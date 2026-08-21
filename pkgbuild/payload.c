@@ -1,13 +1,20 @@
 /*
- * payload - build a pkg Payload (cpio odc streamed through gzip).
+ * payload - build a pkg Payload/ Scripts (cpio odc streamed through gzip).
  *
  * Copyright (c) 2026 Sunneva N. Mariu <sunnevanattsol@gmail.com>
  * SPDX-License-Identifier: BSD-3-Clause
  *
  * The cpio(1) copy-out is delegated to the system bsdcpio (/usr/bin/cpio)
- * exactly as `find <root> -print | cpio -o -H odc | gzip` would produce. The
+ * exactly as `find <dir> -print | cpio -o -H odoc | gzip` would produce. The
  * odc record layout is fiddly; rather than re-implement it, we let cpio own it
  * and only own the gzip stream (via zlib) and the enclosing xar.
+ *
+ * To faithfully replicate Apple pkgbuild's `._*` AppleDouble sidecars (which it
+ * emits for any source entry carrying an extended attribute or resource fork),
+ * the source tree is staged into a private temp directory: regular files are
+ * hard-linked, symlinks recreated, directories rebuilt, and for each
+ * xattr-bearing entry a `._<name>` sidecar is materialised with copyfile(3)
+ * COPYFILE_PACK. cpio then archives the staged tree.
  */
 
 #include <stdio.h>
@@ -22,6 +29,9 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <sys/param.h>
+#include <sys/xattr.h>
+#include <copyfile.h>
 #include <dirent.h>
 #include <zlib.h>
 
@@ -109,57 +119,186 @@ buf_free(struct buf *b)
 	b->cap = 0;
 }
 
-/* --- recursive walk producing "./rel" paths (dir listed before its children) */
+/* --- path helpers --- */
 
-static int
-walk_path(struct svec *s, const char *abspath, const char *relpath)
+/* dirname of relpath (no leading "./"). "" for root or top-level entry. */
+static void
+dirname_of(const char *relpath, char *out, size_t n)
 {
-	char name[PATH_MAX];
-
-	if (relpath == NULL || relpath[0] == '\0')
-		snprintf(name, sizeof name, ".");
-	else
-		snprintf(name, sizeof name, "./%s", relpath);
-
-	if (svec_push(s, name) != 0)
-		return -1;
-
-	struct stat st;
-	if (lstat(abspath, &st) != 0)
-		return 0;	/* ignore paths that vanish mid-walk */
-	if (!S_ISDIR(st.st_mode))
-		return 0;	/* file or symlink: list, do not descend */
-
-	DIR *d = opendir(abspath);
-	if (d == NULL)
-		return 0;
-
-	struct dirent *de;
-	while ((de = readdir(d)) != NULL) {
-		if (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0)
-			continue;
-		char child_abs[PATH_MAX];
-		char child_rel[PATH_MAX];
-		if (snprintf(child_abs, sizeof child_abs, "%s/%s", abspath, de->d_name)
-		    >= (int)sizeof child_abs)
-			continue;
-		if (relpath == NULL || relpath[0] == '\0')
-			snprintf(child_rel, sizeof child_rel, "%s", de->d_name);
-		else
-			snprintf(child_rel, sizeof child_rel, "%s/%s", relpath, de->d_name);
-		if (walk_path(s, child_abs, child_rel) != 0) {
-			closedir(d);
-			return -1;
-		}
+	const char *slash = strrchr(relpath, '/');
+	if (slash == NULL) {
+		out[0] = '\0';
+	} else {
+		size_t len = (size_t)(slash - relpath);
+		memcpy(out, relpath, len);
+		out[len] = '\0';
+		if (len >= n)
+			out[n - 1] = '\0';
 	}
-	closedir(d);
-	return 0;
 }
 
-/* --- delegate cpio -o -H odc reading the name list from a temp file --- */
+static const char *
+basename_of(const char *relpath)
+{
+	const char *slash = strrchr(relpath, '/');
+	return slash ? slash + 1 : relpath;
+}
+
+/* --- recursive staging with AppleDouble sidecars --- */
+
+struct stage_ctx {
+	const char *root;
+	const char *stage;
+	struct svec *names;
+	int failed;
+};
 
 static int
-run_cpio(const char *root, struct svec *names, struct buf *out)
+stage_copy_file(const char *src, const char *dst)
+{
+	if (link(src, dst) == 0)
+		return 0;
+	if (errno == EXDEV || errno == ENOTSUP) {
+		/* cross-device or unsupported: fall back to a plain copy */
+		int in = open(src, O_RDONLY);
+		if (in < 0)
+			return -1;
+		int outfd = open(dst, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+		if (outfd < 0) {
+			close(in);
+			return -1;
+		}
+		unsigned char buf[65536];
+		ssize_t k;
+		int rc = 0;
+		while ((k = read(in, buf, sizeof buf)) > 0) {
+			if (write(outfd, buf, (size_t)k) != k) {
+				rc = -1;
+				break;
+			}
+		}
+		close(in);
+		close(outfd);
+		return rc;
+	}
+	return -1;
+}
+
+static int
+has_xattrs(const char *path)
+{
+	/* listxattr with XATTR_NOFOLLOW reports the entry's own attrs (not a
+	 * symlink target's), avoiding spurious descent into linked trees. */
+	ssize_t n = listxattr(path, NULL, 0, XATTR_NOFOLLOW);
+	if (n < 0)
+		return 0;	/* treat errors as "no sidecar" */
+	return n > 0;
+}
+
+static void
+stage_entry(struct stage_ctx *ctx, const char *relpath)
+{
+	char src[PATH_MAX];
+	char dst[PATH_MAX];
+	char name[PATH_MAX];
+
+	if (snprintf(src, sizeof src, "%s/%s", ctx->root,
+	    relpath[0] ? relpath : ".") >= (int)sizeof src ||
+	    snprintf(dst, sizeof dst, "%s/%s", ctx->stage,
+	    relpath[0] ? relpath : ".") >= (int)sizeof dst)
+		goto fail;
+
+	struct stat st;
+	if (lstat(src, &st) != 0)
+		return;		/* ignore vanished entries */
+
+	const char *disp = relpath[0] ? relpath : ".";
+
+	if (S_ISDIR(st.st_mode)) {
+		if (mkdir(dst, st.st_mode & 0777) != 0 && errno != EEXIST)
+			goto fail;
+	} else if (S_ISLNK(st.st_mode)) {
+		char target[PATH_MAX];
+		ssize_t t = readlink(src, target, sizeof target - 1);
+		if (t < 0)
+			goto fail;
+		target[t] = '\0';
+		if (symlink(target, dst) != 0 && errno != EEXIST)
+			goto fail;
+	} else if (S_ISREG(st.st_mode)) {
+		if (stage_copy_file(src, dst) != 0)
+			goto fail;
+	}
+
+	if (relpath[0]) {
+		if (snprintf(name, sizeof name, "./%s", disp) >= (int)sizeof name)
+			goto fail;
+	} else {
+		snprintf(name, sizeof name, ".");
+	}
+	if (svec_push(ctx->names, name) != 0)
+		goto fail;
+
+	/* AppleDouble sidecar for xattr/resource-fork-bearing entries. */
+	if (relpath[0] && (S_ISDIR(st.st_mode) || S_ISREG(st.st_mode)) &&
+	    has_xattrs(src)) {
+		char parent[PATH_MAX];
+		const char *base = basename_of(relpath);
+		dirname_of(relpath, parent, sizeof parent);
+
+		char sid[PATH_MAX];
+		snprintf(sid, sizeof sid, "._%s", base);
+
+		char sdst[PATH_MAX];
+		char sname[PATH_MAX];
+		if (parent[0]) {
+			snprintf(sdst, sizeof sdst, "%s/%s/%s", ctx->stage,
+			    parent, sid);
+			snprintf(sname, sizeof sname, "./%s/%s", parent, sid);
+		} else {
+			snprintf(sdst, sizeof sdst, "%s/%s", ctx->stage, sid);
+			snprintf(sname, sizeof sname, "./%s", sid);
+		}
+
+		if (copyfile(src, sdst, NULL, COPYFILE_PACK) == 0) {
+			if (svec_push(ctx->names, sname) != 0)
+				goto fail;
+		}
+	}
+
+	if (S_ISDIR(st.st_mode)) {
+		/* descend in sorted order, like a real copy */
+		DIR *d = opendir(src);
+		if (d == NULL)
+			return;
+		struct dirent *de;
+		while ((de = readdir(d)) != NULL) {
+			if (strcmp(de->d_name, ".") == 0 ||
+			    strcmp(de->d_name, "..") == 0)
+				continue;
+			char child[PATH_MAX];
+			int clen = relpath[0] ?
+			    snprintf(child, sizeof child, "%s/%s", relpath,
+			        de->d_name) :
+			    snprintf(child, sizeof child, "%s", de->d_name);
+			if (clen < 0 || (size_t)clen >= sizeof child)
+				continue;
+			stage_entry(ctx, child);
+			if (ctx->failed)
+				break;
+		}
+		closedir(d);
+	}
+	return;
+
+fail:
+	ctx->failed = 1;
+}
+
+/* --- cpio -o -H odc reading the name list from a temp file --- */
+
+static int
+run_cpio(const char *stage, struct svec *names, struct buf *out)
 {
 	char tmpl[] = "/tmp/pkgbuild.XXXXXX";
 	int tf = mkstemp(tmpl);
@@ -189,7 +328,6 @@ run_cpio(const char *root, struct svec *names, struct buf *out)
 		return -1;
 	}
 	if (pid == 0) {
-		/* child: feed the name list on stdin, capture cpio stdout */
 		int in = open(tmpl, O_RDONLY);
 		if (in >= 0) {
 			dup2(in, STDIN_FILENO);
@@ -203,13 +341,12 @@ run_cpio(const char *root, struct svec *names, struct buf *out)
 			dup2(dev, STDERR_FILENO);
 			close(dev);
 		}
-		if (chdir(root) != 0)
+		if (chdir(stage) != 0)
 			_exit(127);
 		execlp("cpio", "cpio", "-o", "-H", "odc", (char *)NULL);
 		_exit(127);
 	}
 
-	/* parent: read the archive */
 	close(pipefd[1]);
 	char tmp[8192];
 	ssize_t k;
@@ -226,12 +363,10 @@ run_cpio(const char *root, struct svec *names, struct buf *out)
 	waitpid(pid, &status, 0);
 	unlink(tmpl);
 
-	if (WIFEXITED(status) && WEXITSTATUS(status) == 0)
-		return 0;
-	return -1;
+	return (WIFEXITED(status) && WEXITSTATUS(status) == 0) ? 0 : -1;
 }
 
-/* --- gzip (RFC 1952) via raw deflate with the gzip wrapper --- */
+/* --- gzip (RFC 1952) via raw deflate (windowBits = 15 + 16) --- */
 
 static int
 gzip_bytes(const void *in, size_t n, unsigned char **out, size_t *out_len)
@@ -277,40 +412,79 @@ gzip_bytes(const void *in, size_t n, unsigned char **out, size_t *out_len)
 	return 0;
 }
 
+/* --- recursive remove --- */
+
+static void
+remove_tree(const char *path)
+{
+	struct stat st;
+	if (lstat(path, &st) != 0)
+		return;
+	if (S_ISDIR(st.st_mode) && !S_ISLNK(st.st_mode)) {
+		DIR *d = opendir(path);
+		if (d != NULL) {
+			struct dirent *de;
+			while ((de = readdir(d)) != NULL) {
+				if (strcmp(de->d_name, ".") == 0 ||
+				    strcmp(de->d_name, "..") == 0)
+					continue;
+				char child[PATH_MAX];
+				snprintf(child, sizeof child, "%s/%s", path, de->d_name);
+				remove_tree(child);
+			}
+			closedir(d);
+		}
+		rmdir(path);
+	} else {
+		unlink(path);
+	}
+}
+
 int
 payload_build(const char *root, struct payload *out)
 {
+	char tmpl[] = "/tmp/pkgbuild-stage.XXXXXX";
+	char *stage = mkdtemp(tmpl);
+	if (stage == NULL)
+		return -1;
+
 	struct svec names;
 	names.v = NULL;
 	names.n = 0;
 	names.cap = 0;
 
-	if (walk_path(&names, root, NULL) != 0) {
-		svec_free(&names);
-		return -1;
-	}
+	struct stage_ctx ctx;
+	ctx.root = root;
+	ctx.stage = stage;
+	ctx.names = &names;
+	ctx.failed = 0;
+	stage_entry(&ctx, "");
+
+	int rc = -1;
+	if (ctx.failed)
+		goto done;
+	if (names.n == 0)
+		goto done;
 
 	struct buf odc;
 	buf_init(&odc);
-	if (run_cpio(root, &names, &odc) != 0) {
-		buf_free(&odc);
-		svec_free(&names);
-		return -1;
-	}
+	if (run_cpio(stage, &names, &odc) != 0)
+		goto done;
 
 	unsigned char *gz = NULL;
 	size_t gzlen = 0;
-	if (gzip_bytes(odc.v, odc.n, &gz, &gzlen) != 0) {
-		buf_free(&odc);
-		svec_free(&names);
-		return -1;
-	}
+	if (gzip_bytes(odc.v, odc.n, &gz, &gzlen) != 0)
+		goto done;
 
 	out->data = gz;
 	out->size = gzlen;
 	out->uncompressed = odc.n;
 	out->file_count = names.n;
+	rc = 0;
+
+done:
 	buf_free(&odc);
 	svec_free(&names);
-	return 0;
+	remove_tree(stage);
+	return rc;
 }

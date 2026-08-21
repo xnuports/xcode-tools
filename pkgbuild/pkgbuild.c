@@ -15,6 +15,7 @@
 #include <stdint.h>
 #include <unistd.h>
 #include <getopt.h>
+#include <limits.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -134,7 +135,7 @@ main(int argc, char **argv)
 	};
 
 	int c;
-	while ((c = getopt_long(argc, argv, "a:hV:r:c:i:L:o:S:g:d:v:I:",
+	while ((c = getopt_long(argc, argv, "ahVr:c:i:L:o:S:g:d:v:I:",
 	    longopts, NULL)) != -1) {
 		switch (c) {
 		case 'r': root = optarg; break;
@@ -198,7 +199,8 @@ main(int argc, char **argv)
 
 	size_t pkginfo_len = 0;
 	char *pkginfo = pkginfo_build(identifier, version ? version : "1.0",
-	    install_location, pl.file_count, install_kbytes, &pkginfo_len);
+	    install_location, scripts_dir, pl.file_count, install_kbytes,
+	    &pkginfo_len);
 	if (pkginfo == NULL) {
 		fprintf(stderr, "%s: failed to build PackageInfo\n", program_name);
 		free(pl.data);
@@ -215,7 +217,15 @@ main(int argc, char **argv)
 	}
 
 	/* Assemble the xar archive. */
-	struct xar_entry entries[3];
+	int nent = 3;
+	struct xar_entry *entries = malloc(4 * sizeof(*entries));
+	if (entries == NULL) {
+		fprintf(stderr, "%s: out of memory\n", program_name);
+		free(pkginfo);
+		free(bom);
+		free(pl.data);
+		return 1;
+	}
 	entries[0].name = "Bom";
 	entries[0].encoding = "application/x-gzip";
 	entries[0].data = bom;
@@ -225,7 +235,7 @@ main(int argc, char **argv)
 	entries[1].name = "Payload";
 	entries[1].encoding = "application/octet-stream";
 	entries[1].data = pl.data;
-	entries[1].size = pl.size;       /* stored raw: <size> == bytes stored == gzip length */
+	entries[1].size = pl.size;	/* stored raw: <size> == bytes stored == gzip length */
 	entries[1].compressed = 0;
 
 	entries[2].name = "PackageInfo";
@@ -234,13 +244,31 @@ main(int argc, char **argv)
 	entries[2].size = pkginfo_len;
 	entries[2].compressed = 1;
 
+	struct payload scripts;
+	scripts.data = NULL;
+	if (scripts_dir != NULL) {
+		if (payload_build(scripts_dir, &scripts) == 0) {
+			entries[3].name = "Scripts";
+			entries[3].encoding = "application/octet-stream";
+			entries[3].data = scripts.data;
+			entries[3].size = scripts.size;
+			entries[3].compressed = 0;
+			nent = 4;
+		} else {
+			fprintf(stderr, "%s: failed to build Scripts archive\n",
+			    program_name);
+		}
+	}
+
 	size_t arch_len = 0;
-	unsigned char *arch = xar_build(entries, 3, &arch_len);
+	unsigned char *arch = xar_build(entries, nent, &arch_len);
 	free(pkginfo);
 	free(bom);
 	free(pl.data);
+	free(entries);
 	if (arch == NULL) {
 		fprintf(stderr, "%s: failed to assemble archive\n", program_name);
+		free(scripts.data);
 		return 1;
 	}
 
@@ -248,13 +276,23 @@ main(int argc, char **argv)
 	if (write_file(out, arch, arch_len) != 0) {
 		fprintf(stderr, "%s: cannot write %s\n", program_name, out);
 		free(arch);
+		free(scripts.data);
 		return 1;
 	}
 	free(arch);
+	free(scripts.data);
 
 	if (sign_identity != NULL) {
 		pid_t pid = fork();
 		if (pid == 0) {
+			if (dev_dir != NULL) {
+				setenv("DEVELOPER_DIR", dev_dir, 1);
+				const char *path = getenv("PATH");
+				char newpath[PATH_MAX];
+				snprintf(newpath, sizeof newpath, "%s/usr/bin:%s",
+				    dev_dir, path ? path : "/usr/bin");
+				setenv("PATH", newpath, 1);
+			}
 			execlp("codesign", "codesign", "--force", "--sign",
 			    sign_identity, out, (char *)NULL);
 			_exit(127);

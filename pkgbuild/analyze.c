@@ -9,6 +9,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>
+#include <limits.h>
+#include <dirent.h>
+#include <sys/stat.h>
 
 #include "analyze.h"
 
@@ -22,10 +25,81 @@ aprintf(char **out, const char *fmt, ...)
 	return r;
 }
 
+/*
+ * Scan scripts_dir for "preinstall" and/or "postinstall" files.
+ * Appends a <scripts>...</scripts> block to *scripts_xml (malloc'd,
+ * caller frees) on success, or leaves it NULL if neither is found.
+ * Returns 0 on success, -1 on error.
+ */
+static int
+collect_scripts(const char *scripts_dir, char **scripts_xml)
+{
+	if (scripts_dir == NULL) {
+		*scripts_xml = NULL;
+		return 0;
+	}
+
+	struct stat st;
+	if (stat(scripts_dir, &st) != 0 || !S_ISDIR(st.st_mode)) {
+		*scripts_xml = NULL;
+		return 0;
+	}
+
+	char path[PATH_MAX];
+	int has_pre = 0, has_post = 0;
+
+	if (snprintf(path, sizeof path, "%s/preinstall", scripts_dir) < (int)sizeof path &&
+	    stat(path, &st) == 0 && S_ISREG(st.st_mode))
+		has_pre = 1;
+
+	if (snprintf(path, sizeof path, "%s/postinstall", scripts_dir) < (int)sizeof path &&
+	    stat(path, &st) == 0 && S_ISREG(st.st_mode))
+		has_post = 1;
+
+	if (!has_pre && !has_post) {
+		*scripts_xml = NULL;
+		return 0;
+	}
+
+	char *buf = NULL;
+	if (aprintf(&buf, "    <scripts>\n") < 0 || buf == NULL)
+		return -1;
+
+	if (has_pre) {
+		char *tmp = NULL;
+		if (aprintf(&tmp, "%s        <preinstall file=\"./preinstall\" timeout=\"600\"/>\n",
+		    buf) < 0 || tmp == NULL) {
+			free(buf);
+			return -1;
+		}
+		free(buf);
+		buf = tmp;
+	}
+	if (has_post) {
+		char *tmp = NULL;
+		if (aprintf(&tmp, "%s        <postinstall file=\"./postinstall\" timeout=\"600\"/>\n",
+		    buf) < 0 || tmp == NULL) {
+			free(buf);
+			return -1;
+		}
+		free(buf);
+		buf = tmp;
+	}
+
+	char *tmp = NULL;
+	if (aprintf(&tmp, "%s    </scripts>\n", buf) < 0 || tmp == NULL) {
+		free(buf);
+		return -1;
+	}
+	free(buf);
+	*scripts_xml = tmp;
+	return 0;
+}
+
 char *
 pkginfo_build(const char *identifier, const char *version,
-    const char *install_location, int number_of_files,
-    size_t install_kbytes, size_t *out_len)
+    const char *install_location, const char *scripts_dir,
+    int number_of_files, size_t install_kbytes, size_t *out_len)
 {
 	char loc_attr[512];
 	if (install_location != NULL)
@@ -47,8 +121,14 @@ pkginfo_build(const char *identifier, const char *version,
 	    version ? version : "1.0",
 	    loc_attr,
 	    number_of_files > 0 ? number_of_files : 1,
-	 install_kbytes) < 0 || head == NULL)
+	    install_kbytes) < 0 || head == NULL)
 		return NULL;
+
+	char *scripts_xml = NULL;
+	if (collect_scripts(scripts_dir, &scripts_xml) != 0) {
+		free(head);
+		return NULL;
+	}
 
 	char *tail = NULL;
 	if (aprintf(&tail,
@@ -58,10 +138,13 @@ pkginfo_build(const char *identifier, const char *version,
 	    "    <atomic-update-bundle/>\n"
 	    "    <strict-identifier/>\n"
 	    "    <relocate/>\n"
-	    "</pkg-info>\n") < 0 || tail == NULL) {
+	    "%s"
+	    "</pkg-info>\n", scripts_xml ? scripts_xml : "") < 0 || tail == NULL) {
 		free(head);
+		free(scripts_xml);
 		return NULL;
 	}
+	free(scripts_xml);
 
 	size_t hl = strlen(head);
 	size_t tl = strlen(tail);
