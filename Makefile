@@ -5,7 +5,8 @@ DEVELOPER_DIR ?= $(PREFIX)/Developer
 # they are not built or installed. A replacement SDK layout is pending.
 DIRS := \
 	xcrun \
-	xcode-select
+	xcode-select \
+	xcodebuild
 
 define do_make
 	@for dir in $1; do \

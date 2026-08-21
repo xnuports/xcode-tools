@@ -6,6 +6,7 @@ An open source reimplementation of Apple's command-line xcode utilities
 Currently implemented utilities:
 * xcrun
 * xcode-select
+* xcodebuild
 
 How to use these utilities
 --------------------------
@@ -199,4 +200,42 @@ xcrun is a simple utility used to locate and/or execute Developer, Toolchain, an
   NOTE: If this is your first time using this version of xcrun and you run into an error starting with ```xcrun: error: unable to validate path```,
   ensure that xcrun is searching the developer folder by running ```xcode-select --switch <DevPath>```, where ```<DevPath>``` is the absolute path to your
   developer folder. If you still run into problems, open an issue report and maybe I can help you. :)
+
+xcodebuild:
+------------
+
+xcodebuild is a command-line build orchestration utility compatible with Apple's xcodebuild. It resolves the
+active developer directory (via `xcode-select`, `DEVELOPER_DIR`, or the compiled-in default), reads the selected
+SDK and toolchain metadata, parses Xcode projects and `.xcconfig` files, and resolves the effective build
+settings table.
+
+* How does this tool work?
+--------------------------
+
+  xcodebuild reuses the same developer-directory and SDK/toolchain resolution as `xcrun`, so it reads the
+  `info.ini` files shipped in `<DevFolder>/SDKs/<sdk>.sdk` and `<DevFolder>/Toolchains/<toolchain>.toolchain`.
+  Build settings are merged in Xcode precedence order:
+
+  1. platform / SDK / toolchain defaults
+  2. `project.pbxproj` `XCBuildConfiguration.buildSettings` (for the selected target + configuration)
+  3. `.xcconfig` files (with `#include` / `#include?` and `$(VAR)` / `${VAR}` expansion)
+  4. `-xcconfig <file>`
+  5. `KEY=VALUE` overrides passed directly on the command line
+
+  For inspection, `xcodebuild -showBuildSettings` prints the resolved settings (`key = value` lines), and
+  `-json` / `-pretty` emit a JSON array. `xcodebuild -list` parses `project.pbxproj` (a minimal NextSTEP-plist
+  parser) and reports targets, configurations and schemes. `xcodebuild -showsdks` lists the available SDKs and
+  toolchains from the developer directory.
+
+  For build actions (`build`, `test`, `analyze`, `archive`, `install`, `installsrc`, `clean`, `run`, `bench`,
+  `test-without-building`) xcodebuild resolves the settings, constructs the SDK/toolchain environment
+  (`SDKROOT`, `PATH`, `LD_LIBRARY_PATH`, `TARGET_TRIPLE`, deployment target) and delegates execution to the
+  toolchain through `xcrun` -- for example `xcrun -sdk <sdk> -toolchain <tc> <action> <args>`. A toolchain that
+  provides an `<action>` driver in its `usr/bin` will therefore be driven end-to-end; `-dry-run` prints the
+  delegation command without executing it. `-exportArchive` reads an `exportOptions.plist` (XML plist) and
+  validates the export parameters (`method`, `teamID`, etc.) before delegating.
+
+  NOTE: full per-file compilation of an Xcode project's build phases is delegated to the toolchain's build
+  driver (or a real `xcodebuild`/Xcode toolchain when present). If no driver for the requested action can be
+  located, `xcrun` reports that the tool could not be found, matching the behavior of this tool suite.
 
