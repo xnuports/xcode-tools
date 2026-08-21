@@ -25,8 +25,8 @@ all: $(OBJS)
 	$(CC) $(OBJS) -o $(PROG) $(LFLAGS)
 
 install: all
-	install -d $(DESTDIR)$(PREFIX)/bin
-	install -s -m 755 $(PROG) $(DESTDIR)$(PREFIX)/bin/$(PROG)
+	install -d $(DESTDIR)$(PREFIX)/usr/bin
+	install -s -m 755 $(PROG) $(DESTDIR)$(PREFIX)/usr/bin/$(PROG)
 
 clean:
 	rm -f $(OBJS) $(PROG)
