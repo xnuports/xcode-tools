@@ -13,6 +13,7 @@
 *.tmp
 **/*.tmp
 
-xcrun/xcrun
-xcode-select/xcode-select
-xcodebuild/xcodebuild
+	xcrun/xcrun
+	xcode-select/xcode-select
+	xcodebuild/xcodebuild
+	pkgbuild/pkgbuild

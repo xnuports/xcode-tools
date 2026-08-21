@@ -7,6 +7,7 @@ Currently implemented utilities:
 * xcrun
 * xcode-select
 * xcodebuild
+* pkgbuild
 
 How to use these utilities
 --------------------------
@@ -41,6 +42,36 @@ xcode-select is a simple utility used to specify the location of a Developer fol
 
   If you only wish to temporarily override the Developer folder path, set the ```DEVELOPER_DIR``` environment variable 
   in your shell to point to the absolute path of your desired Developer folder.
+
+pkgbuild:
+----------
+
+`pkgbuild` assembles a `.pkg` installer from a source root, producing an
+archive that is valid for `pkgutil` (`--payload-files`, `--bom`,
+`--expand-full`) and the system installer.
+
+* How does it work?
+
+  The archive is an `xar` containing, in heap order, a BOM (from `mkbom`), the
+  Payload (a cpio `odc` archive streamed through gzip), and the `PackageInfo`
+  XML. The xar header, the `sha1(toc_z)` archive checksum, and the TOC --
+  including per-file `<extracted-checksum>`/`<archived-checksum>` records --
+  are emitted by this tool in C. cpio copy-out and BOM generation are
+  delegated to the system `cpio(1)` and `mkbom(1)`.
+
+  Note: the `/usr/bin/xar` (1.8dev) shipped in this tree is intentionally not
+  used to *assemble* the archive because it produces a layout that `pkgutil`
+  rejects; `pkgbuild` implements the xar writer directly.
+
+* How do I use it?
+
+  ```
+  pkgbuild --root ./MyRoot --identifier com.example.app --version 1.0 -o out.pkg
+  pkgbuild --component ./ MyApp.app --identifier com.example.MyApp -o MyApp.pkg
+  pkgbuild --analyze --root ./MyRoot --identifier com.example.app  # print PackageInfo
+  pkgbuild --inspect out.pkg                                       # list archive files
+  pkgbuild --sign "Developer ID Installer: ..." -o signed.pkg    # codesign
+  ```
 
 xcrun:
 --------

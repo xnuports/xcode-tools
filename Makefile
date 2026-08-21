@@ -6,7 +6,8 @@ DEVELOPER_DIR ?= $(PREFIX)/Developer
 DIRS := \
 	xcrun \
 	xcode-select \
-	xcodebuild
+	xcodebuild \
+	pkgbuild
 
 define do_make
 	@for dir in $1; do \
