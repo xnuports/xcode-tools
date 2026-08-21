@@ -1,2 +1,0 @@
-mkdir -p /opt/xnuports/etc
-ln -sf ../opt/xcode-tools/etc/xcrun.ini /opt/xnuports/etc/xcrun.ini
