@@ -1,4 +1,5 @@
 PROG := xcode-select
+PREFIX ?= /opt/xnuports/opt/xcode-tools
 
 CFLAGS :=
 LFLAGS :=
@@ -23,8 +24,8 @@ all: $(OBJS)
 	$(CC) $(OBJS) -o $(PROG) $(LFLAGS)
 
 install: all
-	install -d $(DESTDIR)/usr/bin
-	install -s -m 755 $(PROG) $(DESTDIR)/usr/bin/$(PROG)
+	install -d $(DESTDIR)$(PREFIX)/bin
+	install -s -m 755 $(PROG) $(DESTDIR)$(PREFIX)/bin/$(PROG)
 
 clean:
 	rm -f $(OBJS) $(PROG)

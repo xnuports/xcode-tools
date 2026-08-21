@@ -1,6 +1,8 @@
 #!/bin/bash
 
-TOOL=`/usr/bin/xcrun -find clang`
+XCRUN=/opt/xnuports/bin/xcrun
+
+TOOL=`${XCRUN} -find clang`
 
 ${TOOL} -E "${@}"
 

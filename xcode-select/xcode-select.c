@@ -40,6 +40,9 @@
 
 #define TOOL_VERSION "1.0.0"
 #define SDK_CFG ".xcdev.dat"
+#ifndef XCRUN_DEFAULT_DEVELOPER_DIR
+#define XCRUN_DEFAULT_DEVELOPER_DIR "/opt/xnuports/opt/xcode-tools/Developer"
+#endif
 
 /**
  * @func usage -- Print helpful information about this tool.
@@ -125,6 +128,15 @@ static char *get_developer_path(void)
 		value = devpath;
 		fclose(fp);
 	} else {
+		struct stat st;
+
+		free(cfg_path);
+
+		/* No per-user selection yet: fall back to the distro default. */
+		if (stat(XCRUN_DEFAULT_DEVELOPER_DIR, &st) == 0 && S_ISDIR(st.st_mode)) {
+			return XCRUN_DEFAULT_DEVELOPER_DIR;
+		}
+
 		fprintf(stderr, "xcode-select: error: unable to read configuration file. (errno=%s)\n", strerror(errno));
 		return NULL;
 	}

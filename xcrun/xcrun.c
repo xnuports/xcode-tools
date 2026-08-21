@@ -46,7 +46,12 @@
 /* General stuff */
 #define TOOL_VERSION "1.0.0"
 #define SDK_CFG ".xcdev.dat"
-#define XCRUN_DEFAULT_CFG "/etc/xcrun.ini"
+#ifndef XCRUN_DEFAULT_CFG
+#define XCRUN_DEFAULT_CFG "/opt/xnuports/etc/xcrun.ini"
+#endif
+#ifndef XCRUN_DEFAULT_DEVELOPER_DIR
+#define XCRUN_DEFAULT_DEVELOPER_DIR "/opt/xnuports/opt/xcode-tools/Developer"
+#endif
 
 /* Toolchain configuration struct */
 typedef struct {
@@ -410,6 +415,16 @@ static char *get_developer_path(void)
 		value = devpath;
 		fclose(fp);
 	} else {
+		struct stat st;
+
+		free(cfg_path);
+
+		/* No per-user selection yet: fall back to the distro default. */
+		if (stat(XCRUN_DEFAULT_DEVELOPER_DIR, &st) == 0 && S_ISDIR(st.st_mode)) {
+			verbose_printf(stdout, "xcrun: info: using default developer path \'%s\'.\n", XCRUN_DEFAULT_DEVELOPER_DIR);
+			return XCRUN_DEFAULT_DEVELOPER_DIR;
+		}
+
 		fprintf(stderr, "xcrun: error: unable to read configuration cache. (errno=%s)\n", strerror(errno));
 		return NULL;
 	}

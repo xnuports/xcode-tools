@@ -1,4 +1,5 @@
-DEVELOPER_DIR ?= /opt/Developer
+PREFIX ?= /opt/xnuports/opt/xcode-tools
+DEVELOPER_DIR ?= $(PREFIX)/Developer
 
 DIRS := \
 	configs \
@@ -8,7 +9,7 @@ DIRS := \
 
 define do_make
 	@for dir in $1; do \
-		make -C $$dir DESTDIR=$(DESTDIR) DEVELOPER_DIR=$(DEVELOPER_DIR) $2; \
+		make -C $$dir DESTDIR=$(DESTDIR) PREFIX=$(PREFIX) $2; \
 	done
 endef
 
