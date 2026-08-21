@@ -1,6 +1,6 @@
 #!/bin/bash
 
-XCRUN=/opt/xnuports/bin/xcrun
+XCRUN=/opt/xnuports/usr/bin/xcrun
 
 TOOL=`${XCRUN} -find clang++`
 

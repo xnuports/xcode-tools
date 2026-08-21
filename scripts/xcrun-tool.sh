@@ -1,6 +1,6 @@
 #!/bin/bash
 
-XCRUN=/opt/xnuports/bin/xcrun
+XCRUN=/opt/xnuports/usr/bin/xcrun
 
 if [ `basename ${0}` == "xcrun-tool" ]; then
 	echo "xcrun-tool: error: this tool must not be called directly."

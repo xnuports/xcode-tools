@@ -1,6 +1,6 @@
 #!/bin/bash
 
-XCRUN=/opt/xnuports/bin/xcrun
+XCRUN=/opt/xnuports/usr/bin/xcrun
 
 ##
 # clang/clang++ wrapper for cross-compiling.
