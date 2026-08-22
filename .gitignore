@@ -24,5 +24,6 @@ simctl/simctl
 devicectl/devicectl
 productbuild/productbuild_debug
 */productbuild_debug
+codesign/codesign
 *.dSYM
 **/*.dSYM
