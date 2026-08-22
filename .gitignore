@@ -18,3 +18,4 @@ xcode-select/xcode-select
 xcodebuild/xcodebuild
 pkgbuild/pkgbuild
 notarytool/notarytool
+productbuild/productbuild
