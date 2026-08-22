@@ -8,3 +8,9 @@
 [submodule "xctoolchain"]
 	path = xctoolchain
 	url = https://github.com/xnuports/xctoolchain.git
+[submodule "distribution-Developer_Tools"]
+	path = distribution-Developer_Tools
+	url = https://github.com/xnuports/distribution-Developer_Tools.git
+[submodule "swift"]
+	path = swift
+	url = https://github.com/xnuports/swift.git
