@@ -19,6 +19,7 @@ xcodebuild/xcodebuild
 pkgbuild/pkgbuild
 notarytool/notarytool
 productbuild/productbuild
+xctrace/xctrace
 productbuild/productbuild_debug
 */productbuild_debug
 *.dSYM

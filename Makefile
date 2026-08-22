@@ -9,7 +9,8 @@ DIRS := \
 	xcodebuild \
 	pkgbuild \
 	notarytool \
-	productbuild
+	productbuild \
+	xctrace
 
 define do_make
 	@for dir in $1; do \
