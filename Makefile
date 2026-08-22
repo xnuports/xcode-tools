@@ -1,20 +1,18 @@
 # Top-level Makefile for xcode-tools
+# Build system uses bmake and delegates to src/
 
-SUBDIRS := codesign
+BUILD_DIR ?= ${.CURDIR}/build
+PREFIX ?= /opt/xnuports/opt/xcode-tools
+CC := clang
 
 .PHONY: all clean install
 
 all:
-	@for dir in $(SUBDIRS); do \
-		$(MAKE) -C $$dir; \
-	done
+	$(MAKE) -C src BUILD_DIR=$(BUILD_DIR) PREFIX=$(PREFIX) CC=$(CC)
 
 clean:
-	@for dir in $(SUBDIRS); do \
-		$(MAKE) -C $$dir clean; \
-	done
+	rm -rf $(BUILD_DIR)
+	$(MAKE) -C src clean BUILD_DIR=$(BUILD_DIR)
 
 install: all
-	@for dir in $(SUBDIRS); do \
-		$(MAKE) -C $$dir install; \
-	done
+	$(MAKE) -C src install BUILD_DIR=$(BUILD_DIR) PREFIX=$(PREFIX) CC=$(CC)

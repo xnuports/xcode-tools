@@ -1,29 +1,13 @@
 .DS_Store
 **/.DS_Store
 
-*.o
-**/*.o
+# Build artifacts (relocated from source directories to build/)
+build/
 
-*.a
-**/*.a
+# Debug artifacts
+*.debug
+*_debug
 
-*.dylib
-**/*.dylib
-
-*.tmp
-**/*.tmp
-
-xcrun/xcrun
-xcode-select/xcode-select
-xcodebuild/xcodebuild
-pkgbuild/pkgbuild
-notarytool/notarytool
-productbuild/productbuild
-xctrace/xctrace
-simctl/simctl
-devicectl/devicectl
-productbuild/productbuild_debug
-*/productbuild_debug
-codesign/codesign
+# macOS metadata
 *.dSYM
 **/*.dSYM
