@@ -20,6 +20,8 @@ pkgbuild/pkgbuild
 notarytool/notarytool
 productbuild/productbuild
 xctrace/xctrace
+simctl/simctl
+devicectl/devicectl
 productbuild/productbuild_debug
 */productbuild_debug
 *.dSYM

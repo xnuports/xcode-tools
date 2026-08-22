@@ -10,7 +10,9 @@ DIRS := \
 	pkgbuild \
 	notarytool \
 	productbuild \
-	xctrace
+	xctrace \
+	simctl \
+	devicectl
 
 define do_make
 	@for dir in $1; do \
