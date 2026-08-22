@@ -17,3 +17,6 @@
 [submodule "src/objc4"]
 	path = src/objc4
 	url = https://github.com/xnuports/objc4.git
+[submodule "src/Python"]
+	path = src/Python
+	url = https://github.com/xnuports/Python-Apple-support/
