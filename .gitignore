@@ -13,7 +13,8 @@
 *.tmp
 **/*.tmp
 
-	xcrun/xcrun
-	xcode-select/xcode-select
-	xcodebuild/xcodebuild
-	pkgbuild/pkgbuild
+xcrun/xcrun
+xcode-select/xcode-select
+xcodebuild/xcodebuild
+pkgbuild/pkgbuild
+notarytool/notarytool

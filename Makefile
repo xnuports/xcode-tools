@@ -7,7 +7,8 @@ DIRS := \
 	xcrun \
 	xcode-select \
 	xcodebuild \
-	pkgbuild
+	pkgbuild \
+	notarytool
 
 define do_make
 	@for dir in $1; do \
