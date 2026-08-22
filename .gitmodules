@@ -20,3 +20,6 @@
 [submodule "src/Python"]
 	path = src/Python
 	url = https://github.com/xnuports/Python-Apple-support/
+[submodule "include/ld-internals"]
+	path = include/ld-internals
+	url = https://github.com/xnuports/ld-internals.git
