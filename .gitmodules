@@ -27,3 +27,6 @@
 	path = src/cpython
 	url = https://github.com/xnuports/cpython.git
 	branch = 3.14
+[submodule "src/git"]
+	path = src/git
+	url = https://github.com/xnuports/git
