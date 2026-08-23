@@ -30,3 +30,6 @@
 [submodule "src/git"]
 	path = src/git
 	url = https://github.com/xnuports/git
+[submodule "src/pngcrush"]
+	path = src/pngcrush
+	url = https://github.com/xnuports/pngcrush.git
