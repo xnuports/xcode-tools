@@ -23,17 +23,21 @@ xcode-tools/
 │   ├── python-apple-support/         # Submodule: Python build system for Apple platforms
 │   ├── cpython/                      # Submodule: CPython 3.14.7 source
 │   ├── git/                          # Submodule: Git v2.55.0 source
-│   ├── dist-dev-tools/               # Submodule: Apple open-source dev tools
+│   ├── dist-dev-tools/               # Submodule: Apple open-source dev tools (nested submodules)
+│   │   ├── CoreOSMakefiles/          # Build system makefiles
+│   │   ├── Git/                      # Apple's Git fork (Git-155)
 │   │   ├── bison/                    # GNU Bison
-│   │   ├── cctools/                  # Apple cctools (includes ld64)
-│   │   ├── developer_cmds/           # Apple developer commands
+│   │   ├── bootstrap_cmds/           # Bootstrap commands
+│   │   ├── cctools/                  # Apple cctools (ar, nm, lipo, strip, otool, vtool, etc.)
+│   │   ├── developer_cmds/           # Apple developer commands (asa, ctags, indent, etc.)
 │   │   ├── flex/                     # Fast Lexical Analyzer
+│   │   ├── gm4/                      # GNU M4
 │   │   ├── gnumake/                  # GNU Make
 │   │   ├── gperf/                    # Perfect hash function generator
-│   │   ├── gm4/                      # GNU M4
-│   │   ├── headerdoc/                # Header documentation tool
-│   │   ├── ld64/                     # Apple linker
+│   │   ├── headerdoc/                # Header documentation tool (headerdoc2html, hdxml2manxml)
+│   │   ├── ld64/                     # Apple linker (ld, ld-classic)
 │   │   ├── libgit2/                  # Git library
+│   │   ├── pb_makefiles/             # Project Builder makefiles
 │   │   └── tapi/                     # Text-based API tool
 │   ├── objc4/                        # Submodule: Objective-C runtime
 │   ├── pngcrush/                     # Submodule: PNG optimization tool
@@ -485,9 +489,9 @@ We currently have **10 open-source reimaginations** of Apple's command-line tool
 | malloc_history | Debug | Memory history tracking |
 | xcdebug | Debug | Debug log analysis |
 | xcindex-test | Debug | Index testing |
-| gcov | Coverage | Coverage data processing |
-| headerdoc2html | Docs | Header documentation generator |
-| hdxml2manxml | Docs | Header docs to man page XML |
+| gcov | Coverage | Coverage data processing | ✅ Alternative: llvm-cov (`src/llvm-project/`) |
+| headerdoc2html | Docs | Header documentation generator | ✅ Source available (`src/dist-dev-tools/headerdoc/`) |
+| hdxml2manxml | Docs | Header docs to man page XML | ✅ Source available (`src/dist-dev-tools/headerdoc/`) |
 | sdef | Scripting | Scripting definition file generator |
 | sdp | Scripting | Scripting definition compiler |
 | scntool | SceneKit | SceneKit asset tool |
@@ -509,31 +513,31 @@ We currently have **10 open-source reimaginations** of Apple's command-line tool
 | xcsigningtool | Code Signing | Signing identity tool |
 | xcstringstool | Localization | String manipulation tool |
 | xctest | Testing | Unit test runner |
-| xed | IDE | Source editor (GUI) |
-| xml2man | Docs | Man page generator |
-| agent | Agent | Background service management |
-| ba-package | Build | Build assistant packaging |
-| ba-serve | Build | Build assistant server |
-| backgroundassets-debug | Debug | Background assets debugging |
-| compositeMD5 | Archive | MD5 computation |
-| convertRichTextToAscii | Conversion | Rich text to ASCII |
-| DeRez | Resource | Resource fork de-compiler |
-| Rez | Resource | Resource compiler |
-| ResMerger | Resource | Resource fork merger |
+| xed | IDE | Source editor (GUI) | N/A |
+| xml2man | Docs | Man page generator | ✅ Available via headerdoc (`src/dist-dev-tools/headerdoc/`) |
+| agent | Agent | Background service management | N/A (Apple internal) |
+| ba-package | Build | Build assistant packaging | N/A (Apple internal) |
+| ba-serve | Build | Build assistant server | N/A (Apple internal) |
+| backgroundassets-debug | Debug | Background assets debugging | N/A (Apple internal) |
+| compositeMD5 | Archive | MD5 computation | N/A (Apple internal) |
+| convertRichTextToAscii | Conversion | Rich text to ASCII | N/A (Apple internal) |
+| DeRez | Resource | Resource fork de-compiler | N/A (no source; binary-only in Tools/) |
+| Rez | Resource | Resource compiler | N/A (no source; binary-only in Tools/) |
+| ResMerger | Resource | Resource fork merger | N/A (no source; binary-only in Tools/) |
 | GetFileInfo | File | File metadata query |
 | SetFile | File | File metadata setter |
 | SplitForks | File | Fork splitting tool |
-| resolveLinks | File | Symbolication link resolver |
-| swinfo | File | Swift info query |
-| stringdups | File | String deduplication |
-| filtercalltree | Debug | Call tree filtering |
-| extractLocStrings | Localization | Localization string extraction |
-| gatherheaderdoc | Docs | Header doc gathering |
+| resolveLinks | File | Symbolication link resolver | N/A (Apple internal) |
+| swinfo | File | Swift info query | N/A (Apple internal) |
+| stringdups | File | String deduplication | N/A (Apple internal) |
+| filtercalltree | Debug | Call tree filtering | N/A (Apple internal) |
+| extractLocStrings | Localization | Localization string extraction | N/A (Apple internal) |
+| gatherheaderdoc | Docs | Header doc gathering | ✅ Source available (`src/dist-dev-tools/headerdoc/`) |
 | desdp | Debug | Dispatch profiling tool |
 | desdp | Debug | Dispatch profiling tool |
-| stapler | Code Signing | Signature stapling |
-| embeddedBinaryValidationUtility | Code Signing | Embedded binary validation |
-| crashlog | Debug | Crash log management |
+| stapler | Code Signing | Signature stapling | ❌ |
+| embeddedBinaryValidationUtility | Code Signing | Embedded binary validation | ❌ |
+| crashlog | Debug | Crash log management | ❌ |
 | CreateIPA | App Store | IPA creation |
 | momc | Core Data | Managed object model compiler |
 | 2to3 | Python | Python 2 to 3 converter | ✅ Source available |
@@ -603,8 +607,8 @@ We currently have **10 open-source reimaginations** of Apple's command-line tool
 - swift-static
 - swift-symbolgraph-extract
 - swift-synthesize-interface
-- unifdef, unifdefall
-- vtool
+- vtool (✅ available via dist-dev-tools/cctools/)
+- unifdef (✅ available via dist-dev-tools/developer_cmds/)
 - unwinddump
 - c89, c99
 
@@ -676,19 +680,77 @@ We currently have **10 open-source reimaginations** of Apple's command-line tool
 
 ### dist-dev-tools Submodule
 
+**Source:** `src/dist-dev-tools/` (Apple Developer Tools 26.0.1)
+
 **What it covers:**
-- cctools (ar, ranlib, strip, lipo, otool, nm, etc.)
-- ld64 (the Apple linker, ld, ld-classic)
+- cctools (ar, ranlib, strip, lipo, otool, nm, strings, size, vtool, segedit, etc.)
+- cctools/misc (install_name_tool, bitcode_strip, codesign_allocate, ctf_insert, etc.)
+- ld64 (ld, ld-classic)
 - GNU tools (bison, flex, gperf, gnumake, gm4)
-- headerdoc (documentation generator)
+- headerdoc (headerdoc2html, hdxml2manxml, gatherHeaderDoc)
+- developer_cmds (asa, ctags, indent, lorder, rpcgen, unifdef)
 - tapi (text-based API tools)
-- developer_cmds (various)
+- CoreOSMakefiles (build system infrastructure)
+- pb_makefiles (Project Builder makefiles)
 - bootstrap_cmds
 - libgit2
 
 **Gaps:**
-- Missing `vtool`, `unifdef`, `mig`, `segedit`
-- Missing `dsymutil` (use LLVM's instead)
+- Missing `mig` (Mach Interface Generator — not in open-source releases)
+- Missing `dsymutil` in cctools (use LLVM's from `src/llvm-project/` instead)
+
+### cctools (within dist-dev-tools)
+
+**What it covers:**
+- `ar` — static library archiver
+- `nm` — symbol table listing
+- `lipo` — universal binary creation/manipulation
+- `strip` — symbol stripping
+- `strings` — string extraction
+- `size` — size reporting
+- `otool` — object file inspection (with disassembly for arm/x86)
+- `vtool` — target/version specification
+- `install_name_tool` — dylib install name modification
+- `bitcode_strip` — bitcode removal
+- `codesign_allocate` — code signature allocation
+- `ctf_insert` — Compact Type Format insertion
+- `libtool` — static library tool (Apple variant, not GNUstep)
+- `segedit` — segment editing
+- `check_dylib`, `checksyms`, `cmpdylib`, `indr`, `inout`, `pagestuff`, `seg_addr_table`, `seg_hack`
+- `redo_prebinding` (legacy)
+
+### ld64 (within dist-dev-tools)
+
+**What it covers:**
+- `ld` — Apple's Mach-O linker
+- `ld-classic` — Legacy linker mode
+
+**Gaps:**
+- Requires `libgit2` and other build dependencies
+
+### developer_cmds (within dist-dev-tools)
+
+**What it covers:**
+- `asa` — append space after each line (for Fortran compatibility)
+- `ctags` — tag file generation for source code navigation
+- `indent` — C source code formatter
+- `lorder` — library ordering for ar
+- `rpcgen` — RPC protocol generator
+- `unifdef` — conditional compilation removal
+
+### headerdoc (within dist-dev-tools)
+
+**What it covers:**
+- `headerdoc2html` — header documentation to HTML
+- `hdxml2manxml` — header doc XML to man page XML
+- `gatherHeaderDoc.pl` — gathering header documentation
+
+### pb_makefiles (within dist-dev-tools)
+
+**What it covers:**
+- Project Builder build system makefiles
+- `platform.make`, `common.make`, `commands.make`, etc.
+- Build commands (arch_tool, clonehdrs, dotdotify, newer, etc.)
 
 ### objc4 Submodule
 
@@ -837,19 +899,24 @@ We currently have **10 open-source reimaginations** of Apple's command-line tool
 | Swift compiler | ✅ Via submodule | ✅ Full | Open source Swift |
 | Asset compilation | ❌ | ✅ Full | actool, TextureAtlas, etc. |
 | IB compilation | ❌ | ✅ Full | ibtool, ibtoold |
-| Resource fork tools | ❌ | ✅ Full | Rez, DeRez, SetFile, etc. |
+| Resource fork tools | ❌ | ✅ Full | Rez/DeRez/SetFile/GetFileInfo binary-only, no source |
 | Debugging tools | ❌ | ✅ Full | lldb, leaks, vmmap, etc. |
 | App Store delivery | ❌ | ✅ Full | altool, iTMSTransporter, ipatool |
 | Coverage tools | ❌ | ✅ Full | xccov, llvm-cov |
 | Localization | ❌ | ✅ Full | genstrings, actool, etc. |
 | Python tools | ✅ Source available | ✅ Full | CPython 3.14.7 + build system |
-| Git | ✅ Source available | ✅ Full | Git v2.55.0 |
+| Git | ✅ Source available | ✅ Full | Git v2.55.0 (`src/git/`) |
+| Binary tools (ar, strip, lipo, otool, nm, etc.) | ✅ Source available | ✅ Full | Via `src/dist-dev-tools/cctools/` |
+| Linker (ld, ld-classic) | ✅ Source available | ✅ Full | Via `src/dist-dev-tools/ld64/` |
+| Dev utilities (asa, ctags, indent, lorder, rpcgen, unifdef) | ✅ Source available | ✅ Full | Via `src/dist-dev-tools/developer_cmds/` |
+| Header docs (headerdoc2html, hdxml2manxml) | ✅ Source available | ✅ Full | Via `src/dist-dev-tools/headerdoc/` |
+| pngcrush | ✅ Source available | ✅ Full | pngcrush v1.8.1 (`src/pngcrush/`) |
 
 ## 8. Roadmap Recommendations
 
 ### Phase 1: Toolchain & Infrastructure
 1. Build and integrate the LLVM toolchain (clang, swiftc, ld, ar, etc.) from submodules
-2. Integrate dist-dev-tools (bison, flex, gnumake, gperf, etc.)
+2. Integrate dist-dev-tools (cctools, ld64, bison, flex, gnumake, gperf, developer_cmds, headerdoc, tapi, pb_makefiles)
 3. Build and install CPython 3.14.7 (`src/cpython/`) using `python-apple-support` build system
 4. Build and install Git v2.55.0 (`src/git/`)
 5. Set up SDK directories with info.ini files

@@ -38,7 +38,7 @@ All build artifacts go to `build/` (`build/usr/bin/` for binaries, `build/obj/` 
 | **swift** | `src/swift/` | Swift compiler | swiftc, swift-frontend, SPM, SourceKit |
 | **objc4** | `src/objc4/` | Objective-C runtime | Runtime library |
 | **pngcrush** | `src/pngcrush/` | PNG optimization | pngcrush v1.8.1 |
-| **dist-dev-tools** | `src/dist-dev-tools/` | Apple open-source dev tools | bison, flex, gnumake, gperf, ld64, cctools |
+| **dist-dev-tools** | `src/dist-dev-tools/` | Apple open-source dev tools (nested submodules) | cctools, ld64, bison, flex, gnumake, gperf, developer_cmds, headerdoc, tapi, pb_makefiles |
 | **git** | `src/git/` | Git v2.55.0 | git, git-receive-pack, git-shell, etc. |
 | **cpython** | `src/cpython/` | CPython 3.14.7 | python3, pip3, pydoc3, 2to3 |
 | **python-apple-support** | `src/python-apple-support/` | Python build system for Apple platforms | XCFramework packaging, cross-platform builds |
@@ -60,7 +60,7 @@ See `docs/DOCUMENTATION.md` for a comprehensive audit. Key gaps:
 - **Code signing:** No certificate-based or CMS signing (ad-hoc only)
 - **Swift toolchain:** Swift submodule available but not yet built/integrated
 - **SDKs:** No iOS, watchOS, tvOS, visionOS, or macOS SDKs
-- **Not yet built:** LLVM toolchain (clang, etc.), Python, Git, pngcrush — sources available but not yet integrated into build
+- **Not yet built:** LLVM toolchain (clang, swiftc), dist-dev-tools (ar, strip, lipo, otool, ld, bison, flex), Python, Git, pngcrush — sources available in submodules but not yet integrated into bmake build
 
 ## Quick Start
 
@@ -81,4 +81,4 @@ bmake install
 ## License
 
 Primary code: BSD-3-Clause (see `LICENSE.BSD-3`)
-Submodules retain their respective licenses (Apache 2.0, APSL, GPL, BSD, MIT, etc.)
+Submodules retain their respective licenses (Apache 2.0, APSL, GPL, BSD, MIT, PSF, PNG License, etc.)
