@@ -36,6 +36,7 @@ xcode-tools/
 │   │   ├── libgit2/                  # Git library
 │   │   └── tapi/                     # Text-based API tool
 │   ├── objc4/                        # Submodule: Objective-C runtime
+│   ├── pngcrush/                     # Submodule: PNG optimization tool
 │   ├── llvm-project/                 # Submodule: LLVM/Clang/LLVM project
 │   ├── swift/                        # Submodule: Swift compiler
 │   └── xcode/                        # Our reimplemented Xcode tools
@@ -467,7 +468,7 @@ We currently have **10 open-source reimaginations** of Apple's command-line tool
 | momc | Core Data | Compiles `.xcdatamodel` files |
 | mapc | Maps | Map template compiler |
 | copypng | Asset | PNG optimization/copy for iOS resources |
-| pngcrush | Asset | PNG optimization |
+| pngcrush | Asset | PNG optimization | ✅ Source available (`src/pngcrush/`) |
 | TextureAtlas | Asset | Texture atlas compiler |
 | TextureConverter | Asset | Texture format conversion |
 | altool | App Store | App Store Transport / upload validation |
@@ -700,6 +701,25 @@ We currently have **10 open-source reimaginations** of Apple's command-line tool
 - No Objective-C compiler (covered by clang in llvm-project)
 - No runtime headers for all platforms
 
+### pngcrush Submodule
+
+**Source:** `src/pngcrush/` (pngcrush v1.8.1, xnuports fork)
+
+**What it covers:**
+- PNG (Portable Network Graphics) optimization
+- PNG IDAT datastream compression optimization
+- Removal of unwanted ancillary chunks
+- Adding gAMA, tRNS, iCCP, and textual chunks
+- Bundled with libpng and zlib source (modified fork)
+- Pre-compiled binary available in submodule
+- Batch processing scripts for workspace-based workflows
+
+**Gaps:**
+- No Makefile checked out in current commit (build files exist in git history)
+- Pre-compiled `.o` files and binary in tree (should be cleaned)
+- Uses bundled (modified) libpng/zlib rather than system libraries
+- No integration into our bmake build system yet
+
 ### git Submodule
 
 **Source:** `src/git/` (Git v2.55.0, xnuports fork)
@@ -856,7 +876,7 @@ We currently have **10 open-source reimaginations** of Apple's command-line tool
 
 ### Phase 4: File & Resource Tools
 1. **Rez/DeRez/SetFile/GetFileInfo** — Resource fork tools (available in `Tools/`)
-2. **pngcrush, copypng** — Image optimization
+2. **copypng** — PNG optimization for iOS resources
 3. **sdef/sdp** — Scripting definition tools
 4. **TextureAtlas/TextureConverter** — Texture processing
 
@@ -874,4 +894,5 @@ We currently have **10 open-source reimaginations** of Apple's command-line tool
 | CPython | PSF-2.0 | `src/cpython/` |
 | Python-Apple-Support | BSD-3-Clause | `src/python-apple-support/` |
 | ld-internals | Apple Public Source License | `include/ld-internals/` |
+| pngcrush | PNG License | `src/pngcrush/` |
 | Our top-level code | BSD-3-Clause | `LICENSE.BSD-3` |

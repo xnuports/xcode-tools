@@ -37,6 +37,7 @@ All build artifacts go to `build/` (`build/usr/bin/` for binaries, `build/obj/` 
 | **llvm-project** | `src/llvm-project/` | LLVM/Clang/LLDB/MLIR | C/C++/ObjC compiler, LLVM tools |
 | **swift** | `src/swift/` | Swift compiler | swiftc, swift-frontend, SPM, SourceKit |
 | **objc4** | `src/objc4/` | Objective-C runtime | Runtime library |
+| **pngcrush** | `src/pngcrush/` | PNG optimization | pngcrush v1.8.1 |
 | **dist-dev-tools** | `src/dist-dev-tools/` | Apple open-source dev tools | bison, flex, gnumake, gperf, ld64, cctools |
 | **git** | `src/git/` | Git v2.55.0 | git, git-receive-pack, git-shell, etc. |
 | **cpython** | `src/cpython/` | CPython 3.14.7 | python3, pip3, pydoc3, 2to3 |
@@ -49,7 +50,7 @@ All build artifacts go to `build/` (`build/usr/bin/` for binaries, `build/obj/` 
 
 See `docs/DOCUMENTATION.md` for a comprehensive audit. Key gaps:
 
-- **Asset compilation:** No `actool` (asset catalogs), `TextureAtlas`, `copypng`, `pngcrush`
+- **Asset compilation:** No `actool` (asset catalogs), `TextureAtlas`, `copypng`
 - **Interface Builder:** No `ibtool`/`ibtoold` (nib/xib compilation)
 - **App Store delivery:** No `altool`, `iTMSTransporter`, `ipatool`
 - **Core ML:** No `coremlc` (model compilation)
@@ -59,7 +60,7 @@ See `docs/DOCUMENTATION.md` for a comprehensive audit. Key gaps:
 - **Code signing:** No certificate-based or CMS signing (ad-hoc only)
 - **Swift toolchain:** Swift submodule available but not yet built/integrated
 - **SDKs:** No iOS, watchOS, tvOS, visionOS, or macOS SDKs
-- **Not yet built:** LLVM toolchain (clang, etc.), Python, Git — sources available but not yet integrated into build
+- **Not yet built:** LLVM toolchain (clang, etc.), Python, Git, pngcrush — sources available but not yet integrated into build
 
 ## Quick Start
 
