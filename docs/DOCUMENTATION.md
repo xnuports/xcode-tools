@@ -20,7 +20,9 @@ xcode-tools/
 ├── src/
 │   ├── Makefile                      # Delegates to xcode/
 │   ├── PlistBuddy/                   # Submodule: open-source PlistBuddy
-│   ├── Python/                       # Submodule: Python support package
+│   ├── python-apple-support/         # Submodule: Python build system for Apple platforms
+│   ├── cpython/                      # Submodule: CPython 3.14.7 source
+│   ├── git/                          # Submodule: Git v2.55.0 source
 │   ├── dist-dev-tools/               # Submodule: Apple open-source dev tools
 │   │   ├── bison/                    # GNU Bison
 │   │   ├── cctools/                  # Apple cctools (includes ld64)
@@ -533,15 +535,16 @@ We currently have **10 open-source reimaginations** of Apple's command-line tool
 | crashlog | Debug | Crash log management |
 | CreateIPA | App Store | IPA creation |
 | momc | Core Data | Managed object model compiler |
-| 2to3 | Python | Python 2 to 3 converter |
-| pip3 | Python | Python package installer |
-| python3 | Python | Python 3 interpreter |
-| Make | Python | Make helper |
-| Git | VCS | Git operations |
-| Git-receive-pack | VCS | Git receive pack |
-| Git-shell | VCS | Git shell |
-| Git-upload-archive | VCS | Git upload archive |
-| Git-upload-pack | VCS | Git upload pack |
+| 2to3 | Python | Python 2 to 3 converter | ✅ Source available |
+| pip3 | Python | Python package installer | ✅ Part of CPython source |
+| pydoc3 | Python | Python documentation | ✅ Part of CPython source |
+| python3 | Python | Python 3 interpreter | ✅ Source available (`src/cpython/` + `src/python-apple-support/`) |
+| Make | Python | Make helper | ✅ Part of CPython source |
+| Git | VCS | Git operations | ✅ Source available (`src/git/`) |
+| Git-receive-pack | VCS | Git receive pack | ✅ Source available (`src/git/`) |
+| Git-shell | VCS | Git shell | ✅ Source available (`src/git/`) |
+| Git-upload-archive | VCS | Git upload archive | ✅ Source available (`src/git/`) |
+| Git-upload-pack | VCS | Git upload pack | ✅ Source available (`src/git/`) |
 
 ### 3.3 Tools in /Applications/Xcode.app/Contents/Developer/Tools/
 
@@ -697,6 +700,66 @@ We currently have **10 open-source reimaginations** of Apple's command-line tool
 - No Objective-C compiler (covered by clang in llvm-project)
 - No runtime headers for all platforms
 
+### git Submodule
+
+**Source:** `src/git/` (Git v2.55.0, xnuports fork)
+
+**What it covers:**
+- Full Git source code (git, git-receive-pack, git-shell, git-upload-archive, git-upload-pack)
+- Apple's Xcode ships Git in its Developer/usr/bin — our source matches the same Git version
+- Includes `libgit2` is already available in dist-dev-tools (as a library)
+- Note: Apple's git includes Apple-specific patches (credential helpers, keychain integration)
+
+**Gaps:**
+- May lack Apple-specific patches present in Xcode's build
+- No Swift-specific Git integration (e.g., `swift package`-style Git helpers)
+
+### cpython Submodule
+
+**Source:** `src/cpython/` (CPython 3.14.7, xnuports fork on `3.14` branch)
+
+**What it covers:**
+- Full CPython 3.14.7 source code
+- Python 3 interpreter (`python3`)
+- pip, pydoc, 2to3, and other Python tools
+- Apple-specific directory structure (`src/cpython/Apple/`, `src/cpython/iOS/`)
+- Cross-compilation toolchain resources for iOS (`src/cpython/iOS/Resources/bin/`)
+
+**What it doesn't cover:**
+- Building fat binaries for multiple Apple platforms (handled by python-apple-support)
+- App Store compliance patches (handled by python-apple-support)
+- SDK-specific configurations (handled by python-apple-support)
+
+### python-apple-support Submodule
+
+**Source:** `src/python-apple-support/` (Beeware Python-Apple-support, `heads/main`)
+
+**What it covers:**
+- Meta-build system for packaging Python as XCFrameworks for Apple platforms
+- Downloads, patches, and builds CPython 3.14.6 with dependencies:
+  - bzip2 1.0.8, libffi 3.4.7, mpdecimal 4.0.0, OpenSSL 3.5.7, xz 5.6.4, zstd 1.5.7
+- Builds fat binaries supporting macOS (x86_64, arm64), iOS, tvOS, watchOS, visionOS
+- Creates relocatable frameworks for embedding in Xcode projects
+- App Store compliance patches applied to macOS build
+- Cross-platform patches for iOS/tvOS/watchOS/visionOS (backported from PEP 730)
+- Reuses official macOS Python binary packages (re-packaged as XCFramework)
+
+**Relationship to cpython submodule:**
+- `src/cpython/` contains the actual CPython source tree
+- `src/python-apple-support/` is the build system that compiles and packages it
+- They are complementary: cpython provides source, python-apple-support provides the Apple-platform build pipeline
+
+**Gaps:**
+- Not yet integrated into our bmake build system
+- No Makefile for building (uses its own Makefile which calls `xcodebuild`/`cmake`)
+
+### include/ld-internals
+
+**Source:** `include/ld-internals` (git submodule, `heads/main`)
+
+- Apple internals header files for `ld64`
+- Private APIs and data structures used by the Apple linker
+
 ## 5. Configuration Infrastructure
 
 ### Our configs/ directory
@@ -759,16 +822,19 @@ We currently have **10 open-source reimaginations** of Apple's command-line tool
 | App Store delivery | ❌ | ✅ Full | altool, iTMSTransporter, ipatool |
 | Coverage tools | ❌ | ✅ Full | xccov, llvm-cov |
 | Localization | ❌ | ✅ Full | genstrings, actool, etc. |
-| Python tools | ✅ Via submodule | ✅ Full | Support package |
+| Python tools | ✅ Source available | ✅ Full | CPython 3.14.7 + build system |
+| Git | ✅ Source available | ✅ Full | Git v2.55.0 |
 
 ## 8. Roadmap Recommendations
 
-### Phase 1: Tooling & Infrastructure
-1. Build and integrate the LLVM toolchain (clang, swiftc, ld, ar, etc.)
+### Phase 1: Toolchain & Infrastructure
+1. Build and integrate the LLVM toolchain (clang, swiftc, ld, ar, etc.) from submodules
 2. Integrate dist-dev-tools (bison, flex, gnumake, gperf, etc.)
-3. Set up SDK directories with info.ini files
-4. Implement the toolchain shim scripts in `scripts/`
-5. Install configs to system paths
+3. Build and install CPython 3.14.7 (`src/cpython/`) using `python-apple-support` build system
+4. Build and install Git v2.55.0 (`src/git/`)
+5. Set up SDK directories with info.ini files
+6. Implement the toolchain shim scripts in `scripts/`
+7. Install configs to system paths
 
 ### Phase 2: Missing Xcode Tools
 1. **actool** — Asset catalog compiler (high priority for iOS/macOS apps)
@@ -778,6 +844,7 @@ We currently have **10 open-source reimaginations** of Apple's command-line tool
 5. **altool/iTMSTransporter** — App Store delivery
 6. **lldb** — Debugger (integrate from llvm-project)
 7. **stapler** — Signature stapling (for notarization workflow)
+8. **agvtool** — Version string management
 
 ### Phase 3: Developer Tools
 1. **atos, vmmap, symbols, leaks** — Debugging and profiling
@@ -785,9 +852,10 @@ We currently have **10 open-source reimaginations** of Apple's command-line tool
 3. **xcsigningtool** — Signing identity management
 4. **xccov** — Coverage reporting
 5. **xcresulttool** — Test result processing
+6. **ipatool** — IPA packaging tool
 
 ### Phase 4: File & Resource Tools
-1. **Rez/DeRez/SetFile/GetFileInfo** — Resource fork tools
+1. **Rez/DeRez/SetFile/GetFileInfo** — Resource fork tools (available in `Tools/`)
 2. **pngcrush, copypng** — Image optimization
 3. **sdef/sdp** — Scripting definition tools
 4. **TextureAtlas/TextureConverter** — Texture processing
@@ -802,4 +870,8 @@ We currently have **10 open-source reimaginations** of Apple's command-line tool
 | Objective-C runtime | Apple Public Source License | `src/objc4/` |
 | PlistBuddy | Apple Public Source License | `src/PlistBuddy/` |
 | dist-dev-tools | Mixed (Apple APL, GPL, BSD) | `src/dist-dev-tools/` |
+| Git | GPL-2.0 | `src/git/` |
+| CPython | PSF-2.0 | `src/cpython/` |
+| Python-Apple-Support | BSD-3-Clause | `src/python-apple-support/` |
+| ld-internals | Apple Public Source License | `include/ld-internals/` |
 | Our top-level code | BSD-3-Clause | `LICENSE.BSD-3` |
