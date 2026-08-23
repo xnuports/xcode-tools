@@ -23,3 +23,7 @@
 [submodule "include/ld-internals"]
 	path = include/ld-internals
 	url = https://github.com/xnuports/ld-internals.git
+[submodule "src/cpython"]
+	path = src/cpython
+	url = https://github.com/xnuports/cpython.git
+	branch = 3.14
