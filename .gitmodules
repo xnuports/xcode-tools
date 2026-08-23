@@ -18,7 +18,7 @@
 	path = src/objc4
 	url = https://github.com/xnuports/objc4.git
 [submodule "src/Python"]
-	path = src/Python
+	path = src/python-apple-support
 	url = https://github.com/xnuports/Python-Apple-support/
 [submodule "include/ld-internals"]
 	path = include/ld-internals
