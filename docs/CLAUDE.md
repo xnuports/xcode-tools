@@ -534,50 +534,56 @@ Notes:
   built here because the project carries it as a submodule, installed to
   `usr/libexec` as the closest match. It links `-framework CoreFoundation`.
 
-#### 2c. ld64 (in progress — 33 of 36 sources compile)
+#### 2c. ld64 (compiles fully; blocked on libtapi)
 
-Scaffolding is in place: `mk/with-ld64.mk` and `mk/tool.d/ld.mk`, which
-reproduce the xcodeproj's script phases (`configure.h` from
-`src/create_configure`, `compile_stubs.h` as a C string) into
-`build/gen/ld64/`. `ld` is deliberately **not** in `mk/progs.mk` yet, so the
-build stays green; adding it is one line once the two headers below land.
+Every one of ld64's sources now compiles — 36 C++ across `ld/`, `ld/parsers/`,
+`ld/passes/`, `ld/passes/stubs/` and `mach_o/`, plus `debugline.c` and
+`libcodedirectory.c` — and the link resolves everything except `tapi::*`.
 
-Resolved along the way:
+`libtapi` builds only inside the LLVM tree: tapi's `CMakeLists.txt` uses
+`llvm_add_library` and reaches into `CLANG_SOURCE_DIR`. So ld64 waits on
+stage 5. Enabling it afterwards is one commented-out line in `mk/progs.mk`.
 
-- **C++20 is required** — ld64 uses `std::string_view::starts_with`.
-- **`tapi/tapi.h`** was already ours, in `src/dist-dev-tools/tapi/include`;
-  only an include path was missing. `tapi/Version.inc` is CMake-generated from
-  `Version.inc.in`; the version is `2.0.0`, from tapi's `CMakeLists.txt`.
-- **`CoreAnalytics/CoreAnalytics.h`** — Apple private framework, no source. The
-  include is the only occurrence in `Options.cpp`, so `include/CoreAnalytics/`
-  holds an empty shim.
-- **`mach-o/dyld_priv.h`** — supplied by the `lib/dyld` submodule, but two
-  traps. cctools ships its *own* stripped `mach-o/dyld_priv.h` with no
-  `dyld_unwind_sections`, so dyld's copy must win the header search; and
-  putting all of `lib/dyld/include` first is wrong, because it also carries
-  `dlfcn.h` and `mach-o/dyld.h`, which shadow the system and cctools headers
-  (that mistake costs four other files). The fix is a generated shim directory
-  exposing only `mach-o/dyld_priv.h`. That header also annotates with
-  `bridgeos()`, a platform the public SDK's availability macros do not know, so
-  the shim neuters `__API_AVAILABLE` and friends before including it —
-  irrelevant for a build tool.
-- **corecrypto** keeps its headers in a `corecrypto/` directory under each of
-  its ~60 modules, so the include list is generated with `find` rather than
-  written out.
+(Apple's shipped `XcodeDefault.xctoolchain/usr/lib/libtapi.dylib` would make
+`ld` link today, but it is a closed binary — the same objection as
+`libcodedirectory`, so we do not depend on it.)
 
-Still blocked on two headers that are in none of our submodules:
+What it took, all in `mk/with-ld64.mk` and `mk/tool.d/ld.mk`:
 
-| Header | Needed by | Where it lives |
-|---|---|---|
-| `os/base_private.h` | `ld.cpp`, `OutputFile.cpp`, via libplatform's `os/lock_private.h` | **libdispatch**, not libplatform |
-| `CrashReporterClient.h` | `Options.cpp`, for `CRSetCrashLogMessage` | Apple's internal SDK; no obvious open-source home |
+- **C++20**, for `std::string_view::starts_with`. It applies to the C++
+  sources only, via a new `T_CXXFLAGS` knob — ld64 has C sources too.
+- **Generated headers**, standing in for the xcodeproj's script phases:
+  `configure.h` (from `src/create_configure`; note it sets
+  `SUPPORT_ARCH_riscv32 0` for `XcodeDefault`, which is us), `compile_stubs.h`
+  (the csh script as a C string), `tapi/Version.inc` (version read out of
+  tapi's `CMakeLists.txt`), and `version.c` supplying
+  `ld_classicVersionString`, which `Options.cpp` declares `extern` but no
+  source defines — Apple's build system stamps it in.
+- **`-lxar`** for `bitcode_bundle.cpp`, and **`-lc++`**-style linkage handled
+  automatically because `tool.mk` picks `${CXX}` when any source is C++.
+- **Private headers**, now all in submodules: `include/ld-internals`,
+  `lib/libplatform` (`os/lock_private.h`), `lib/dyld` (`mach-o/dyld_priv.h`),
+  `lib/corecrypto`, and `lib/apple_internal_sdk` for the four that ship
+  nowhere else — `CrashReporterClient.h`, `os/base_private.h`,
+  `System/machine/cpu_capabilities.h` (+ its `arm`/`i386` variants) and
+  `Private/CommonCrypto/CommonDigestSPI.h`.
 
-Note that ld64 guards the `CrashReporterClient.h` include with
-`#if __MAC_OS_X_VERSION_MIN_REQUIRED >= 1070` and carries an `#else` branch
-that writes `__crashreporter_info__` directly, so that dependency is in
-principle avoidable.
+Three traps worth remembering:
 
-Once ld builds, `ld-classic` is the second binary a stock toolchain ships.
+1. **cctools ships its own stripped `mach-o/dyld_priv.h`**, without
+   `dyld_unwind_sections`. dyld's copy has to win the header search — but
+   putting all of `lib/dyld/include` first is wrong, because it also carries
+   `dlfcn.h` and `mach-o/dyld.h`, which shadow the system and cctools headers
+   and break four otherwise-fine files. The fix is a generated shim directory
+   exposing only `mach-o/dyld_priv.h`.
+2. **Several Apple headers annotate with `bridgeos()`**, which the public
+   SDK's availability macros reject. The shims neuter `__API_AVAILABLE` and
+   friends around the include and restore them with `#pragma push_macro` /
+   `pop_macro` — clobbering them for the rest of the translation unit breaks
+   later system headers.
+3. **`tool.mk`'s out-of-directory source branch compiled everything with
+   `${CC}`.** clang dispatches on suffix so it appeared to work, but C++-only
+   flags could not be applied. It now dispatches on suffix explicitly.
 
 ### Stage 3 — `.xctoolchain` and `.sdk` bundle emission
 

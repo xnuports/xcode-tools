@@ -14,7 +14,8 @@
 #
 #	T_SRCS		override source list (basenames, or TOP-relative
 #			paths for sources outside T_SRCDIR)
-#	T_CFLAGS	extra compiler flags
+#	T_CFLAGS	extra compiler flags (C and C++ alike)
+#	T_CXXFLAGS	extra flags for C++ sources only (e.g. -std=)
 #	T_LDADD		extra libraries (e.g. -lz, ${LIBSTUFF})
 #	T_LINKS		extra names hardlinked to the built binary in the
 #			same install dir (e.g. ld-classic -> ld)
@@ -134,9 +135,17 @@ ${T_OBJDIR} ${T_TARGET:H}:
 .for s in ${SRCS}
 . if ${s:M*/*} != ""
 # Source outside T_SRCDIR: T_SRCS entry is a path relative to TOP.
+# Dispatch on the suffix, so a tree with both C and C++ sources (ld64)
+# gets the right driver and the right flags for each.
+.  if ${s:M*.cc} != "" || ${s:M*.cpp} != ""
+${T_OBJDIR}/${s:T:R}.o: ${TOP}/${s}
+	@mkdir -p ${T_OBJDIR}
+	${CXX} ${CPPFLAGS} ${CXXFLAGS} ${T_CFLAGS} ${T_CXXFLAGS} -c ${TOP}/${s} -o ${.TARGET}
+.  else
 ${T_OBJDIR}/${s:T:R}.o: ${TOP}/${s}
 	@mkdir -p ${T_OBJDIR}
 	${CC} ${CPPFLAGS} ${CFLAGS} ${T_CFLAGS} -c ${TOP}/${s} -o ${.TARGET}
+.  endif
 . elif ${s:M*.y} != ""
 # Yacc: foo.y -> foo.tab.c + foo.tab.h -> foo.tab.o
 ${T_OBJDIR}/${s:T:R}.tab.c ${T_OBJDIR}/${s:T:R}.tab.h: ${T_SRCDIR}/${s}
@@ -160,7 +169,7 @@ ${T_OBJDIR}/${s:T}.lex.o: ${T_OBJDIR}/${s:T}.lex.c
 # the compiler.
 ${T_OBJDIR}/${s:T:R}.o: ${T_SRCDIR}/${s}
 	@mkdir -p ${T_OBJDIR}
-	${CXX} ${CPPFLAGS} ${CXXFLAGS} ${T_CFLAGS} -c ${T_SRCDIR}/${s} -o ${.TARGET}
+	${CXX} ${CPPFLAGS} ${CXXFLAGS} ${T_CFLAGS} ${T_CXXFLAGS} -c ${T_SRCDIR}/${s} -o ${.TARGET}
 . else
 # Plain C source.  Compile the named source explicitly (not ${.ALLSRC})
 # so header prerequisites added by a fragment are not passed to clang.
