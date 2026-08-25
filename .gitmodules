@@ -33,3 +33,12 @@
 [submodule "src/pngcrush"]
 	path = src/pngcrush
 	url = https://github.com/xnuports/pngcrush.git
+[submodule "lib/libplatform"]
+	path = lib/libplatform
+	url = https://github.com/xnuports/libplatform.git
+[submodule "lib/corecrypto"]
+	path = lib/corecrypto
+	url = https://github.com/xnuports/corecrypto.git
+[submodule "lib/dyld"]
+	path = lib/dyld
+	url = https://github.com/xnuports/dyld.git
