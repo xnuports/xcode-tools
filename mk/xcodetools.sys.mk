@@ -74,18 +74,10 @@ MK_TOOLCHAIN?=	yes
 # stay stable when they land.
 #	MK_LLVM, MK_SWIFT, MK_PYTHON, MK_GIT
 
-# cctools + ld64.  Populated in mk/progs.mk order; kept here so the
-# filter below can see it.
-TOOLCHAIN_PROGS=	ar libtool lipo nm otool ranlib size strings strip \
-			vtool segedit install_name_tool bitcode_strip \
-			codesign_allocate ctf_insert check_dylib checksyms \
-			cmpdylib indr inout pagestuff seg_addr_table seg_hack \
-			depinfo ld ld-classic
-
-# Names filtered out of the build loop when their tier is disabled.
+# Per-program opt-outs.  Whole tiers are gated in mk/progs.mk instead --
+# a duplicated list of program names here would go stale the moment a
+# tool is renamed (as it did when nm/otool/size became the -classic
+# names).  This stays for disabling individual programs.
 DISABLED_PROGS=
-.if ${MK_TOOLCHAIN:tl} != "yes"
-DISABLED_PROGS+=	${TOOLCHAIN_PROGS}
-.endif
 
 .PHONY: all clean

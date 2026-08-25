@@ -435,8 +435,8 @@ We currently have **10 open-source reimaginations** of Apple's command-line tool
 | ar | Toolchain usr/bin | `src/dist-dev-tools/cctools/` | ✅ Source available |
 | libtool | Toolchain usr/bin | `src/dist-dev-tools/cctools/` | ✅ Source available |
 | lipo | Toolchain usr/bin | `src/dist-dev-tools/cctools/` | ✅ Source available |
-| otool | Toolchain usr/bin | `src/dist-dev-tools/cctools/` | ✅ Source available |
-| nm | Toolchain usr/bin | `src/dist-dev-tools/cctools/` | ✅ Source available |
+| otool | Toolchain usr/bin | `src/llvm-project/llvm/` | ✅ In a stock toolchain `otool` is `llvm-otool`; the cctools build ships as `otool-classic` |
+| nm | Toolchain usr/bin | `src/llvm-project/llvm/` | ✅ In a stock toolchain `nm` is a symlink to `llvm-nm`; the cctools build ships as `nm-classic` |
 | ranlib | Toolchain usr/bin | `src/dist-dev-tools/cctools/` | ✅ Source available |
 | strip | Toolchain usr/bin | `src/dist-dev-tools/cctools/` | ✅ Source available |
 | dsymutil | Toolchain usr/bin | `src/llvm-project/llvm/` | ✅ Source available |

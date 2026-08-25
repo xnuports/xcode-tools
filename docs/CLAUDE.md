@@ -143,10 +143,10 @@ These submodules provide source code for tools previously listed as "no source":
 | `dist-dev-tools` | `src/dist-dev-tools/` | 26.0.1 | See nested submodules below |
 | `git` | `src/git/` | v2.55.0 | git, git-receive-pack, git-shell, git-upload-pack |
 | `cpython` | `src/cpython/` | v3.14.7 | python3, pip3, pydoc3, 2to3 |
-| `python-apple-support` | `src/python-apple-support/` | heads/main | Python XCFramework build system |
+| `python-apple-support` | `src/python-apple-support/` | heads/main | **Reference only** — a meta-build system for Python XCFrameworks. We build Python ourselves, so this is kept for reference rather than used. |
 | `PlistBuddy` | `src/PlistBuddy/` | heads/main | PlistBuddy |
 | `pngcrush` | `src/pngcrush/` | v1.8.1 | pngcrush |
-| `xctoolchain` | `xctoolchain/` | heads/master | Xcode toolchain configs (.xcconfig files) |
+| `xctoolchain` | `xctoolchain/` | heads/master | **Reference only** — generic `.xcconfig` build settings, not a source of the `.xctoolchain` bundle format |
 | `ld-internals` | `include/ld-internals/` | heads/main | ld64 private headers |
 
 ### dist-dev-tools Nested Submodules
@@ -395,25 +395,75 @@ drop-in `Developer/` tree, byte-reproducible links, and ten fewer Makefiles.
 Wire up the submodule sources that `mk/tool.mk` can compile directly. None of
 these need a foreign build system.
 
-1. **cctools** — the biggest win.
-   - `libstuff/` (46 `.c`) and `libmacho/` become static libraries in
-     `lib/Makefile`, consumed via `mk/with-libstuff.mk` / `mk/with-libmacho.mk`.
-   - `ar/` and `otool/` are per-program directories — source auto-discovery
-     handles them with no fragment.
-   - `misc/` is the one awkward case: a *flat* directory of ~25 single-file
-     programs (`lipo.c`, `nm.c`, `strip.c`, `vtool.c`, `install_name_tool.c`,
-     `codesign_allocate.c`, …). Auto-discovery would compile them all into one
-     binary, so each needs a one-line `mk/tool.d/<prog>.mk` with
-     `T_SRCS=<prog>.c`.
-   - Installs to `${XCTOOLCHAIN}/usr/bin`.
-2. **ld64** — `ld` and `ld-classic`. C++ across `src/ld/`, `src/mach_o/`,
+#### 2a. cctools ✅
+
+14 programs build and install to `${XCTOOLCHAIN}/usr/bin`:
+
+    ar   bitcode_strip   codesign_allocate   ctf_insert   install_name_tool
+    lipo   nm-classic   nmedit   otool-classic   segedit   size-classic (+size)
+    strings   strip   vtool
+
+`libstuff` (46 sources) and `libmacho` build as static libraries in
+`lib/Makefile`; consumers pull them in via `mk/with-libstuff.mk` and
+`mk/with-libmacho.mk`, which imply `mk/with-cctools.mk` for the shared
+include paths and defines translated out of Apple's xcconfigs.
+
+Four things worth knowing, all of them non-obvious:
+
+1. **The `-classic` names.** Modern Xcode has retired the cctools builds of
+   `nm`, `otool` and `size` from their plain names. In a stock toolchain `nm`
+   and `otool` are symlinks to `llvm-nm` / `llvm-otool`, and `size` is a
+   symlink to `size-classic`; the cctools builds ship as `nm-classic`,
+   `otool-classic`, `size-classic`. We install under those names and leave
+   `nm` and `otool` for llvm-project in stage 5. `nmedit` is `strip.c`
+   recompiled with `-DNMEDIT` — cctools has no `nmedit.c`.
+
+2. **`libtool` and `ranlib` are blocked.** `libtool.c` calls
+   `make_obj_file_with_linker_options()`, declared in
+   `<mach-o/cctools_helpers.h>` and defined in `libcctoolshelper`. Neither the
+   header nor the library appears in the open-source drop *or* in a shipped
+   Xcode — they are build-time-only Apple internals, statically linked into
+   Apple's binaries. `ranlib` is the same binary as `libtool`, dispatched on
+   `argv[0]`, so it is blocked too. Unblocking them means reimplementing that
+   function: it emits a Mach-O object carrying `LC_LINKER_OPTION` load
+   commands for `-reflibs`/`-reffw`. That is stage 4 work.
+
+   The same library is why `strip` is built without `-DTRIE_SUPPORT`, which
+   `strip.xcconfig` sets for macOS/Xcode builds: the guarded code includes the
+   same missing header. `strip` is otherwise complete.
+
+3. **`CODEDIRECTORY_SUPPORT` is deliberately off.** Apple enables it for macOS
+   and Xcode builds, but it links `libcodedirectory.dylib`, a closed Apple
+   binary. Depending on it would defeat the purpose of the project. The cost
+   is that tools which rewrite a Mach-O do not regenerate its ad-hoc code
+   signature — see the parity note in section 11.
+
+4. **Two gaps in the published sources** had to be filled from our own
+   submodules, both recorded in `mk/cctools-compat.h`:
+   - `libstuff/lto.c` includes `<llvm-c/lto.h>`, which the drop does not
+     bundle (its `include/llvm-c/` holds only `Disassembler.h`). Taken from
+     `src/llvm-project/llvm/include`.
+   - `libstuff/reloc.c` switches on `CPU_TYPE_RISCV32`, which is defined
+     nowhere: cctools' own `include/mach/machine-cctools.h` carries the
+     "RISC-V subtypes" section comment with the definitions beneath it
+     stripped, and the public SDK stops at `CPU_TYPE_POWERPC64`. Recovered
+     from LLVM's `BinaryFormat/MachO.h` (`CPU_TYPE_RISCV = 24`). Apple treats
+     riscv32 as absent from this toolchain anyway: ld64's `create_configure`
+     emits `SUPPORT_ARCH_riscv32 0` whenever the install dir matches
+     `XcodeDefault`.
+
+#### 2b–2f. Remaining (current work)
+
+1. **ld64** — `ld` and `ld-classic`. C++ across `src/ld/`, `src/mach_o/`,
    `src/other/`; only ~18 `.c`/`.cpp` files, so an explicit `T_SRCS` is
-   tractable. Needs libstuff and `include/ld-internals` on `CPPFLAGS`.
-3. **developer_cmds** — `asa`, `ctags`, `indent`, `lorder`, `rpcgen`,
+   tractable. Needs libstuff and `include/ld-internals` on `CPPFLAGS`, and
+   `create_configure` has to be translated into a generated `configure.h`
+   under `build/gen/ld64/`.
+2. **developer_cmds** — `asa`, `ctags`, `indent`, `lorder`, `rpcgen`,
    `unifdef`. Per-program directories; the cleanest fit in the tree.
-4. **headerdoc** — Perl; use `mk/tool.mk`'s `T_SCRIPT` branch.
-5. **PlistBuddy** — flat `.c` directory, one `PROGS+=` line.
-6. **pngcrush** — flat directory with bundled libpng/zlib; needs `T_SRCS`.
+3. **headerdoc** — Perl; use `mk/tool.mk`'s `T_SCRIPT` branch.
+4. **PlistBuddy** — flat `.c` directory, one `PROGS+=` line.
+5. **pngcrush** — flat directory with bundled libpng/zlib; needs `T_SRCS`.
    Note the prebuilt `.o` files committed in that submodule (see
    `docs/DOCUMENTATION.md` section 4): ignore them, do not clean them.
 
@@ -592,8 +642,24 @@ For specific tools:
 - **pkgbuild:** must produce valid `.pkg` archives (test with `pkgutil`)
 - **productbuild:** must produce valid distribution packages
 - **simctl:** must list available simulators (requires Xcode Simulator installed)
-- **cctools / ld64:** compare against Apple's counterparts on identical input
-  (`lipo -info`, `otool -h`, `nm`) — the function-to-function parity requirement
+- **cctools:** compare against Apple's counterparts on identical input — the
+  function-to-function parity requirement. Compare against the matching name
+  (`nm-classic` against `nm-classic`, not against `nm`, which is llvm-nm).
+  Invoke both as `./tool` from their own directory, since these tools print
+  `argv[0]` verbatim in usage and error messages.
+
+  As of stage 2a, every output comparison matches exactly: `lipo -info`,
+  `-detailed_info`, `-thin`, `-extract`, `-create`; `otool-classic -h/-l/-L/-tV`;
+  `nm-classic`; `size-classic`; `strings`; `vtool -show`; and every usage and
+  error string.
+
+  Round-trips that *rewrite* a binary (`strip -S`, `strip -x`,
+  `install_name_tool`) are byte-identical only after
+  `codesign --remove-signature` is applied to both. That is expected and not a
+  defect: Apple's builds regenerate the ad-hoc signature through
+  `libcodedirectory`, which we deliberately do not link (see section 9,
+  stage 2a). The Mach-O content itself is identical.
+- **ld64:** same approach, once it builds.
 
 ## 12. License Compliance Checklist
 

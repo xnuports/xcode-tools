@@ -25,7 +25,12 @@
 
 TOP?=		${.CURDIR}
 T_SRCDIR?=	${TOP}/src/${T_DIR}
-T_OBJDIR?=	${TOP}/build/obj/${T_DIR}
+# Objects are keyed by program, not by source directory.  cctools' misc/
+# holds several programs in one directory, and two of them (strip and
+# nmedit) are the same source compiled with different flags -- sharing an
+# objdir would let one link the other's object.  Program names are unique
+# by construction: they are the installed binary names.
+T_OBJDIR?=	${TOP}/build/obj/${T_PROG}
 T_TARGET?=	${TOP}/build/release/${T_BIN}/${T_PROG}
 
 .include "${TOP}/mk/xcodetools.sys.mk"
