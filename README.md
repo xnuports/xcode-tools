@@ -143,6 +143,8 @@ Optional tiers:
 
 ```sh
 bmake MK_TOOLCHAIN=no   # skip the binutils tier (cctools, ld64)
+bmake MK_PORTS=yes      # also build components with their own build
+                        # system (gperf, flex, make) -- slow, off by default
 ```
 
 ## License

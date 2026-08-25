@@ -69,6 +69,12 @@ XCODE_STRICT_CFLAGS=	-Werror
 #
 MK_TOOLCHAIN?=	yes
 
+# MK_PORTS gates the components that carry their own build system and
+# are driven by mk/port.mk rather than compiled by mk/tool.mk.  Off by
+# default: each one runs a full configure and make, which is far slower
+# than the rest of the tree put together.
+MK_PORTS?=	no
+
 # Reserved for the foreign-build-system driver (see the plan, stage 5).
 # These trees are not in the inventory yet; the names exist so the knobs
 # stay stable when they land.

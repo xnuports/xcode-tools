@@ -332,6 +332,8 @@ Makefile          top level: dirs, lib, progs
 | `mk/xcodetools.sys.mk` | global flags, tier gating, `DISABLED_PROGS` filter |
 | `mk/progs.mk` | the inventory: `PROGS+= <src-dir> <program> <install-suffix>` |
 | `mk/tool.mk` | the per-program engine (never invoked by hand) |
+| `mk/port.mk` | the per-port engine, for foreign build systems |
+| `mk/ports.mk` | the port inventory: `PORTS+= <src-dir> <port> <suffix>` |
 | `mk/tool.d/<program>.mk` | optional per-tool flags, `sinclude`d |
 | `mk/with-*.mk` | reusable link bundles (e.g. `with-openssl.mk`) |
 
@@ -692,28 +694,78 @@ Also in this stage: deepen the tools we already have — `codesign` CMS/
 certificate signing, `notarytool` history/log/cancel, `devicectl` app install
 and file/log transfer, `simctl` io/push/location.
 
-### Stage 5 — The big submodules
+### Stage 5 — Components with their own build system (engine done)
 
-These cannot be compiled by `mk/tool.mk`. They must be *driven*
-(`configure`/`cmake` → build → stage) and their output installed into the
-stage 3 bundles. They need a second engine — `mk/port.mk`, a ports-style
-configure/build/stage driver with its own `PORTS+=` inventory, alongside
-`tool.mk`.
+`mk/port.mk` is the second engine, the counterpart to `mk/tool.mk`: it *drives*
+a component's own build rather than compiling sources itself. `mk/ports.mk` is
+the inventory, `ports/Makefile` the driver, `mk/port.d/<name>.mk` the per-port
+fragments — the same shape as the tool side.
+
+Phases are configure → build → stage, each with a stamp file, and the staged
+prefix is copied into the release tree so *we* choose what ships rather than the
+port's own install rules. Knobs: `P_PROGS`, `P_CONFIGURE`, `P_CONFIGURE_ARGS`,
+`P_MAKE`, `P_MAKE_ARGS`, `P_LINKS`, `P_PREPARE`, `P_COPY`, `P_NOBUILD`.
+
+Ports are gated behind `MK_PORTS`, off by default — each runs a full configure
+and make, which costs more than the rest of the tree together.
+
+```sh
+bmake MK_PORTS=yes        # build the ports too
+bmake list-ports          # the port inventory
+bmake check MK_PORTS=yes  # verify every port produced its binary
+```
+
+**`P_COPY` defaults to yes**, meaning the source is copied into
+`build/ports/<name>/src` and built in tree. The submodule is never written to
+either way, but these old autoconf trees have rules that only work in tree —
+out of tree they stop at "No rule to make target 'alloca_.h'" or silently drop
+objects. `P_PREPARE` then runs inside that private copy: the ports-style
+post-extract step.
+
+Building today:
+
+| Port | Version | Matches Apple |
+|------|---------|---------------|
+| `gperf` | 3.0.3 | yes |
+| `flex` | 2.6.4 | yes |
+| `gnumake` (as `make` + `gnumake`) | 3.81 | yes |
+
+What each needed, all of it non-obvious:
+
+- **flex** — its bundled libtool links `libfl` as a dylib with
+  `-flat_namespace`, which modern ld refuses outright for shared-cache-eligible
+  dylibs. Nothing here wants the library, so `--disable-shared`.
+- **gnumake** — `job.c` and `remake.c` call `general_vpath_search()` and
+  `allocated_vpath_expand_for_file()`, which live in `next.c`, an Apple/NeXT
+  source the autoconf Makefile never lists because Apple builds this from their
+  own project file. `P_PREPARE` appends it to the source and object lists. The
+  port also installs its binary as `make`, not `gnumake`; Apple ships both, so
+  `P_LINKS` supplies the second name.
+- **gm4, bison** — not enabled. Both restore their missing gnulib templates
+  fine (`mk/scripts/gnulib-restore-templates.sh` recreates `alloca_.h` and
+  `getopt_.h`, which Apple's drops ship the *outputs* of but not the inputs),
+  and then their vendored gnulib — two decades older than the SDK — substitutes
+  its own `<stdint.h>`/`<inttypes.h>` and the system `_inttypes.h` stops seeing
+  `intmax_t`. Fixing that means forcing configure to accept the system headers
+  or refreshing the vendored gnulib. Their fragments are in place.
+
+Apple also ships `lex`, `yacc` and `m4` in the toolchain, but as distinct
+binaries rather than links to flex/bison/gm4, so `P_LINKS` does not cover them.
+
+**Still ahead on this stage**, in dependency order:
 
 | Tree | Build system | Notes |
 |------|--------------|-------|
-| `llvm-project`, `swift` | CMake | clang and swiftc — the headline deliverables |
-| `cpython` (+ `python-apple-support`) | autoconf / own meta-build | |
+| `llvm-project`, `swift` | CMake | clang and swiftc — the headline deliverables. Set `P_COPY=no`: CMake builds out of tree properly, and copying LLVM is not worth the disk. |
+| `tapi` | CMake, inside the LLVM tree | **unblocks ld64**, which already compiles completely |
+| `cpython` (+ `python-apple-support`) | autoconf | |
 | `git` | autoconf + GNU make | |
-| `bison`, `flex`, `gnumake`, `gperf`, `gm4` | GNU autoconf | smallest; best first candidates for the new driver |
-| `objc4` | Xcode project | builds a dylib — needs a *library* target, not a program target |
-| `tapi`, `libgit2` | CMake | |
+| `objc4` | Xcode project | builds a dylib — needs a library target, not a program target |
+| `libgit2` | CMake | |
 
 Landing llvm/swift is what lets `xcodebuild` stop delegating and actually
-compile (section 4), and what fills `${XCTOOLCHAIN}/usr/bin`.
+compile, and what fills `${XCTOOLCHAIN}/usr/bin`.
 
-Reserved knob names for this stage: `MK_LLVM`, `MK_SWIFT`, `MK_PYTHON`,
-`MK_GIT`.
 
 ## 10. Development Workflow
 
@@ -868,6 +920,8 @@ All code must comply with these rules:
 | `mk/tool.mk` | The per-program build engine |
 | `mk/xcodetools.sys.mk` | Global flags and tier gating |
 | `mk/bundle.mk` | Emits the `.xctoolchain` / `.sdk` bundle metadata |
+| `mk/port.mk` | Driver for components with their own build system |
+| `mk/ports.mk` | The port inventory |
 | `src/xcode/common/devpath.c` | Finds our Developer directory at runtime |
 | `configs/xcrun.ini` | Default SDK/toolchain config |
 
