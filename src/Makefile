@@ -1,12 +1,36 @@
-# Makefile for src/
+# src/Makefile
+#
+# Drives the build of every program listed in mk/progs.mk by recursing
+# into mk/tool.mk once per entry.  The three fields of each entry map
+# round-robin onto d (source dir), p (program name) and b (release
+# suffix).
 
-.PHONY: all clean install
+TOP?=		${.CURDIR}/..
+
+.include "${TOP}/mk/xcodetools.sys.mk"
+.include "${TOP}/mk/progs.mk"
 
 all:
-	$(MAKE) -C xcode BUILD_DIR=$(BUILD_DIR) PREFIX=$(PREFIX) CC=$(CC)
+.for d p b in ${PROGS}
+.if empty(DISABLED_PROGS:M${p})
+	-@${MAKE} -f ${TOP}/mk/tool.mk TOP=${TOP} \
+		T_DIR=${d} T_PROG=${p} T_BIN=${b}
+.endif
+.endfor
 
 clean:
-	$(MAKE) -C xcode clean BUILD_DIR=$(BUILD_DIR)
+.for d p b in ${PROGS}
+.if empty(DISABLED_PROGS:M${p})
+	-@${MAKE} -f ${TOP}/mk/tool.mk TOP=${TOP} \
+		T_DIR=${d} T_PROG=${p} T_BIN=${b} clean
+.endif
+.endfor
 
-install:
-	$(MAKE) -C xcode install BUILD_DIR=$(BUILD_DIR) PREFIX=$(PREFIX) CC=$(CC)
+list-progs:
+.for d p b in ${PROGS}
+.if empty(DISABLED_PROGS:M${p})
+	@${ECHO} "${b}/${p}	<- src/${d}"
+.endif
+.endfor
+
+.PHONY: all clean list-progs

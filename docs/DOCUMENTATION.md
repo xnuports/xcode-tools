@@ -863,14 +863,22 @@ We currently have **10 open-source reimaginations** of Apple's command-line tool
 
 ### Our Build System
 - **bmake** (BSD make) as the build system
-- Hierarchical Makefile structure:
-  - `Makefile` → `src/Makefile` → `src/xcode/Makefile` → `src/xcode/<tool>/Makefile`
-- All build artifacts go to `build/` directory:
-  - `build/obj/<tool>/` — object files
-  - `build/usr/bin/` — final binaries
-- Tool Makefiles use `.for` loops for explicit compile rules
-- Uses `!=` operator instead of `$(shell ...)` for command substitution
-- Uses `${.CURDIR}` instead of `$(CURDIR)` for directory detection
+- One generic engine driven by a flat inventory, ported from the sibling
+  `apple-core` project — not a Makefile per tool:
+  - `Makefile` → `src/Makefile` → `mk/tool.mk` (once per entry in `mk/progs.mk`)
+  - `mk/progs.mk` lists `<src-dir> <program> <install-suffix>`
+  - `mk/tool.d/<program>.mk` carries optional per-tool flags
+- Submodule sources are compiled in place, read-only; nothing is ever written
+  inside a submodule
+- All build artifacts go to `build/`:
+  - `build/obj/<dir>/` — object files
+  - `build/gen/<tool>/` — build-time generated sources
+  - `build/lib/` — static libraries
+  - `build/release/` — staged tree, a drop-in replacement for Xcode's `Developer/`
+- Uses `.for` loops for explicit compile rules, `!=` instead of `$(shell ...)`,
+  and `${.CURDIR}` instead of `$(CURDIR)`
+- `-Wl,-reproducible` on every link, so two clean builds are byte-identical
+- See `docs/CLAUDE.md` section 8 for the full description
 
 ### Apple's Build System
 - Custom Xcode build system (`xcodebuild`)

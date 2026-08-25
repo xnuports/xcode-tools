@@ -1,18 +1,40 @@
-# Top-level Makefile for xcode-tools
-# Build system uses bmake and delegates to src/
+# xcode-tools -- top-level Makefile (BSD bmake).
+#
+#	./configure?  No.  Just:  bmake
+#
+# Targets:
+#	all		build every library and program into build/
+#	clean		remove build/ entirely
+#	list-progs	print the tool inventory with release placements
+#
+# The release tree lands in build/release/ and is a drop-in replacement
+# for /Applications/Xcode.app/Contents/Developer/ -- see mk/progs.mk.
 
-BUILD_DIR ?= ${.CURDIR}/build
-PREFIX ?= /opt/xnuports/opt/xcode-tools
-CC := clang
+TOP?=		${.CURDIR}
 
-.PHONY: all clean install
+.include "${TOP}/mk/xcodetools.sys.mk"
 
-all:
-	$(MAKE) -C src BUILD_DIR=$(BUILD_DIR) PREFIX=$(PREFIX) CC=$(CC)
+RELEASE=	${TOP}/build/release
+
+all: dirs lib progs
+	@${ECHO} "== xcode-tools build complete =="
+	@${ECHO} "   release tree: ${RELEASE}"
+
+dirs:
+.for d in usr/bin usr/lib usr/libexec usr/share ${XCTOOLCHAIN}/usr/bin Tools
+	mkdir -p ${RELEASE}/${d}
+.endfor
+
+lib:
+	${MAKE} -C ${TOP}/lib TOP=${TOP}
+
+progs:
+	${MAKE} -C ${TOP}/src TOP=${TOP}
+
+list-progs:
+	${MAKE} -C ${TOP}/src TOP=${TOP} list-progs
 
 clean:
-	rm -rf $(BUILD_DIR)
-	$(MAKE) -C src clean BUILD_DIR=$(BUILD_DIR)
+	rm -rf ${TOP}/build
 
-install: all
-	$(MAKE) -C src install BUILD_DIR=$(BUILD_DIR) PREFIX=$(PREFIX) CC=$(CC)
+.PHONY: all dirs lib progs list-progs clean

@@ -24,11 +24,21 @@ reimplementations where Apple has not released source.
 | **xcrun** | ~400 lines (3 files) | Tool locator and executor with SDK/toolchain support |
 | **xctrace** | ~400 lines (4 files) | Trace recording and export (stub) |
 
-Build system: **bmake** (BSD make), hierarchical Makefiles:
+Build system: **bmake** (BSD make), with one generic engine driven by an
+inventory — the same architecture as the sibling
+[apple-core](https://github.com/xnuports/apple-core) project:
+
 ```
-Makefile → src/Makefile → src/xcode/Makefile → src/xcode/<tool>/Makefile
+Makefile → src/Makefile → mk/tool.mk   (once per entry in mk/progs.mk)
 ```
-All build artifacts go to `build/` (`build/usr/bin/` for binaries, `build/obj/` for objects).
+
+`mk/progs.mk` lists every program as `<src-dir> <program> <install-suffix>`;
+`mk/tool.mk` builds it; `mk/tool.d/<program>.mk` carries any per-tool flags.
+Sources belonging to submodules are compiled in place, read-only — nothing is
+ever written inside a submodule.
+
+Build artifacts go to `build/`, and `build/release/` is a drop-in replacement for
+Xcode's `Developer/` directory.
 
 ### Submodule Components
 
@@ -65,17 +75,31 @@ See `docs/DOCUMENTATION.md` for a comprehensive audit. Key gaps:
 ## Quick Start
 
 ```sh
-# Build all tools
+# Build everything in the inventory
 bmake
 
-# Output binaries in build/usr/bin/
-ls build/usr/bin/
+# Print the inventory with install locations
+bmake list-progs
+
+# Output lands in build/release/, laid out like Xcode's Developer/
+ls build/release/usr/bin/
 
 # Clean build artifacts
 bmake clean
+```
 
-# Install (requires root)
-bmake install
+There is no `install` target: `build/release/` is the product.
+
+```
+build/release/usr/bin                                      our tools
+build/release/Toolchains/XcodeDefault.xctoolchain/usr/bin  cctools, ld64, clang, swiftc
+build/release/Platforms/<P>.platform/Developer/SDKs        SDK bundles
+```
+
+Optional tiers:
+
+```sh
+bmake MK_TOOLCHAIN=no   # skip the binutils tier (cctools, ld64)
 ```
 
 ## License

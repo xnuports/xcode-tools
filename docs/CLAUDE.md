@@ -29,9 +29,9 @@ invoked from the same paths with the same arguments.
    (BSD make). No GNU make extensions like `$(shell ...)`, `$(CURDIR)`,
    or GNU-style pattern rules with path prefixes. Use `.for` loops, `!=`
    for command substitution, and `${.CURDIR}`.
-4. **Build hygiene:** All build artifacts go to `build/`
-   (`build/usr/bin/` for binaries, `build/obj/<tool>/` for objects).
-   Source tree must remain pristine.
+4. **Build hygiene:** All build artifacts go to `build/` (`build/release/`
+   for the staged Developer tree, `build/obj/<dir>/` for objects). The source
+   tree, submodules included, must remain pristine after a full build.
 5. **Submodule discipline:** Each external dependency is a git submodule.
    Nested submodules must be populated with `git submodule update --init --recursive`.
 
@@ -42,21 +42,28 @@ invoked from the same paths with the same arguments.
 ```
 xcode-tools/
 ├── Makefile                        # Top-level bmake build system
-├── .gitmodules                     # 10 submodule definitions
+├── .gitmodules                     # 11 submodule definitions
 ├── .gitignore
 ├── LICENSE.BSD-3
 ├── README.md
+├── mk/                             # THE BUILD SYSTEM (see section 8)
+│   ├── xcodetools.sys.mk           # global flags, tier gating
+│   ├── progs.mk                    # the program inventory
+│   ├── tool.mk                     # the per-program engine
+│   ├── tool.d/<program>.mk         # optional per-tool flags
+│   └── with-*.mk                   # reusable link bundles
+├── lib/
+│   └── Makefile                    # static libs from submodule sources
 ├── docs/
 │   ├── DOCUMENTATION.md            # Comprehensive audit vs. Xcode Developer
 │   └── CLAUDE.md                   # This file
-├── configs/                        # SDK/toolchain INI configuration
-├── scripts/                        # Toolchain shim scripts (cc.sh, clang.sh, etc.)
+├── configs/                        # SDK/toolchain INI configuration (stage 3 input)
+├── scripts/                        # Toolchain shim scripts (stage 3 input)
 ├── xctoolchain/                    # Submodule: Xcode toolchain configurations
 ├── include/
 │   └── ld-internals/               # Submodule: ld64 private headers
 ├── src/
-│   ├── Makefile                    # Delegates to xcode/
-│   ├── Makefile                    # Top-level src delegator
+│   ├── Makefile                    # .for loop over mk/progs.mk
 │   ├── PlistBuddy/                 # Submodule: open-source PlistBuddy
 │   ├── python-apple-support/       # Submodule: Python build system for Apple platforms
 │   ├── cpython/                    # Submodule: CPython 3.14.7 source
@@ -82,7 +89,6 @@ xcode-tools/
 │   ├── llvm-project/               # Submodule: LLVM/Clang/LLDB/MLIR/flang/etc.
 │   ├── swift/                      # Submodule: Swift compiler
 │   └── xcode/                      # OUR reimplemented Xcode tools (10 tools)
-│       ├── Makefile
 │       ├── codesign/               # ad-hoc signing & verification (7 files)
 │       ├── devicectl/              # device management (2 files)
 │       ├── notarytool/             # notarization client (6 files)
@@ -94,8 +100,10 @@ xcode-tools/
 │       ├── xcrun/                  # tool locator & executor (3 files)
 │       └── xctrace/                # trace recording (4 files, stub)
 └── build/                          # Generated output
-    ├── obj/
-    └── usr/bin/
+    ├── obj/<dir>/                  # object files
+    ├── gen/<tool>/                 # build-time generated sources
+    ├── lib/                        # static libraries
+    └── release/                    # staged, drop-in Developer/ tree
 ```
 
 ---
@@ -195,6 +203,8 @@ These submodules provide source code for tools previously listed as "no source":
 | xed | IDE | ❌ GUI app, not a CLI tool |
 | xcdebug | Debug | ❌ No source (Apple proprietary) |
 | xcindex-test | Debug | ❌ No source (Apple proprietary) |
+| xcdevice | Device | ❌ No source (Apple proprietary) |
+| xcdiagnose | Debug | ❌ No source (Apple proprietary) |
 | atos | Debug | ❌ No source (Apple proprietary) |
 | vmmap | Debug | ❌ No source (Apple proprietary) |
 | symbols | Debug | ❌ No source (Apple proprietary) |
@@ -302,297 +312,241 @@ Each contains: Info.plist, SDKs/, usr/ (headers, libs), Tools/, Developer/.
 
 **Build tool:** `bmake` (BSD make)
 
-**Hierarchy:**
+The architecture is ported from the sibling `apple-core` / `darwintools`
+project: one generic engine driven by a flat inventory, rather than a
+Makefile per tool.
+
 ```
-Makefile (top-level)
-  → src/Makefile
-    → src/xcode/Makefile
-      → src/xcode/<tool>/Makefile (x10)
+Makefile          top level: dirs, lib, progs
+  → lib/Makefile      static libraries from submodule sources
+  → src/Makefile      .for loop over mk/progs.mk
+      → mk/tool.mk    invoked once per program
 ```
+
+| File | Role |
+|------|------|
+| `mk/xcodetools.sys.mk` | global flags, tier gating, `DISABLED_PROGS` filter |
+| `mk/progs.mk` | the inventory: `PROGS+= <src-dir> <program> <install-suffix>` |
+| `mk/tool.mk` | the per-program engine (never invoked by hand) |
+| `mk/tool.d/<program>.mk` | optional per-tool flags, `sinclude`d |
+| `mk/with-*.mk` | reusable link bundles (e.g. `with-openssl.mk`) |
+
+`mk/tool.mk` discovers `.c/.cc/.cpp/.y/.l` sources automatically, runs
+yacc/lex codegen, and links with `${CXX}` when any source is C++. Per-tool
+overrides: `T_SRCS`, `T_CFLAGS`, `T_LDADD`, `T_LINKS`, `T_SCRIPT`, `T_NOBUILD`.
+
+**Hard rule:** submodules are never written into. Every Makefile lives outside
+them and reaches in read-only via `.PATH`. Objects go to `build/obj/`, so a
+full build leaves every submodule pristine. Submodule changes must go through
+the individual upstream repositories.
 
 **Key design decisions for bmake compatibility:**
-- `:=` assignment (not `?=` for CC, since bmake's default CC is `cc ${PIPE}`)
 - `${.CURDIR}` instead of `$(CURDIR)` for directory paths
-- `.for` loops to generate explicit compile rules (bmake doesn't support path-prefixed `%.o: %.c` pattern rules)
 - `!=` operator instead of `$(shell ...)` for command substitution
-- `$>` (not `$<`) if automatic variables for first-prerequisite are needed in explicit rules
-- All build output to `build/` directory
+- `.for` loops to generate explicit compile rules (bmake doesn't support
+  path-prefixed `%.o: %.c` pattern rules)
+- **Plain `=`, not `?=`, for `CC`/`CFLAGS`/`CXXFLAGS`.** bmake predefines all
+  three in its own `sys.mk` (`CC` is `cc ${PIPE}`, `CFLAGS` is `-O2`), so `?=`
+  is silently a no-op and your flags vanish. Command-line assignments still win.
+- `-Wl,-reproducible` on every link. With `-g`, ld records each object's mtime
+  in the debug map (`N_OSO` stab) and folds it into `LC_UUID`, so two clean
+  builds of identical sources otherwise differ byte-for-byte.
+- `-Werror` applies only to our own sources under `src/xcode/`; imported
+  Apple/GNU sources predate most modern diagnostics and are exempt.
 
-**Build commands:**
-```sh
-bmake          # Build all 10 tools
-bmake clean    # Remove build/ directory
-bmake install  # Install to PREFIX (default: /opt/xnuports/opt/xcode-tools)
+### 8.2 Output layout
+
+`build/release/` is a drop-in replacement for Xcode's `Developer/` directory,
+and is the product — there is no `install` target and no `PREFIX`.
+
+```
+build/obj/<dir>       per-tool object files
+build/gen/<tool>      build-time generated sources
+build/lib             static libraries
+build/release/
+  usr/{bin,lib,libexec,share}
+  Toolchains/XcodeDefault.xctoolchain/usr/bin
+  Platforms/<P>.platform/Developer/SDKs/<S>.sdk
+  Tools/
 ```
 
-### 8.2 Variables
+### 8.3 Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `BUILD_DIR` | `${.CURDIR}/build` | Build output directory (absolute) |
-| `PREFIX` | `/opt/xnuports/opt/xcode-tools` | Installation prefix |
-| `CC` | `clang` | C compiler (use `:=` not `?=` in top-level) |
-| `DESTDIR` | (empty) | Staged install root |
-
----
+| `TOP` | `${.CURDIR}` | Repository root, passed down to every sub-make |
+| `CC` / `CXX` | `cc -pipe` / `c++` | Compilers |
+| `CFLAGS` | `-O2 -g -Wall -Wno-unused-parameter` | Global C flags |
+| `XCTOOLCHAIN` | `Toolchains/XcodeDefault.xctoolchain` | Toolchain bundle path under `build/release/` |
+| `MK_TOOLCHAIN` | `yes` | Build the binutils tier (cctools, ld64) |
 
 ## 9. Phased Roadmap
 
-### Phase 1: Build & Integrate Existing Sources (Current Priority)
+Five stages, in dependency order. Stage 1 is done; stage 2 is the current work.
 
-Goal: Get all submodule sources to compile and produce working binaries.
+### Stage 1 — Core build system ✅
 
-**Tasks:**
+Port `apple-core`'s `mk/` architecture (section 8) and migrate our ten tools
+onto it. Delivered: one engine, a flat inventory, `build/release/` as a
+drop-in `Developer/` tree, byte-reproducible links, and ten fewer Makefiles.
 
-1. **cctools integration**
-   - Create Makefiles for each tool in `src/dist-dev-tools/cctools/misc/`
-   - Build: ar, nm, lipo, strip, strings, size, otool, vtool, segedit, install_name_tool, bitcode_strip, codesign_allocate, ctf_insert, libtool (Apple variant)
-   - Integrate into top-level Makefile hierarchy
-   - Output to `build/usr/bin/`
+### Stage 2 — Everything buildable today (current)
 
-2. **ld64 integration**
-   - Build `ld` and `ld-classic` from `src/dist-dev-tools/ld64/`
-   - Requires cctools headers as build dependency
+Wire up the submodule sources that `mk/tool.mk` can compile directly. None of
+these need a foreign build system.
 
-3. **developer_cmds integration**
-   - Build: asa, ctags, indent, lorder, rpcgen, unifdef
-   - Each has a `Makefile` or `plist` in its directory
+1. **cctools** — the biggest win.
+   - `libstuff/` (46 `.c`) and `libmacho/` become static libraries in
+     `lib/Makefile`, consumed via `mk/with-libstuff.mk` / `mk/with-libmacho.mk`.
+   - `ar/` and `otool/` are per-program directories — source auto-discovery
+     handles them with no fragment.
+   - `misc/` is the one awkward case: a *flat* directory of ~25 single-file
+     programs (`lipo.c`, `nm.c`, `strip.c`, `vtool.c`, `install_name_tool.c`,
+     `codesign_allocate.c`, …). Auto-discovery would compile them all into one
+     binary, so each needs a one-line `mk/tool.d/<prog>.mk` with
+     `T_SRCS=<prog>.c`.
+   - Installs to `${XCTOOLCHAIN}/usr/bin`.
+2. **ld64** — `ld` and `ld-classic`. C++ across `src/ld/`, `src/mach_o/`,
+   `src/other/`; only ~18 `.c`/`.cpp` files, so an explicit `T_SRCS` is
+   tractable. Needs libstuff and `include/ld-internals` on `CPPFLAGS`.
+3. **developer_cmds** — `asa`, `ctags`, `indent`, `lorder`, `rpcgen`,
+   `unifdef`. Per-program directories; the cleanest fit in the tree.
+4. **headerdoc** — Perl; use `mk/tool.mk`'s `T_SCRIPT` branch.
+5. **PlistBuddy** — flat `.c` directory, one `PROGS+=` line.
+6. **pngcrush** — flat directory with bundled libpng/zlib; needs `T_SRCS`.
+   Note the prebuilt `.o` files committed in that submodule (see
+   `docs/DOCUMENTATION.md` section 4): ignore them, do not clean them.
 
-4. **headerdoc integration**
-   - Build: headerdoc2html, hdxml2manxml
-   - Note: headerdoc is Perl-based (uses `gatherHeaderDoc.pl`)
+### Stage 3 — `.xctoolchain` and `.sdk` bundle emission
 
-5. **dist-dev-tools remaining**
-   - Build: bison, flex, gnumake, gperf, gm4
-   - Integrate tapi (text-based API tool)
-   - CoreOSMakefiles and pb_makefiles are infrastructure, not standalone tools
+The output should be bundles, not a loose bin directory. Formats, as shipped
+by Xcode:
 
-6. **Git integration**
-   - Build git v2.55.0 from `src/git/`
-   - Output: git, git-receive-pack, git-shell, git-upload-archive, git-upload-pack
-   - Requires: openssl, curl, expat, pcre2, etc.
+```
+XcodeDefault.xctoolchain/       MacOSX.sdk/
+├── ToolchainInfo.plist         ├── SDKSettings.plist
+├── usr/                        ├── SDKSettings.json
+└── Developer/                  ├── Entitlements.plist
+                                ├── System/
+                                └── usr/
+```
 
-7. **CPython + python-apple-support integration**
-   - Build CPython 3.14.7 using python-apple-support build system
-   - Output: python3, pip3, pydoc3, 2to3
-   - python-apple-support creates XCFrameworks — may need different install path
+`configs/*.info.ini` are already the INI precursors to those plists, so this is
+an INI→plist conversion plus a layout stage — add `mk/bundle.mk` and a
+`bundles` target. `configs/Makefile` and `scripts/Makefile` are the inputs;
+both currently install into a pre-Developer-layout `PREFIX/Developer/DarwinARM.*`
+shape and are not wired into the build.
 
-8. **pngcrush integration**
-   - Build pngcrush v1.8.1 from `src/pngcrush/`
-   - Uses bundled libpng/zlib — verify licensing
+Emit the skeleton even while sparsely populated: it defines the layout every
+later stage installs into. Populating SDK `System/` and `usr/include` is
+stage 4 of `docs/DOCUMENTATION.md` section 8 and stays out of scope.
 
-9. **PlistBuddy integration**
-   - Already has source in `src/PlistBuddy/`
-   - Build: PlistBuddy
+### Stage 4 — Port the closed-source utilities
 
-10. **Verify toolchain compatibility**
-    - Test that our clang (from llvm-project) can compile our cctools
-    - Test cross-compilation toolchain (configure scripts, etc.)
-    - Verify bmake build of all tools
+Our own BSD-licensed reimplementations, in `src/xcode/`, landing on the same
+`PROGS+=` / `tool.d/` machinery as everything else — no build-system cost.
 
-**Deliverable:** A complete set of command-line tools in `build/usr/bin/` that
-match Apple's toolset (minus the Apple-proprietary tools).
+**The `/usr/bin/xc*` family first**, since it is the most conspicuous gap.
+Enumerated from a stock Xcode `Developer/usr/bin`:
 
-### Phase 2: Missing Xcode Tools (Our Reimplementations)
+| Tool | Status |
+|------|--------|
+| `xcodebuild` | have (orchestration only — no compilation) |
+| `xctrace` | have (stub — no tracing backend) |
+| `xccov` | missing — parse LLVM coverage data, report text/JSON/HTML |
+| `xcresulttool` | missing — bundle/unbundle test results, export attachments |
+| `xcstringstool` | missing — `.xcstrings` catalog processing |
+| `xcsigningtool` | missing — signing identity management, keychain |
+| `xctest` | missing — XCTest bundle runner |
+| `xcdebug` | missing |
+| `xcindex-test` | missing |
+| `xcdevice` | missing |
+| `xcdiagnose` | missing |
 
-Goal: Replace or supplement our 10 tools with more capable versions, or
-implement new tools that Apple hasn't open-sourced.
+Then the rest of section 6 in its existing priority order: `actool`, `momc`,
+`coremlc`, `ibtool`, `stapler`, `agvtool`, `altool`/`iTMSTransporter`.
 
-**Tasks:**
+Also in this stage: deepen the tools we already have — `codesign` CMS/
+certificate signing, `notarytool` history/log/cancel, `devicectl` app install
+and file/log transfer, `simctl` io/push/location.
 
-1. **codesign** — Add CMS-based detached signatures:
-   - Support `codesign -s "Developer ID: ..."` (certificate-based signing)
-   - Implement CMS blob generation (using OpenSSL)
-   - Support `--timestamp` (notarization workflow integration)
-   - Support `--deep` recursive signing
-   - Support `--options=runtime` (hardened runtime)
-   - Support `--preserve-metadata` for re-signing with preserved entitlements
+### Stage 5 — The big submodules
 
-2. **devicectl** — Expand device management:
-   - Add app installation/removal (`devicectl device.app.install`)
-   - Add screen recording/streaming
-   - Add file push/pull (`devicectl device.file`)
-   - Add log streaming (`devicectl device.log`)
-   - Add process management (`devicectl device.process`)
+These cannot be compiled by `mk/tool.mk`. They must be *driven*
+(`configure`/`cmake` → build → stage) and their output installed into the
+stage 3 bundles. They need a second engine — `mk/port.mk`, a ports-style
+configure/build/stage driver with its own `PORTS+=` inventory, alongside
+`tool.mk`.
 
-3. **notarytool** — Full API coverage:
-   - Add `notarytool history`
-   - Add `notarytool log`
-   - Add `notarytool cancel`
-   - Add `--key-path`/`--key-id`/`--issuer` CLI options
-   - Integrate stapling after successful notarization
+| Tree | Build system | Notes |
+|------|--------------|-------|
+| `llvm-project`, `swift` | CMake | clang and swiftc — the headline deliverables |
+| `cpython` (+ `python-apple-support`) | autoconf / own meta-build | |
+| `git` | autoconf + GNU make | |
+| `bison`, `flex`, `gnumake`, `gperf`, `gm4` | GNU autoconf | smallest; best first candidates for the new driver |
+| `objc4` | Xcode project | builds a dylib — needs a *library* target, not a program target |
+| `tapi`, `libgit2` | CMake | |
 
-4. **xctrace** — Real tracing backend:
-   - Integrate with DFR (Device File Relay) or implement via `xctrace record`
-   - Add `xctrace list` (template listing)
-   - Add `--template`, `--device`, `--time-limit` options
-   - Add `xctrace export` with full format support
+Landing llvm/swift is what lets `xcodebuild` stop delegating and actually
+compile (section 4), and what fills `${XCTOOLCHAIN}/usr/bin`.
 
-5. **xcodebuild** — Actual compilation support:
-   - Implement per-file compilation using our clang toolchain
-   - Add proper Xcode project build phase execution
-   - Add `-destination` / `-scheme` / `-configuration` support
-   - Add DerivedData management
-   - Add XCTest integration
-
-### Phase 3: Apple-Proprietary Tools (Reverse Engineering / Reimplement)
-
-Goal: Implement tools that Apple has not open-sourced.
-
-**Priority order (by dependency chain):**
-
-1. **actool** — Asset catalog compiler (critical for iOS/macOS apps)
-   - Parse `.xcassets` directories
-   - Generate compiled asset catalogs (CAR files)
-   - Support AppIcon, Complications, Stickers, etc.
-   - Requires understanding of Apple's binary asset catalog format
-
-2. **momc** — Core Data model compiler
-   - Parse `.xcdatamodeld` directories
-   - Generate `.momd` bundles
-   - Requires understanding of Core Data binary format
-
-3. **coremlc** — Core ML model compiler
-   - Parse `.mlmodel` files
-   - Generate compiled model bundles
-   - Requires understanding of Core ML compilation pipeline
-
-4. **ibtool** — Interface Builder compilation
-   - Parse `.xib`/`.nib`/`.storyboard` files
-   - Generate compiled nib files
-   - Requires AppKit runtime headers (private)
-
-5. **stapler** — Signature stapling
-   - Add App Store receipt + notarization ticket to archives
-   - Requires understanding of CMS ticket format
-
-6. **xcsigningtool** — Signing identity management
-   - List and manage code signing identities
-   - Keychain integration
-
-7. **xctest** — Unit test runner
-   - Execute XCTest test bundles
-   - Report results in XCTest format
-
-8. **xccov** — Coverage reporting
-   - Parse LLVM coverage data
-   - Generate reports (text, JSON, HTML)
-
-9. **xcresulttool** — Test result processing
-   - Bundle and unbundle test results
-   - Export attachments
-
-10. **agvtool** — Version string management
-    - Increment/decrement version numbers
-    - Read/write version info in bundles
-
-11. **altool/iTMSTransporter** — App Store delivery
-    - Validate and upload archives to App Store
-    - Requires App Store Connect API integration
-
-### Phase 4: SDK & Platform Infrastructure
-
-Goal: Create our own SDK bundle to match Apple's Developer directory.
-
-**Tasks:**
-
-1. **SDK directory structure**
-   - Create `Platforms/MacOSX.platform/` (and other platforms)
-   - Create `SDKs/MacOSX.sdk/` (and other SDKs)
-   - Populate with headers and libraries
-
-2. **SDKSettings.plist generation**
-   - Convert INI configs to Apple's property list format
-   - Or keep INI format and have xcrun/xcodebuild convert
-
-3. **Headers**
-   - Copy system headers from macOS SDK
-   - Include toolchain headers (clang, Swift)
-   - Include private framework headers (where open-sourced)
-
-4. **Libraries**
-   - dylib/lib files for SDK linking
-   - Swift runtime libraries
-   - Objective-C runtime (from objc4)
-   - C++ standard library (from libcxx)
-
-5. **Toolchain structure**
-   - Build `Toolchains/XcodeDefault.xctoolchain/` layout
-   - Populate with clang, swiftc, and all toolchain tools
-   - Create toolchain info.plist
-
-6. **Developer directory layout**
-   - `Applications/Simulator.app` (or reference system's)
-   - `Library/Frameworks/` (Python3, XcodeKit — may need Apple's)
-   - `Makefiles/` (from CoreOSMakefiles)
-   - `Tools/` (resource fork tools — currently binary-only)
-   - `usr/bin/` (all our tools)
-   - `usr/lib/` (libraries)
-   - `usr/share/` (documentation, man pages)
-
----
+Reserved knob names for this stage: `MK_LLVM`, `MK_SWIFT`, `MK_PYTHON`,
+`MK_GIT`.
 
 ## 10. Development Workflow
 
 ### Building
 
 ```sh
-# Build all tools
-bmake
+bmake                   # build everything in the inventory
+bmake list-progs        # print the inventory with install locations
+bmake clean             # remove build/
+bmake MK_TOOLCHAIN=no   # skip the binutils tier (cctools, ld64)
+```
 
-# Build a specific tool
-bmake -C src/xcode/<tool-name>
+To build a single program without the whole tree, invoke the engine directly
+the way `src/Makefile` does:
 
-# Clean everything
-bmake clean
-
-# Install (to default PREFIX or custom)
-bmake install
-bmake install PREFIX=/usr/local
+```sh
+bmake -f mk/tool.mk TOP=$PWD T_DIR=xcode/codesign T_PROG=codesign T_BIN=usr/bin
 ```
 
 ### Testing
 
 For codesign specifically (our most tested tool):
-```sh
-# Sign a test binary and verify
-clang test.c -o test_bin
-bmake -C src/xcode/codesign build  # or use codesign from build/usr/bin/
 
-# Verify the signed binary
-codesign --verify --strict build/usr/bin/test_bin
-spctl --assess build/usr/bin/test_bin
+```sh
+cc test.c -o test_bin
+build/release/usr/bin/codesign -f -s - test_bin
+codesign --verify --strict test_bin
 ```
 
 ### Adding a New Tool
 
-1. Create `src/xcode/<tool-name>/` directory
-2. Add source files (`.c` and `.h`)
-3. Create `Makefile` following the template:
-   ```makefile
-   PROG := <tool-name>
-   OBJDIR := $(BUILD_DIR)/obj/$(PROG)
-   BINDIR := $(BUILD_DIR)/usr/bin
-   CC ?= cc
-   CFLAGS := -Wall -Werror -O2
-   SRC := <source files>
-   .for src in $(SRC)
-   $(OBJDIR)/$(src:R).o: $(src)
-       mkdir -p $(OBJDIR)
-       $(CC) -x c $(CFLAGS) -c $(src) -o $@
-   .endfor
-   all: $(BINDIR)/$(PROG)
-   $(BINDIR)/$(PROG): $(OBJ)
-       mkdir -p $(BINDIR)
-       $(CC) $(OBJS) -o $@ $(LFLAGS)
-   clean:
-       rm -rf $(OBJDIR) $(BINDIR)/$(PROG)
-   install: all
-       mkdir -p $(DESTDIR)$(PREFIX)/usr/bin
-       install -m 755 $(BINDIR)/$(PROG) $(DESTDIR)$(PREFIX)/usr/bin/$(PROG)
+1. Put the sources somewhere under `src/`. For our own reimplementations that
+   is `src/xcode/<tool-name>/`; for an imported component it is wherever the
+   submodule already keeps them — do not move or copy them.
+2. Add one line to `mk/progs.mk`:
    ```
-4. Add tool name to `src/xcode/Makefile` SUBDIRS list
-5. Test: `bmake && build/usr/bin/<tool-name> --help`
+   PROGS+=	xcode/<tool-name> <tool-name> usr/bin
+   ```
+   The third field is the path under `build/release/`, mirroring where Xcode
+   ships the tool: `usr/bin`, `usr/libexec`, or `${XCTOOLCHAIN}/usr/bin`.
+3. **Only if it needs flags**, add `mk/tool.d/<tool-name>.mk`. Sources are
+   discovered automatically, so a plain tool needs no fragment at all:
+   ```makefile
+   # what the tool links against, and why
+   .include "${TOP}/mk/with-openssl.mk"
+   T_LDADD+=	-lz -framework Security
+   ```
+   Recognized knobs: `T_SRCS` (override the discovered source list; entries may
+   be TOP-relative paths for sources outside the tool's directory), `T_CFLAGS`,
+   `T_LDADD`, `T_LINKS` (extra hardlinked names), `T_SCRIPT` (install a script
+   instead of compiling), `T_NOBUILD` (skip).
+4. Test: `bmake && build/release/usr/bin/<tool-name> --help`
+
+There is no per-tool Makefile to write, and nothing to register in a `SUBDIRS`
+list.
 
 ### bmake Gotchas
 
@@ -600,30 +554,46 @@ spctl --assess build/usr/bin/test_bin
 |----------|------------------|-------|
 | `$(CURDIR)` | `${.CURDIR}` | Returns absolute path in bmake |
 | `$(shell cmd)` | `VAR != cmd` | Use `!=` for command substitution |
-| `$<` | `$>` or `$(src)` | First prerequisite (empty in bmake explicit rules) |
+| `$<` | `${.IMPSRC}` / name the source | Empty in bmake explicit rules |
 | `%.o: %.c` | `.for` loop | bmake doesn't support path-prefixed patterns |
-| `?=` for CC | `:=` | bmake's default CC is `cc ${PIPE}` |
-
----
+| `?=` for `CC`, `CFLAGS`, `CXXFLAGS` | plain `=` | bmake predefines all three in its own `sys.mk`, so `?=` is silently a no-op |
 
 ## 11. Testing Requirements
 
 Every tool must pass:
 1. **Build test:** `bmake` succeeds without errors or warnings
-2. **Binary verification:** All binaries are valid Mach-O (use `file`)
-3. **Functionality test:** Tools produce expected output for basic operations
-4. **Clean test:** `bmake clean` removes all build artifacts
-5. **Idempotency:** Re-running `bmake` after `bmake clean` produces same binaries
+2. **Inventory test:** every entry in `mk/progs.mk` produces a binary at its
+   declared `build/release/<suffix>/<prog>` path (`bmake list-progs`)
+3. **Binary verification:** all binaries are valid Mach-O (use `file`)
+4. **Functionality test:** tools produce expected output for basic operations
+5. **Clean test:** `bmake clean` removes all build artifacts
+6. **Read-only test:** nothing is written into the source tree or any
+   submodule. After a full build, both of these must be empty:
+   ```sh
+   git status --porcelain
+   git submodule foreach --recursive --quiet 'git status --porcelain'
+   ```
+7. **Reproducibility:** two clean builds of identical sources produce
+   byte-identical binaries. This is section 12 rule 6, and it only holds
+   because of `-Wl,-reproducible` (see section 8.1).
+   ```sh
+   bmake clean && bmake && shasum build/release/usr/bin/* > /tmp/r1
+   bmake clean && bmake && shasum build/release/usr/bin/* > /tmp/r2
+   diff /tmp/r1 /tmp/r2
+   ```
 
 For specific tools:
-- **codesign:** Must pass `codesign --verify --strict` and `spctl --assess`
-- **xcrun:** Must find and execute tools in the Developer directory
-- **xcodebuild:** Must parse `.pbxproj` and `.xcconfig` files correctly
-- **pkgbuild:** Must produce valid `.pkg` archives (test with `pkgutil`)
-- **productbuild:** Must produce valid distribution packages
-- **simctl:** Must list available simulators (requires Xcode Simulator installed)
-
----
+- **codesign:** must pass `codesign --verify --strict`. Note that
+  `spctl --assess` is only meaningful on a machine where Gatekeeper assessment
+  is enabled; check for `override=security disabled` in its output before
+  treating a pass as evidence.
+- **xcrun:** must find and execute tools in the Developer directory
+- **xcodebuild:** must parse `.pbxproj` and `.xcconfig` files correctly
+- **pkgbuild:** must produce valid `.pkg` archives (test with `pkgutil`)
+- **productbuild:** must produce valid distribution packages
+- **simctl:** must list available simulators (requires Xcode Simulator installed)
+- **cctools / ld64:** compare against Apple's counterparts on identical input
+  (`lipo -info`, `otool -h`, `nm`) — the function-to-function parity requirement
 
 ## 12. License Compliance Checklist
 
@@ -651,7 +621,9 @@ All code must comply with these rules:
 | `src/xcode/xcodebuild/plist.c` | Property list parser |
 | `src/xcode/xcrun/xcrun.c` | Tool location and execution |
 | `Makefile` | Top-level bmake build |
-| `src/xcode/Makefile` | Tool iteration |
+| `mk/progs.mk` | The program inventory — add a tool here |
+| `mk/tool.mk` | The per-program build engine |
+| `mk/xcodetools.sys.mk` | Global flags and tier gating |
 | `configs/xcrun.ini` | Default SDK/toolchain config |
 
 ---
@@ -670,11 +642,14 @@ git submodule update --init --recursive
 bmake
 
 # 4. Check results
-ls build/usr/bin/
+bmake list-progs
+ls build/release/usr/bin/
 
 # 5. Clean up
 bmake clean
 ```
+
+`build/release/` is the product; there is no `install` target.
 
 ---
 
