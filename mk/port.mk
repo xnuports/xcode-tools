@@ -20,9 +20,10 @@
 #
 #	P_PROGS		programs to stage, relative to the staged prefix
 #			(default: bin/${P_NAME})
+#	P_BUILDSYS	"autoconf" (default) or "cmake"
 #	P_CONFIGURE	configure script, relative to the source dir
-#			(default: configure)
-#	P_CONFIGURE_ARGS  extra arguments to configure
+#			(autoconf only; default: configure)
+#	P_CONFIGURE_ARGS  extra arguments to configure / cmake
 #	P_MAKE		make(1) to drive the port with (default: make,
 #			which is GNU make on macOS)
 #	P_MAKE_ARGS	extra arguments to make
@@ -44,9 +45,7 @@
 TOP?=		${.CURDIR}
 P_SRCDIR?=	${TOP}/src/${P_DIR}
 P_WORKDIR?=	${TOP}/build/ports/${P_NAME}
-# With P_COPY on, configure and build happen inside the copied tree --
-# that is what "in tree" means for these old autoconf projects.
-P_OBJDIR?=	${P_COPY:tl:Myes:?${P_WORKDIR}/src:${P_WORKDIR}/build}
+
 P_STAGEDIR?=	${P_WORKDIR}/stage
 P_BINDIR?=	${TOP}/build/release/${P_BIN}
 
@@ -56,16 +55,29 @@ sinclude ${TOP}/mk/port.d/${P_NAME}.mk
 
 .MAIN: all
 
+P_BUILDSYS?=		autoconf
 P_CONFIGURE?=		configure
+.if ${P_BUILDSYS:tl} == "cmake"
+# CMake builds out of tree properly, so there is no reason to copy the
+# source, and for a tree the size of LLVM copying is actively wasteful.
+P_COPY?=		no
+P_MAKE?=		ninja
+.else
 P_MAKE?=		make
+.endif
 P_PROGS?=		bin/${P_NAME}
 P_COPY?=		yes
 
 .if ${P_COPY:tl} == "yes"
+# In-tree: configure and build happen inside our private copy, which is
+# what these old autoconf projects require.
 P_BUILDSRC=	${P_WORKDIR}/src
+P_OBJDIR?=	${P_WORKDIR}/src
 P_CONFDEP=	${P_WORKDIR}/.copied
 .else
+# Out-of-tree: build beside the submodule, which stays read-only.
 P_BUILDSRC=	${P_SRCDIR}
+P_OBJDIR?=	${P_WORKDIR}/build
 P_CONFDEP=
 .endif
 
@@ -73,6 +85,10 @@ P_CONFDEP=
 # directory, so that what lands in the release tree is chosen here
 # rather than by the port's own install rules.
 P_PREFIX?=		/usr
+
+# For a CMake port, the directory holding the top-level CMakeLists.txt,
+# relative to the source dir (LLVM keeps its under llvm/).
+P_CMAKE_SRC?=	.
 
 .if defined(P_NOBUILD)
 all clean:
@@ -107,6 +123,14 @@ ${P_WORKDIR}/.copied:
 ${P_WORKDIR}/.configured: ${P_CONFDEP}
 	@mkdir -p ${P_OBJDIR}
 	@${ECHO} "port: configuring ${P_NAME}"
+.if ${P_BUILDSYS:tl} == "cmake"
+	cd ${P_OBJDIR} && cmake -G Ninja ${P_BUILDSRC}/${P_CMAKE_SRC} \
+		-DCMAKE_INSTALL_PREFIX=${P_PREFIX} \
+		-DCMAKE_BUILD_TYPE=Release \
+		${P_CONFIGURE_ARGS} > ${P_WORKDIR}/configure.log 2>&1 || \
+		{ ${ECHO} "port: ${P_NAME}: configure failed, see ${P_WORKDIR}/configure.log"; \
+		  tail -20 ${P_WORKDIR}/configure.log; exit 1; }
+.else
 	cd ${P_OBJDIR} && ${P_BUILDSRC}/${P_CONFIGURE} \
 		--prefix=${P_PREFIX} \
 		--disable-dependency-tracking \
@@ -114,6 +138,7 @@ ${P_WORKDIR}/.configured: ${P_CONFDEP}
 		${P_CONFIGURE_ARGS} > ${P_WORKDIR}/configure.log 2>&1 || \
 		{ ${ECHO} "port: ${P_NAME}: configure failed, see ${P_WORKDIR}/configure.log"; \
 		  tail -20 ${P_WORKDIR}/configure.log; exit 1; }
+.endif
 	@touch ${.TARGET}
 
 # --- build ------------------------------------------------------------
