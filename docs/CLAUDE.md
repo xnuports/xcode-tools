@@ -51,6 +51,7 @@ xcode-tools/
 │   ├── progs.mk                    # the program inventory
 │   ├── tool.mk                     # the per-program engine
 │   ├── tool.d/<program>.mk         # optional per-tool flags
+│   ├── bundle.mk                   # .xctoolchain / .sdk emission
 │   └── with-*.mk                   # reusable link bundles
 ├── lib/
 │   └── Makefile                    # static libs from submodule sources
@@ -90,6 +91,7 @@ xcode-tools/
 │   ├── llvm-project/               # Submodule: LLVM/Clang/LLDB/MLIR/flang/etc.
 │   ├── swift/                      # Submodule: Swift compiler
 │   ├── cctools-helpers/            # OURS: reimplemented libcctoolshelper piece
+│   ├── common/                     # OURS: shared helpers (devpath.c)
 │   └── xcode/                      # OUR reimplemented Xcode tools (10 tools)
 │       ├── codesign/               # ad-hoc signing & verification (7 files)
 │       ├── devicectl/              # device management (2 files)
@@ -585,29 +587,81 @@ Three traps worth remembering:
    `${CC}`.** clang dispatches on suffix so it appeared to work, but C++-only
    flags could not be applied. It now dispatches on suffix explicitly.
 
-### Stage 3 — `.xctoolchain` and `.sdk` bundle emission
+### Stage 3 — `.xctoolchain` and `.sdk` bundle emission ✅
 
-The output should be bundles, not a loose bin directory. Formats, as shipped
-by Xcode:
+`mk/bundle.mk` emits the metadata that makes `build/release/` a Developer
+directory rather than a loose bin tree, via the `bundles` target:
 
 ```
-XcodeDefault.xctoolchain/       MacOSX.sdk/
-├── ToolchainInfo.plist         ├── SDKSettings.plist
-├── usr/                        ├── SDKSettings.json
-└── Developer/                  ├── Entitlements.plist
-                                ├── System/
-                                └── usr/
+Toolchains/XcodeDefault.xctoolchain/ToolchainInfo.plist   Identifier
+Platforms/MacOSX.platform/Info.plist                      platform bundle
+Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/SDKSettings.plist
+usr/share/xcrun.ini                                       xcrun's defaults
 ```
 
-`configs/*.info.ini` are already the INI precursors to those plists, so this is
-an INI→plist conversion plus a layout stage — add `mk/bundle.mk` and a
-`bundles` target. `configs/Makefile` and `scripts/Makefile` are the inputs;
-both currently install into a pre-Developer-layout `PREFIX/Developer/DarwinARM.*`
-shape and are not wired into the build.
+Version, deployment target and default arch are taken from the host SDK so the
+emitted bundle is coherent with what the tools would build against; override
+`XT_SDK_VERSION` and friends to pin them. The SDK is a skeleton — settings but
+no headers or libraries yet — emitted anyway because it defines the layout
+every later stage installs into.
 
-Emit the skeleton even while sparsely populated: it defines the layout every
-later stage installs into. Populating SDK `System/` and `usr/include` is
-stage 4 of `docs/DOCUMENTATION.md` section 8 and stays out of scope.
+The toolchain identifier is deliberately Apple's
+(`com.apple.dt.toolchain.XcodeDefault`): it is the name build systems look up
+to find the default toolchain, so a replacement has to answer to it, exactly as
+our tools have to answer to Apple's argv.
+
+**The tools are now self-locating, and no path is compiled in.**
+`src/xcode/common/devpath.c` derives the Developer directory from the running
+binary's own location (`<developer_dir>/usr/bin/<tool>`), used by `xcrun`,
+`xcodebuild` and `xcode-select` through `mk/with-devpath.mk`. A freshly built
+or relocated `build/release/` therefore works with no configuration and no
+`DEVELOPER_DIR`:
+
+```
+$ build/release/usr/bin/xcrun --find strip
+.../build/release/Toolchains/XcodeDefault.toolchain/usr/bin/strip
+$ build/release/usr/bin/xcrun lipo -info /bin/ls
+Architectures in the fat file: /bin/ls are: x86_64 arm64e
+```
+
+Every `/opt/xnuports/...` path is gone from our sources. The compiled-in
+fallbacks are now `/Library/Developer/CommandLineTools` and
+`/usr/local/etc/xcrun.ini`, consulted only when the self-derived directory is
+not a Developer layout.
+
+**Layout note.** Our `xcrun` still speaks the older layout —
+`<dev>/SDKs/<n>.sdk` and `<dev>/Toolchains/<n>.toolchain`, with `info.ini`
+metadata — while modern Xcode has neither path: SDKs live under `Platforms/`
+and the toolchain is `.xctoolchain`. `bundles` therefore also emits
+compatibility symlinks and an `info.ini` inside each bundle. That is a bridge,
+not the destination: teaching `xcrun` and `xcodebuild` to read
+`SDKSettings.plist` from the Apple layout is stage 4 work. Nothing in Apple's
+tree is displaced by the symlinks.
+
+`configs/` and `scripts/` are now consumed by `bundles` rather than being
+orphaned: `configs/xcrun.ini` seeds the emitted defaults, and the `scripts/`
+shims are installed into the toolchain's `usr/bin`. They resolve `xcrun`
+relative to their own installed location, so they carry no absolute path.
+`configs/Makefile` and `scripts/Makefile` were removed — both were unreachable
+installers keyed to the old `PREFIX`.
+
+Three bugs fell out of making the tree actually usable:
+
+1. **`xcrun` crashed with SIGTRAP on any long `PATH`.** `call_command()` built
+   its environment with `sprintf` into `PATH_MAX` buffers, and the `PATH=`
+   entry appends the caller's entire `PATH` to two absolute directories —
+   over roughly 840 characters it overflowed, which `_FORTIFY_SOURCE` turns
+   into a trap at `-O2` and silent corruption at `-O0`. The entries are now
+   allocated to fit with `asprintf`.
+2. **Uninitialised environment entries.** The same function `malloc`'d slots
+   for `TARGET_TRIPLE` and the deployment target and passed them to `execve`
+   even when neither was set, handing the child garbage. Entries with no value
+   are now simply left out.
+3. **A failing tool vanished silently.** `src/Makefile` prefixes each
+   recursion with `-` so one broken tool does not stop the rest — but nothing
+   then noticed the gap, and a `-Werror` slip removed `xcrun` from the release
+   tree with a clean-looking build. `bmake check` now fails if any inventory
+   entry did not produce its binary.
 
 ### Stage 4 — Port the closed-source utilities
 
@@ -666,11 +720,16 @@ Reserved knob names for this stage: `MK_LLVM`, `MK_SWIFT`, `MK_PYTHON`,
 ### Building
 
 ```sh
-bmake                   # build everything in the inventory
+bmake                   # build everything, then emit the bundles
+bmake check             # verify every inventory entry produced a binary
+bmake bundles           # re-emit the .xctoolchain / .sdk metadata only
 bmake list-progs        # print the inventory with install locations
 bmake clean             # remove build/
 bmake MK_TOOLCHAIN=no   # skip the binutils tier (cctools, ld64)
 ```
+
+Run `bmake check` after any build you care about: `src/Makefile` ignores
+per-tool failures on purpose, so without it a broken tool just disappears.
 
 To build a single program without the whole tree, invoke the engine directly
 the way `src/Makefile` does:
@@ -808,6 +867,8 @@ All code must comply with these rules:
 | `mk/progs.mk` | The program inventory — add a tool here |
 | `mk/tool.mk` | The per-program build engine |
 | `mk/xcodetools.sys.mk` | Global flags and tier gating |
+| `mk/bundle.mk` | Emits the `.xctoolchain` / `.sdk` bundle metadata |
+| `src/xcode/common/devpath.c` | Finds our Developer directory at runtime |
 | `configs/xcrun.ini` | Default SDK/toolchain config |
 
 ---

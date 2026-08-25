@@ -26,6 +26,19 @@ clean:
 .endif
 .endfor
 
+# Every recursion above is prefixed with '-', so one tool failing to
+# build does not stop the rest -- but that also means a broken tool
+# silently vanishes from the release tree.  check-progs is the guard:
+# it fails if any inventory entry did not produce its binary.
+check-progs:
+.for d p b in ${PROGS}
+.if empty(DISABLED_PROGS:M${p})
+	@test -e ${TOP}/build/release/${b}/${p} || \
+		{ ${ECHO} "MISSING: ${b}/${p}  (from src/${d})"; exit 1; }
+.endif
+.endfor
+	@${ECHO} "check: every inventory entry produced a binary"
+
 list-progs:
 .for d p b in ${PROGS}
 .if empty(DISABLED_PROGS:M${p})
@@ -33,4 +46,4 @@ list-progs:
 .endif
 .endfor
 
-.PHONY: all clean list-progs
+.PHONY: all clean check-progs list-progs

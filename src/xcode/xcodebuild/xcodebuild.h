@@ -39,7 +39,7 @@
 #include "plist.h"
 
 #define XCODEBUILD_VERSION "1.0.0"
-#define XCODEBUILD_DEFAULT_DEVELOPER_DIR "/opt/xnuports/opt/xcode-tools/Developer"
+#define XCODEBUILD_DEFAULT_DEVELOPER_DIR "/Library/Developer/CommandLineTools"
 #define SDK_CFG ".xcdev.dat"
 
 /* ------------------------------------------------------------------ */

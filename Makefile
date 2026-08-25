@@ -4,6 +4,8 @@
 #
 # Targets:
 #	all		build every library and program into build/
+#	bundles		emit the .xctoolchain / .sdk bundle metadata
+#	check		verify every inventory entry produced a binary
 #	clean		remove build/ entirely
 #	list-progs	print the tool inventory with release placements
 #
@@ -16,7 +18,7 @@ TOP?=		${.CURDIR}
 
 RELEASE=	${TOP}/build/release
 
-all: dirs lib progs
+all: dirs lib progs bundles
 	@${ECHO} "== xcode-tools build complete =="
 	@${ECHO} "   release tree: ${RELEASE}"
 
@@ -31,10 +33,16 @@ lib:
 progs:
 	${MAKE} -C ${TOP}/src TOP=${TOP}
 
+bundles:
+	${MAKE} -f ${TOP}/mk/bundle.mk TOP=${TOP} bundles
+
+check:
+	${MAKE} -C ${TOP}/src TOP=${TOP} check-progs
+
 list-progs:
 	${MAKE} -C ${TOP}/src TOP=${TOP} list-progs
 
 clean:
 	rm -rf ${TOP}/build
 
-.PHONY: all dirs lib progs list-progs clean
+.PHONY: all dirs lib progs bundles check list-progs clean

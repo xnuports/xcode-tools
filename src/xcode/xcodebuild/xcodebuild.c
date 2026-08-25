@@ -41,11 +41,12 @@
 #include <limits.h>
 
 #include "xcodebuild.h"
+#include "devpath.h"
 #include "ini.h"
 #include "plist.h"
 #include "project.h"
 
-#define XCRUN_DEFAULT_CFG "/opt/xnuports/etc/xcrun.ini"
+#define XCRUN_DEFAULT_CFG "/usr/local/etc/xcrun.ini"
 
 static const char *progname = "xcodebuild";
 
@@ -285,6 +286,18 @@ char *xbuild_get_developer_path(void)
 	}
 
 	struct stat st;
+	/*
+	 * Prefer the Developer directory this binary lives in, so a
+	 * relocated or freshly built release tree works with no
+	 * configuration; the compiled-in system default is the fallback.
+	 */
+	{
+		const char *self = xt_default_developer_dir();
+
+		if (self != NULL)
+			return strdup(self);
+	}
+
 	if (stat(XCODEBUILD_DEFAULT_DEVELOPER_DIR, &st) == 0 && S_ISDIR(st.st_mode))
 		return strdup(XCODEBUILD_DEFAULT_DEVELOPER_DIR);
 
@@ -330,7 +343,20 @@ const char *xbuild_resolve_sdk_name(const xcodebuild_opts *opts, const char *dev
 
 	if (devpath != NULL) {
 		char ini_path[PATH_MAX];
+		{
+			const char *self = xt_default_developer_dir();
+			struct stat cst;
+
+			/* Prefer the copy inside the developer directory. */
+			if (self != NULL) {
+				snprintf(ini_path, sizeof(ini_path),
+					 "%s/usr/share/xcrun.ini", self);
+				if (stat(ini_path, &cst) == 0 && S_ISREG(cst.st_mode))
+					goto have_ini;
+			}
+		}
 		snprintf(ini_path, sizeof(ini_path), "%s", XCRUN_DEFAULT_CFG);
+have_ini:;
 		char name[256] = {0};
 		if (ini_get_value(ini_path, "SDK", "name", name, sizeof(name)) == 1 && name[0]) {
 			snprintf(sdk, sizeof(sdk), "%s", name);

@@ -42,15 +42,16 @@
 #include <sys/types.h>
 
 #include "ini.h"
+#include "devpath.h"
 
 /* General stuff */
 #define TOOL_VERSION "1.0.0"
 #define SDK_CFG ".xcdev.dat"
 #ifndef XCRUN_DEFAULT_CFG
-#define XCRUN_DEFAULT_CFG "/opt/xnuports/etc/xcrun.ini"
+#define XCRUN_DEFAULT_CFG "/usr/local/etc/xcrun.ini"
 #endif
 #ifndef XCRUN_DEFAULT_DEVELOPER_DIR
-#define XCRUN_DEFAULT_DEVELOPER_DIR "/opt/xnuports/opt/xcode-tools/Developer"
+#define XCRUN_DEFAULT_DEVELOPER_DIR "/Library/Developer/CommandLineTools"
 #endif
 
 /* Toolchain configuration struct */
@@ -419,7 +420,21 @@ static char *get_developer_path(void)
 
 		free(cfg_path);
 
-		/* No per-user selection yet: fall back to the distro default. */
+		/*
+		 * No per-user selection yet.  Prefer the Developer directory
+		 * this binary actually lives in -- that keeps a relocated or
+		 * freshly built release tree working with no configuration --
+		 * and only then the compiled-in system default.
+		 */
+		{
+			const char *self = xt_default_developer_dir();
+
+			if (self != NULL) {
+				verbose_printf(stdout, "xcrun: info: using developer path \'%s\' derived from executable location.\n", self);
+				return (char *)self;
+			}
+		}
+
 		if (stat(XCRUN_DEFAULT_DEVELOPER_DIR, &st) == 0 && S_ISDIR(st.st_mode)) {
 			verbose_printf(stdout, "xcrun: info: using default developer path \'%s\'.\n", XCRUN_DEFAULT_DEVELOPER_DIR);
 			return XCRUN_DEFAULT_DEVELOPER_DIR;
@@ -463,6 +478,34 @@ static char *get_toolchain_path(const char *name)
 		free(path);
 		exit(1);
 	}
+}
+
+/**
+ * @func default_cfg_path -- locate xcrun's default configuration
+ *
+ * The release tree is relocatable, so a copy of xcrun.ini inside the
+ * current developer directory takes precedence over the absolute
+ * XCRUN_DEFAULT_CFG baked in at build time.  mk/bundle.mk emits the
+ * former at <developer_dir>/usr/share/xcrun.ini; the compiled-in path
+ * remains the fallback for an installed system copy.
+ *
+ * @return: path to the configuration to read
+ */
+static const char *default_cfg_path(void)
+{
+	static char path[PATH_MAX];
+	struct stat st;
+	char *devpath;
+
+	if ((devpath = get_developer_path()) != NULL) {
+		snprintf(path, sizeof(path), "%s/usr/share/xcrun.ini", devpath);
+		if (stat(path, &st) == 0 && S_ISREG(st.st_mode)) {
+			verbose_printf(stdout, "xcrun: info: using configuration \'%s\'.\n", path);
+			return path;
+		}
+	}
+
+	return XCRUN_DEFAULT_CFG;
 }
 
 /**
@@ -628,10 +671,12 @@ static char *get_target_triple(const char *current_sdk)
  */
 static int call_command(const char *cmd, int argc, char *argv[])
 {
-	int i;
-	char *envp[7] = { NULL };
+	int i, n = 0;
+	char *envp[8];
 	char *target_triple = NULL;
-	char *deployment_target = NULL;
+	const char *deployment_target = NULL;
+	const char *path_env = NULL;
+	const char *home_env = NULL;
 
 	/*
 	 * Pass SDKROOT, PATH, HOME, LD_LIBRARY_PATH, TARGET_TRIPLE, and MACOSX_DEPLOYMENT_TARGET to the called program's environment.
@@ -643,40 +688,59 @@ static int call_command(const char *cmd, int argc, char *argv[])
 	 * > TARGET_TRIPLE is used for clang/clang++ cross compilation when building on a foreign host.
 	 * > {MACOSX|IOS}_DEPLOYMENT_TARGET is used for tools like ld that need to set the minimum compatibility
 	 *   version number for a linked binary.
+	 *
+	 * Each entry is allocated to fit.  These strings concatenate whole
+	 * paths -- PATH in particular appends the caller's entire PATH to two
+	 * absolute directories -- and a fixed PATH_MAX buffer overflows on any
+	 * deeply nested developer directory, which _FORTIFY_SOURCE turns into
+	 * a SIGTRAP.  Entries that have no value are left out rather than
+	 * emitted uninitialised; envp must stay NUL-terminated, so nothing may
+	 * be skipped in the middle.
 	 */
-	envp[0] = (char *)malloc(PATH_MAX - 1);
-	envp[1] = (char *)malloc(PATH_MAX - 1);
-	envp[2] = (char *)malloc(PATH_MAX - 1);
-	envp[3] = (char *)malloc(PATH_MAX - 1);
-	envp[4] = (char *)malloc(64);
-	envp[5] = (char *)malloc(255);
+	memset(envp, 0, sizeof(envp));
 
-	sprintf(envp[0], "SDKROOT=%s", get_sdk_path(current_sdk));
-	sprintf(envp[1], "PATH=%s/usr/bin:%s/usr/bin:%s", developer_dir, get_toolchain_path(current_toolchain), getenv("PATH"));
-	sprintf(envp[2], "LD_LIBRARY_PATH=%s/usr/lib", get_toolchain_path(current_toolchain));
-	sprintf(envp[3], "HOME=%s", getenv("HOME"));
+	path_env = getenv("PATH");
+	home_env = getenv("HOME");
 
-	if ((target_triple = get_target_triple(current_sdk)) != NULL)
-		sprintf(envp[4], "TARGET_TRIPLE=%s", target_triple);
-	else
-		fprintf(stderr, "xcrun: warning: failed to retrieve target triple information for %s.sdk.\n", current_sdk);
+	if (asprintf(&envp[n], "SDKROOT=%s", get_sdk_path(current_sdk)) != (-1))
+		n++;
+	if (asprintf(&envp[n], "PATH=%s/usr/bin:%s/usr/bin:%s", developer_dir,
+		     get_toolchain_path(current_toolchain),
+		     (path_env != NULL) ? path_env : "") != (-1))
+		n++;
+	if (asprintf(&envp[n], "LD_LIBRARY_PATH=%s/usr/lib",
+		     get_toolchain_path(current_toolchain)) != (-1))
+		n++;
+	if (home_env != NULL && asprintf(&envp[n], "HOME=%s", home_env) != (-1))
+		n++;
 
-	if ((deployment_target = getenv("IOS_DEPLOYMENT_TARGET")) != NULL)
-		sprintf(envp[5], "IOS_DEPLOYMENT_TARGET=%s", deployment_target);
-	else if ((deployment_target = getenv("MACOSX_DEPLOYMENT_TARGET")) != NULL)
-		sprintf(envp[5], "MACOSX_DEPLOYMENT_TARGET=%s", deployment_target);
-	else {
+	if ((target_triple = get_target_triple(current_sdk)) != NULL) {
+		if (asprintf(&envp[n], "TARGET_TRIPLE=%s", target_triple) != (-1))
+			n++;
+	} else
+		verbose_printf(stdout, "xcrun: info: no target triple information for %s.sdk.\n", current_sdk);
+
+	if ((deployment_target = getenv("IOS_DEPLOYMENT_TARGET")) != NULL) {
+		if (asprintf(&envp[n], "IOS_DEPLOYMENT_TARGET=%s", deployment_target) != (-1))
+			n++;
+	} else if ((deployment_target = getenv("MACOSX_DEPLOYMENT_TARGET")) != NULL) {
+		if (asprintf(&envp[n], "MACOSX_DEPLOYMENT_TARGET=%s", deployment_target) != (-1))
+			n++;
+	} else {
 		/* Use the deployment target info that is provided by the SDK. */
-		if ((deployment_target = strdup(get_sdk_info(get_sdk_path(current_sdk)).deployment_target)) != NULL) {
-			if (macosx_deployment_target_set == 1)
-				sprintf(envp[5], "MACOSX_DEPLOYMENT_TARGET=%s", deployment_target);
-			else if (ios_deployment_target_set == 1)
-				sprintf(envp[5], "IOS_DEPLOYMENT_TARGET=%s", deployment_target);
-		} else {
-			fprintf(stderr, "xcrun: error: failed to retrieve deployment target information for %s.sdk.\n", current_sdk);
-			exit(1);
+		deployment_target = get_sdk_info(get_sdk_path(current_sdk)).deployment_target;
+		if (deployment_target != NULL) {
+			if (macosx_deployment_target_set == 1) {
+				if (asprintf(&envp[n], "MACOSX_DEPLOYMENT_TARGET=%s", deployment_target) != (-1))
+					n++;
+			} else if (ios_deployment_target_set == 1) {
+				if (asprintf(&envp[n], "IOS_DEPLOYMENT_TARGET=%s", deployment_target) != (-1))
+					n++;
+			}
 		}
 	}
+
+	envp[n] = NULL;
 
 	if (logging_mode == 1) {
 		logging_printf(stdout, "xcrun: info: invoking command:\n\t\"%s", cmd);
@@ -747,7 +811,7 @@ static int request_command(const char *name, int argc, char *argv[])
 		if ((sdk_env = getenv("SDKROOT")) != NULL)
 			stripext(current_sdk, basename(sdk_env));
 		else
-			current_sdk = strdup(get_default_info(XCRUN_DEFAULT_CFG).sdk);
+			current_sdk = strdup(get_default_info(default_cfg_path()).sdk);
 	}
 
 	if (current_toolchain == NULL) {
@@ -755,7 +819,7 @@ static int request_command(const char *name, int argc, char *argv[])
 		if ((toolchain_env = getenv("TOOLCHAINS")) != NULL)
 			stripext(current_toolchain, basename(toolchain_env));
 		else
-			current_toolchain = strdup(get_default_info(XCRUN_DEFAULT_CFG).toolchain);
+			current_toolchain = strdup(get_default_info(default_cfg_path()).toolchain);
 	}
 
 	/* No matter the circumstance, search the developer dir. */
@@ -994,7 +1058,7 @@ static int xcrun_main(int argc, char *argv[])
 		if ((sdk_env = getenv("SDKROOT")) != NULL)
 			stripext(current_sdk, basename(sdk_env));
 		else
-			current_sdk = strdup(get_default_info(XCRUN_DEFAULT_CFG).sdk);
+			current_sdk = strdup(get_default_info(default_cfg_path()).sdk);
 	}
 
 	if (current_toolchain == NULL) {
@@ -1002,7 +1066,7 @@ static int xcrun_main(int argc, char *argv[])
 		if ((toolchain_env = getenv("TOOLCHAINS")) != NULL)
 			stripext(current_toolchain, basename(toolchain_env));
 		else
-			current_toolchain = strdup(get_default_info(XCRUN_DEFAULT_CFG).toolchain);
+			current_toolchain = strdup(get_default_info(default_cfg_path()).toolchain);
 	}
 
 	/* Show SDK path? */

@@ -107,8 +107,11 @@ See `docs/DOCUMENTATION.md` for a comprehensive audit. Key gaps:
 ## Quick Start
 
 ```sh
-# Build everything in the inventory
+# Build everything, then emit the toolchain and SDK bundles
 bmake
+
+# Verify every inventory entry actually produced a binary
+bmake check
 
 # Print the inventory with install locations
 bmake list-progs
@@ -126,6 +129,14 @@ There is no `install` target: `build/release/` is the product.
 build/release/usr/bin                                      our tools
 build/release/Toolchains/XcodeDefault.xctoolchain/usr/bin  cctools, ld64, clang, swiftc
 build/release/Platforms/<P>.platform/Developer/SDKs        SDK bundles
+```
+
+The tools locate their own Developer directory from the running binary, so a
+built or relocated tree works with no configuration:
+
+```sh
+build/release/usr/bin/xcrun --find strip
+build/release/usr/bin/xcrun lipo -info /bin/ls
 ```
 
 Optional tiers:

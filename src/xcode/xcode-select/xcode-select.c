@@ -38,10 +38,12 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
+#include "devpath.h"
+
 #define TOOL_VERSION "1.0.0"
 #define SDK_CFG ".xcdev.dat"
 #ifndef XCRUN_DEFAULT_DEVELOPER_DIR
-#define XCRUN_DEFAULT_DEVELOPER_DIR "/opt/xnuports/opt/xcode-tools/Developer"
+#define XCRUN_DEFAULT_DEVELOPER_DIR "/Library/Developer/CommandLineTools"
 #endif
 
 /**
@@ -132,7 +134,19 @@ static char *get_developer_path(void)
 
 		free(cfg_path);
 
-		/* No per-user selection yet: fall back to the distro default. */
+		/*
+		 * No per-user selection yet.  Prefer the Developer directory
+		 * this binary lives in, so a relocated or freshly built
+		 * release tree works with no configuration, and only then the
+		 * compiled-in system default.
+		 */
+		{
+			const char *self = xt_default_developer_dir();
+
+			if (self != NULL)
+				return (char *)self;
+		}
+
 		if (stat(XCRUN_DEFAULT_DEVELOPER_DIR, &st) == 0 && S_ISDIR(st.st_mode)) {
 			return XCRUN_DEFAULT_DEVELOPER_DIR;
 		}
