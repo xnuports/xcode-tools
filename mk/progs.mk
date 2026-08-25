@@ -73,3 +73,43 @@ PROGS+=	dist-dev-tools/cctools/otool otool-classic ${XCTOOLCHAIN}/usr/bin
 # See docs/CLAUDE.md section 9, stage 2.
 
 .endif # MK_TOOLCHAIN
+
+# ------------------------------------------------------------------
+# developer_cmds (src/dist-dev-tools/developer_cmds).
+#
+# Xcode ships these in XcodeDefault.xctoolchain/usr/bin -- not in
+# Developer/usr/bin, and not to be confused with the system copies in
+# /usr/bin, which are apple-core's territory.  lorder is a shell script.
+# ------------------------------------------------------------------
+PROGS+=	dist-dev-tools/developer_cmds/asa asa ${XCTOOLCHAIN}/usr/bin
+PROGS+=	dist-dev-tools/developer_cmds/ctags ctags ${XCTOOLCHAIN}/usr/bin
+PROGS+=	dist-dev-tools/developer_cmds/indent indent ${XCTOOLCHAIN}/usr/bin
+PROGS+=	dist-dev-tools/developer_cmds/lorder lorder ${XCTOOLCHAIN}/usr/bin
+PROGS+=	dist-dev-tools/developer_cmds/rpcgen rpcgen ${XCTOOLCHAIN}/usr/bin
+PROGS+=	dist-dev-tools/developer_cmds/unifdef unifdef ${XCTOOLCHAIN}/usr/bin
+
+# ------------------------------------------------------------------
+# headerdoc (src/dist-dev-tools/headerdoc) -- Perl, installed as scripts.
+# Xcode ships these in Developer/usr/bin.
+# ------------------------------------------------------------------
+PROGS+=	dist-dev-tools/headerdoc headerdoc2html usr/bin
+PROGS+=	dist-dev-tools/headerdoc/xmlman hdxml2manxml usr/bin
+PROGS+=	dist-dev-tools/headerdoc/xmlman xml2man usr/bin
+PROGS+=	dist-dev-tools/headerdoc/xmlman resolveLinks usr/bin
+PROGS+=	dist-dev-tools/headerdoc gatherheaderdoc usr/bin
+
+# ------------------------------------------------------------------
+# pngcrush (src/pngcrush) -- Developer/usr/bin.  Bundles its own libpng
+# and zlib, so the source list is pinned rather than discovered.
+# ------------------------------------------------------------------
+PROGS+=	pngcrush/pngcrush pngcrush usr/bin
+
+# ------------------------------------------------------------------
+# PlistBuddy (src/PlistBuddy).
+#
+# Note this one is not part of Xcode's Developer directory at all --
+# stock macOS ships it at /usr/libexec/PlistBuddy.  It is carried here
+# because the project added it as a submodule; usr/libexec is the
+# closest match to where the system keeps it.
+# ------------------------------------------------------------------
+PROGS+=	PlistBuddy PlistBuddy usr/libexec

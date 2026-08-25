@@ -220,13 +220,13 @@ These submodules provide source code for tools previously listed as "no source":
 | CreateIPA | App Store | ❌ No source (Apple proprietary) |
 | iphoneos-optimize | Asset | ❌ No source (Apple proprietary) |
 | placeholderutil | App Store | ❌ No source (Apple proprietary) |
-| xml2man | Docs | ❌ No source (Apple proprietary) |
+| xml2man | Docs | ✅ Source: `src/dist-dev-tools/headerdoc/xmlman/` — built |
 | agent, ba-package, ba-serve | Build Assistant | ❌ No source (Apple internal) |
 | backgroundassets-debug | Debug | ❌ No source (Apple internal) |
 | compositeMD5 | Archive | ❌ No source (Apple internal) |
 | convertRichTextToAscii | Conversion | ❌ No source (Apple internal) |
 | filtercalltree | Debug | ❌ No source (Apple internal) |
-| resolveLinks | File | ❌ No source (Apple internal) |
+| resolveLinks | File | ✅ Source: `src/dist-dev-tools/headerdoc/xmlman/` — built |
 | swinfo | File | ❌ No source (Apple internal) |
 | stringdups | File | ❌ No source (Apple internal) |
 | extractLocStrings | Localization | ❌ No source (Apple proprietary) |
@@ -487,20 +487,61 @@ Four things worth knowing, all of them non-obvious:
      emits `SUPPORT_ARCH_riscv32 0` whenever the install dir matches
      `XcodeDefault`.
 
-#### 2b–2f. Remaining (current work)
+#### 2b. developer_cmds, headerdoc, pngcrush, PlistBuddy ✅
 
-1. **ld64** — `ld` and `ld-classic`. C++ across `src/ld/`, `src/mach_o/`,
-   `src/other/`; only ~18 `.c`/`.cpp` files, so an explicit `T_SRCS` is
-   tractable. Needs libstuff and `include/ld-internals` on `CPPFLAGS`, and
-   `create_configure` has to be translated into a generated `configure.h`
-   under `build/gen/ld64/`.
-2. **developer_cmds** — `asa`, `ctags`, `indent`, `lorder`, `rpcgen`,
-   `unifdef`. Per-program directories; the cleanest fit in the tree.
-3. **headerdoc** — Perl; use `mk/tool.mk`'s `T_SCRIPT` branch.
-4. **PlistBuddy** — flat `.c` directory, one `PROGS+=` line.
-5. **pngcrush** — flat directory with bundled libpng/zlib; needs `T_SRCS`.
-   Note the prebuilt `.o` files committed in that submodule (see
-   `docs/DOCUMENTATION.md` section 4): ignore them, do not clean them.
+    ${XCTOOLCHAIN}/usr/bin   asa  ctags  indent  lorder  rpcgen  unifdef
+    usr/bin                  headerdoc2html  hdxml2manxml  gatherheaderdoc
+                             xml2man  resolveLinks  pngcrush
+    usr/libexec              PlistBuddy
+
+Notes:
+
+- **developer_cmds go in the toolchain, not `Developer/usr/bin`.** Xcode ships
+  all six in `XcodeDefault.xctoolchain/usr/bin`. Do not confuse them with the
+  system copies in `/usr/bin`, which belong to apple-core. `lorder` is a shell
+  script, installed via `T_SCRIPT`.
+
+- **`xml2man` and `resolveLinks` are available**, contrary to section 6, which
+  lists `xml2man` as Apple-proprietary and `resolveLinks` as Apple-internal.
+  Both are shipped by Xcode in `Developer/usr/bin` and both build from
+  headerdoc's `xmlman/`. That directory holds three programs plus a
+  `strcompat.c`, so each entry pins `T_SRCS`. `strcompat.c` is excluded
+  deliberately: it defines `strlcpy`/`strlcat`, and headerdoc's own Makefile
+  compiles it only on Linux (`COMPATIBILITY_BITS` is empty on Darwin, where
+  libc has them). All three link `-lxml2`.
+
+- **pngcrush needed two fixes.** libpng's `pngpriv.h` reaches for `<fp.h>`, the
+  Classic Mac OS math header, because `TARGET_OS_MAC` is defined on modern
+  macOS too; its guard skips that include once `<math.h>` has been seen, so
+  `-include math.h` is the fix the header itself anticipates. And `pngrutil.c`
+  calls `png_init_filter_functions_neon` while shipping no `arm/` directory to
+  define it, so `-DPNG_ARM_NEON_OPT=0` turns that path off.
+
+  The bundled zlib is incomplete — `gzguts.h` and every `gz*.c` are missing, so
+  `zutil.c` will not compile, and zlib's own `-DZ_SOLO` switch for a gz-less
+  build then drops `zcalloc`/`zcfree`, which deflate needs. We link the system
+  zlib instead, a configuration pngcrush's own Makefile supports, which also
+  resolves the bundled-vs-system concern in `docs/DOCUMENTATION.md` section 4.
+  `filter_sse2_intrinsics.c` is excluded as x86-only.
+
+  Our pngcrush is *newer* than Apple's: 1.8.1 with libpng 1.6.21 against their
+  1.6.4 with libpng 1.2.7. Output is therefore not byte-identical — ours
+  compresses slightly better — but the decoded images are: same IHDR, and
+  byte-identical raw scanlines. Compare pixels, not file bytes.
+
+- **PlistBuddy is not part of Xcode at all.** Stock macOS ships it at
+  `/usr/libexec/PlistBuddy`; there is no copy in the Developer directory. It is
+  built here because the project carries it as a submodule, installed to
+  `usr/libexec` as the closest match. It links `-framework CoreFoundation`.
+
+#### 2c. ld64 (remaining)
+
+`ld` and `ld-classic`. C++ across `src/ld/`, `src/mach_o/`, `src/other/`; only
+~18 `.c`/`.cpp` files, so an explicit `T_SRCS` is tractable. Needs libstuff and
+`include/ld-internals` on `CPPFLAGS`, and `src/create_configure` has to be
+translated into a generated `configure.h` under `build/gen/ld64/` — note it
+emits `SUPPORT_ARCH_riscv32 0` whenever the install dir matches `XcodeDefault`,
+which is the toolchain we build.
 
 ### Stage 3 — `.xctoolchain` and `.sdk` bundle emission
 

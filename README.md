@@ -7,7 +7,7 @@ identical to Apple's proprietary Xcode Developer tools. All code follows Apple's
 open source releases (APSL/GPL/BSD/Apache where applicable) and our own BSD-licensed
 reimplementations where Apple has not released source.
 
-## Currently Built (25 programs)
+## Currently Built (38 programs)
 
 ### Xcode Command-Line Tools (our reimplementations)
 
@@ -58,6 +58,19 @@ Apple's own: in a stock toolchain `nm` and `otool` are symlinks to `llvm-nm` /
 `libcctoolshelper`, which ships in neither the open-source release nor Xcode
 itself. `src/cctools-helpers/` is our BSD-licensed reimplementation of it, so
 `libtool -ref-l` / `-ref-framework` work; the cctools submodule is untouched.
+
+### Developer Tools (from `src/dist-dev-tools`, `src/pngcrush`, `src/PlistBuddy`)
+
+| Where | Tools |
+|---|---|
+| `Toolchains/XcodeDefault.xctoolchain/usr/bin` | `asa`, `ctags`, `indent`, `lorder`, `rpcgen`, `unifdef` |
+| `usr/bin` | `headerdoc2html`, `hdxml2manxml`, `gatherheaderdoc`, `xml2man`, `resolveLinks`, `pngcrush` |
+| `usr/libexec` | `PlistBuddy` |
+
+Our `pngcrush` is newer than Apple's (1.8.1 / libpng 1.6.21 against their 1.6.4
+/ libpng 1.2.7), so it compresses a little harder; decoded images are
+byte-identical. `PlistBuddy` is not part of Xcode — stock macOS keeps it at
+`/usr/libexec/PlistBuddy` — but is built here since the project carries it.
 
 ### Submodule Components
 
