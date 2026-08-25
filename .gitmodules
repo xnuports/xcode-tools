@@ -42,3 +42,6 @@
 [submodule "lib/dyld"]
 	path = lib/dyld
 	url = https://github.com/xnuports/dyld.git
+[submodule "lib/libdispatch"]
+	path = lib/libdispatch
+	url = https://github.com/xnuports/libdispatch.git
