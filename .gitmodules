@@ -46,5 +46,5 @@
 	path = lib/libdispatch
 	url = https://github.com/xnuports/libdispatch.git
 [submodule "include/apple_internal_sdk"]
-	path = include/apple_internal_sdk
+	path = lib/apple_internal_sdk
 	url = https://github.com/xnuports/apple_internal_sdk.git
