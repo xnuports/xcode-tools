@@ -53,6 +53,7 @@ PROGS+=	dist-dev-tools/cctools/misc codesign_allocate ${XCTOOLCHAIN}/usr/bin
 PROGS+=	dist-dev-tools/cctools/misc ctf_insert ${XCTOOLCHAIN}/usr/bin
 PROGS+=	dist-dev-tools/cctools/misc install_name_tool ${XCTOOLCHAIN}/usr/bin
 PROGS+=	dist-dev-tools/cctools/misc lipo ${XCTOOLCHAIN}/usr/bin
+PROGS+=	dist-dev-tools/cctools/misc libtool ${XCTOOLCHAIN}/usr/bin
 PROGS+=	dist-dev-tools/cctools/misc nm-classic ${XCTOOLCHAIN}/usr/bin
 PROGS+=	dist-dev-tools/cctools/misc nmedit ${XCTOOLCHAIN}/usr/bin
 PROGS+=	dist-dev-tools/cctools/misc segedit ${XCTOOLCHAIN}/usr/bin
@@ -63,12 +64,12 @@ PROGS+=	dist-dev-tools/cctools/misc vtool ${XCTOOLCHAIN}/usr/bin
 PROGS+=	dist-dev-tools/cctools/ar ar ${XCTOOLCHAIN}/usr/bin
 PROGS+=	dist-dev-tools/cctools/otool otool-classic ${XCTOOLCHAIN}/usr/bin
 
-# libtool (and ranlib, which a stock toolchain ships as a symlink to it)
-# are NOT listed: libtool.c calls make_obj_file_with_linker_options(),
-# which lives in Apple's libcctoolshelper.  That library and its
-# <mach-o/cctools_helpers.h> appear neither in the open-source drop nor
-# in a shipped Xcode -- they are build-time-only Apple internals.  The
-# same library is why strip is built without -DTRIE_SUPPORT.
+# libtool builds against src/cctools-helpers/, our reimplementation of
+# make_obj_file_with_linker_options() -- the one thing libtool.c needs
+# from Apple's unpublished libcctoolshelper.  ranlib is the same binary
+# and comes from T_LINKS in mk/tool.d/libtool.mk.
+#
+# The same missing library is why strip is built without -DTRIE_SUPPORT.
 # See docs/CLAUDE.md section 9, stage 2.
 
 .endif # MK_TOOLCHAIN

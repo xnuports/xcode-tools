@@ -7,7 +7,7 @@ identical to Apple's proprietary Xcode Developer tools. All code follows Apple's
 open source releases (APSL/GPL/BSD/Apache where applicable) and our own BSD-licensed
 reimplementations where Apple has not released source.
 
-## Currently Built (24 programs)
+## Currently Built (25 programs)
 
 ### Xcode Command-Line Tools (our reimplementations)
 
@@ -46,17 +46,18 @@ Built and installed to `Toolchains/XcodeDefault.xctoolchain/usr/bin`, matching
 where Xcode ships them:
 
 `ar`, `bitcode_strip`, `codesign_allocate`, `ctf_insert`, `install_name_tool`,
-`lipo`, `nm-classic`, `nmedit`, `otool-classic`, `segedit`, `size-classic`
-(plus `size`), `strings`, `strip`, `vtool`
+`libtool` (plus `ranlib`), `lipo`, `nm-classic`, `nmedit`, `otool-classic`,
+`segedit`, `size-classic` (plus `size`), `strings`, `strip`, `vtool`
 
-Output is verified byte-for-byte against Apple's counterparts. The `-classic`
-names are Apple's own: in a stock toolchain `nm` and `otool` are symlinks to
-`llvm-nm` / `llvm-otool`, with the cctools builds shipped alongside as
-`nm-classic` and `otool-classic`.
+Output is verified against Apple's counterparts. The `-classic` names are
+Apple's own: in a stock toolchain `nm` and `otool` are symlinks to `llvm-nm` /
+`llvm-otool`, with the cctools builds shipped alongside as `nm-classic` and
+`otool-classic`.
 
-`libtool` and `ranlib` are not yet built — they need
-`make_obj_file_with_linker_options()` from Apple's `libcctoolshelper`, which
-ships in neither the open-source release nor Xcode itself.
+`libtool` needs `make_obj_file_with_linker_options()` from Apple's
+`libcctoolshelper`, which ships in neither the open-source release nor Xcode
+itself. `src/cctools-helpers/` is our BSD-licensed reimplementation of it, so
+`libtool -ref-l` / `-ref-framework` work; the cctools submodule is untouched.
 
 ### Submodule Components
 

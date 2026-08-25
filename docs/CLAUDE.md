@@ -61,6 +61,7 @@ xcode-tools/
 ├── scripts/                        # Toolchain shim scripts (stage 3 input)
 ├── xctoolchain/                    # Submodule: Xcode toolchain configurations
 ├── include/
+│   ├── mach-o/                     # OURS: headers Apple references but never shipped
 │   └── ld-internals/               # Submodule: ld64 private headers
 ├── src/
 │   ├── Makefile                    # .for loop over mk/progs.mk
@@ -88,6 +89,7 @@ xcode-tools/
 │   ├── pngcrush/                   # Submodule: pngcrush v1.8.1
 │   ├── llvm-project/               # Submodule: LLVM/Clang/LLDB/MLIR/flang/etc.
 │   ├── swift/                      # Submodule: Swift compiler
+│   ├── cctools-helpers/            # OURS: reimplemented libcctoolshelper piece
 │   └── xcode/                      # OUR reimplemented Xcode tools (10 tools)
 │       ├── codesign/               # ad-hoc signing & verification (7 files)
 │       ├── devicectl/              # device management (2 files)
@@ -397,11 +399,11 @@ these need a foreign build system.
 
 #### 2a. cctools ✅
 
-14 programs build and install to `${XCTOOLCHAIN}/usr/bin`:
+15 programs build and install to `${XCTOOLCHAIN}/usr/bin`:
 
     ar   bitcode_strip   codesign_allocate   ctf_insert   install_name_tool
-    lipo   nm-classic   nmedit   otool-classic   segedit   size-classic (+size)
-    strings   strip   vtool
+    libtool (+ranlib)   lipo   nm-classic   nmedit   otool-classic
+    segedit   size-classic (+size)   strings   strip   vtool
 
 `libstuff` (46 sources) and `libmacho` build as static libraries in
 `lib/Makefile`; consumers pull them in via `mk/with-libstuff.mk` and
@@ -418,19 +420,52 @@ Four things worth knowing, all of them non-obvious:
    `nm` and `otool` for llvm-project in stage 5. `nmedit` is `strip.c`
    recompiled with `-DNMEDIT` — cctools has no `nmedit.c`.
 
-2. **`libtool` and `ranlib` are blocked.** `libtool.c` calls
+2. **`libtool` needed a reimplemented Apple helper.** `libtool.c` calls
    `make_obj_file_with_linker_options()`, declared in
    `<mach-o/cctools_helpers.h>` and defined in `libcctoolshelper`. Neither the
    header nor the library appears in the open-source drop *or* in a shipped
    Xcode — they are build-time-only Apple internals, statically linked into
-   Apple's binaries. `ranlib` is the same binary as `libtool`, dispatched on
-   `argv[0]`, so it is blocked too. Unblocking them means reimplementing that
-   function: it emits a Mach-O object carrying `LC_LINKER_OPTION` load
-   commands for `-reflibs`/`-reffw`. That is stage 4 work.
+   Apple's binaries.
 
-   The same library is why `strip` is built without `-DTRIE_SUPPORT`, which
-   `strip.xcconfig` sets for macOS/Xcode builds: the guarded code includes the
-   same missing header. `strip` is otherwise complete.
+   `src/cctools-helpers/` is our BSD-licensed reimplementation, with the
+   declaration in `include/mach-o/cctools_helpers.h` so `libtool.c` compiles
+   unmodified. It writes an `MH_OBJECT` holding one `LC_LINKER_OPTION` per
+   requested library and framework, which libtool adds to the archive as
+   `__ALWAYS_LOAD.o`; the linker force-loads that member and resolves the
+   references. The encoding ld64 accepts is exactly two shapes
+   (`src/ld/Resolver.cpp`): one string `-lNAME`, or the pair `-framework`,
+   `NAME`. Anything else draws "unknown linker option from object file
+   ignored".
+
+   Two things that cost time and are worth knowing:
+   - An `MH_OBJECT` must carry a segment load command even with no sections.
+     Without one ld64 rejects it with "missing LC_SEGMENT file ... for
+     architecture", so the generated object emits a single empty segment.
+   - A framework resolved this way does not appear in `otool -L` unless a
+     symbol from it is actually used — ld does not record an unused dylib. Test
+     it by referencing a symbol without passing `-framework`, not by looking
+     for the load command.
+
+   `ranlib` is the same binary dispatched on `argv[0]`, and comes from
+   `T_LINKS` in `mk/tool.d/libtool.mk`.
+
+   Note that Apple's *shipped* `libtool` and `ranlib` are not this program at
+   all — their usage text is entirely different, and the source is in neither
+   cctools nor ld64. Like `nm` and `otool`, Apple has replaced them with a
+   newer, unpublished implementation. Ours is the cctools one, which builds
+   working archives.
+
+   A defect in the published `libtool.c` is worth recording: `add_member()`
+   skips the `stat()` that fills a member's `ar_hdr` when the member is named
+   `__ALWAYS_LOAD.o` (line 1974), and nothing else fills it, so that member
+   lands in the archive with an uninitialised mode, uid/gid and date. It is
+   metadata only — the linker reads members from the archive image and links
+   fine — but an extracted `__ALWAYS_LOAD.o` is unreadable until chmod'd. We
+   do not patch it, since submodules are never edited.
+
+   `libcctoolshelper` is also why `strip` is built without `-DTRIE_SUPPORT`,
+   which `strip.xcconfig` sets for macOS/Xcode builds: the guarded code
+   includes the same missing header. `strip` is otherwise complete.
 
 3. **`CODEDIRECTORY_SUPPORT` is deliberately off.** Apple enables it for macOS
    and Xcode builds, but it links `libcodedirectory.dylib`, a closed Apple
