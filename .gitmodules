@@ -26,9 +26,6 @@
 	path = src/cpython
 	url = https://github.com/python/cpython.git
 	branch = 3.14
-[submodule "src/git"]
-	path = src/git
-	url = https://github.com/apple-oss-distributions/Git.git
 [submodule "src/pngcrush"]
 	path = src/pngcrush
 	url = https://github.com/xnuports/pngcrush.git
@@ -57,3 +54,6 @@
 [submodule "src/bmake"]
 	path = src/bmake
 	url = https://github.com/xnuports/bmake.git
+[submodule "src/git"]
+	path = src/git
+	url = https://github.com/git/git.git
