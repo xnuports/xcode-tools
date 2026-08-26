@@ -9,6 +9,8 @@
 # hardware, no tests, no docs, no examples, no bindings.  A full LLVM
 # build is otherwise far larger than this tree needs.
 
+TAPI_PATCHES!=	ls ${TOP}/mk/patches/tapi/*.patch 2>/dev/null || true
+
 P_BUILDSYS=	cmake
 P_CMAKE_SRC=	llvm
 
@@ -70,6 +72,13 @@ ${P_WORKDIR}/tapi-src/.patched:
 		${TOP}/mk/scripts/tapi-linker-flag-shim.cmake
 	@cd ${P_WORKDIR}/tapi-src && ${TOP}/mk/scripts/tapi-fix-diagnostics.sh
 	@cd ${P_WORKDIR}/tapi-src && ${TOP}/mk/scripts/tapi-modernize-llvm-api.sh
+# Patches come last, so they are written against the post-script tree.
+# These are the changes the scripts cannot honestly express: real edits
+# rather than renames.  bmake does not glob in .for, hence the != here.
+.for pt in ${TAPI_PATCHES}
+	@cd ${P_WORKDIR}/tapi-src && patch -s -p1 --forward < ${pt} && \
+		${ECHO} "  applied ${pt:T}"
+.endfor
 	@touch ${.TARGET}
 
 # Not a dependency of .configured while tapi is disabled; run it by hand

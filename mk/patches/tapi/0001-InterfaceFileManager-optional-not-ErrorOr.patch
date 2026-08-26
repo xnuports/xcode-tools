@@ -1,0 +1,37 @@
+InterfaceFileManager: treat the FileManager result as optional, not ErrorOr
+
+clang's FileManager::getFile returned an ErrorOr, so tapi asks the result
+for .getError().  The modern spelling, getOptionalFileRef, returns a
+CustomizableOptional instead, which has no such member -- so this cannot
+be handled by the mechanical renames in
+mk/scripts/tapi-modernize-llvm-api.sh and needs the error handling
+restructured.
+
+readFile still has to return an Expected, so the lost error code is
+replaced with the one the old path would have produced for a missing
+file.  shouldWrite only tested the error to decide "not there yet", which
+is exactly what the optional's own emptiness says.
+
+Applies after mk/scripts/tapi-modernize-llvm-api.sh has renamed getFile.
+
+--- a/lib/Core/InterfaceFileManager.cpp
++++ b/lib/Core/InterfaceFileManager.cpp
+@@ -36,7 +36,8 @@
+                                                 const ReadFlags flags) {
+   auto file = _fm.getOptionalFileRef(path);
+   if (!file)
+-    return errorCodeToError(file.getError());
++    return errorCodeToError(
++        std::make_error_code(std::errc::no_such_file_or_directory));
+ 
+   auto bufferOrErr = _fm.getBufferForFile(*file,
+                                           /*RequiresNullTerminator=*/true,
+@@ -68,7 +69,7 @@
+                                   const InterfaceFile *file,
+                                   FileType fileType) const {
+   auto existingFile = _fm.getOptionalFileRef(path);
+-  if (auto err = existingFile.getError())
++  if (!existingFile)
+     return WriteAction::NewFile;
+ 
+   auto bufferOrErr = _fm.getBufferForFile(*existingFile,
