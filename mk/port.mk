@@ -49,12 +49,23 @@
 #			copying and before configure -- the ports-style
 #			post-extract step.  Requires P_COPY (the default),
 #			since it modifies the tree.
+#	P_POST_STAGE	shell command run inside the source tree after
+#			the port's install step completes.  The staged
+#			prefix is at ${P_STAGEDIR}${P_PREFIX}.  Use this
+#			to move files the port installed to non-standard
+#			locations (e.g. bmake's mk files).
 #	P_NOSTAGE	set to any value to skip the install step and take
 #			P_PROGS straight out of the build directory.  For
 #			a project like LLVM, whose install writes gigabytes
 #			of headers and libraries we do not ship, running it
 #			just to copy a dozen binaries is pure waste.
 #	P_NOBUILD	set to any value to turn the entry into a no-op
+#	P_NO_AUTOTOOLS_FLAGS
+#			set to "yes" to suppress the --disable-dependency-
+#			tracking and --disable-nls flags that port.mk
+#			adds to every autoconf configure.  Needed for
+#			projects whose configure does not recognise them
+#			(e.g. bmake).
 
 TOP?=		${.CURDIR}
 P_SRCDIR?=	${TOP}/src/${P_DIR}
@@ -72,6 +83,17 @@ sinclude ${TOP}/mk/port.d/${P_NAME}.mk
 
 P_BUILDSYS?=		autoconf
 P_CONFIGURE?=		configure
+P_NO_AUTOTOOLS_FLAGS?=	no
+
+# Compute the autotools flags at parse time so they can be used
+# inside recipes without .if (which passes literally to the shell
+# when tab-indented inside a recipe).
+.if ${P_NO_AUTOTOOLS_FLAGS:tl} == "yes"
+_AUTOTOOLS_FLAGS?=
+.else
+_AUTOTOOLS_FLAGS?=	--disable-dependency-tracking --disable-nls
+.endif
+
 .if ${P_BUILDSYS:tl} == "cmake"
 # CMake builds out of tree properly, so there is no reason to copy the
 # source, and for a tree the size of LLVM copying is actively wasteful.
@@ -165,8 +187,7 @@ ${P_WORKDIR}/.configured: ${P_CONFDEP}
 .else
 	cd ${P_OBJDIR} && ${P_BUILDSRC}/${P_CONFIGURE} \
 		--prefix=${P_PREFIX} \
-		--disable-dependency-tracking \
-		--disable-nls \
+		${_AUTOTOOLS_FLAGS} \
 		${P_CONFIGURE_ARGS} > ${P_WORKDIR}/configure.log 2>&1 || \
 		{ ${ECHO} "port: ${P_NAME}: configure failed, see ${P_WORKDIR}/configure.log"; \
 		  tail -20 ${P_WORKDIR}/configure.log; exit 1; }
@@ -186,10 +207,14 @@ ${P_WORKDIR}/.built: ${P_WORKDIR}/.configured
 
 ${P_WORKDIR}/.staged: ${P_WORKDIR}/.built
 	@${ECHO} "port: staging ${P_NAME}"
-	cd ${P_OBJDIR} && ${P_MAKE} install DESTDIR=${P_STAGEDIR} \
+	cd ${P_OBJDIR} && ${P_MAKE} ${P_MAKE_ARGS} install DESTDIR=${P_STAGEDIR} \
 		> ${P_WORKDIR}/stage.log 2>&1 || \
 		{ ${ECHO} "port: ${P_NAME}: stage failed, see ${P_WORKDIR}/stage.log"; \
 		  tail -20 ${P_WORKDIR}/stage.log; exit 1; }
+.if defined(P_POST_STAGE)
+	@${ECHO} "port: post-stage ${P_NAME}"
+	@cd ${P_BUILDSRC} && ${P_POST_STAGE}
+.endif
 	@touch ${.TARGET}
 
 # Verifying here rather than in ports/Makefile, because only this file

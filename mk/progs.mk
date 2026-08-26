@@ -119,3 +119,14 @@ PROGS+=	pngcrush/pngcrush pngcrush usr/bin
 # closest match to where the system keeps it.
 # ------------------------------------------------------------------
 PROGS+=	PlistBuddy PlistBuddy usr/libexec
+
+# ------------------------------------------------------------------
+# bsdmake (src/bsdmake/) -- Apple's BSD make.
+#
+# Xcode ships this as Developer/usr/bin/bsdmake.  Its own Makefile
+# depends on <bsd.prog.mk> and the full BSD make include chain, so
+# we compile it directly via mk/tool.mk with an explicit source list.
+# The mk/ files it ships are copied into usr/share/mk/ by the
+# tool fragment (mk/tool.d/bsdmake.mk).
+# ------------------------------------------------------------------
+PROGS+=	bsdmake bsdmake usr/bin

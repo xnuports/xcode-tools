@@ -29,11 +29,11 @@ work against a stock Xcode with no configuration at all. `xcrun --show-sdk-path`
 `--show-sdk-version` and `--find` match Apple's output exactly when pointed at
 one.
 
-**43 programs** build: 39 compiled directly, 4 through their own build systems.
+**44 programs** build: 40 compiled directly, 4 through their own build systems.
 
 | Where | What |
 |---|---|
-| `usr/bin` | our 10 reimplementations, plus headerdoc, pngcrush, `xml2man`, `resolveLinks`, `make`/`gnumake` |
+| `usr/bin` | our 10 reimplementations, plus headerdoc, pngcrush, `xml2man`, `resolveLinks`, `make`/`gnumake`, `bsdmake`, `bmake` |
 | `Toolchains/XcodeDefault.xctoolchain/usr/bin` | `clang`/`clang++`/`cc`/`c++`/`cpp`, `ld`, the cctools set, the llvm-* tools, `dsymutil`, developer_cmds, `flex`, `gperf` |
 | `Toolchains/XcodeDefault.xctoolchain/usr/lib` | `libtapi.dylib`, clang's resource directory |
 | `usr/libexec` | `PlistBuddy` |
@@ -130,7 +130,7 @@ Two clean builds of the default set produce byte-identical binaries.
 |---|---|
 | `src/xcode/` | our reimplementations (BSD-3-Clause) |
 | `src/xcode/common/` | shared helpers: plist parsers, SDK discovery, self-location |
-| `src/` | source submodules — `distribution-Developer_Tools` (cctools, ld64, tapi, …), llvm-project, swift, cpython, git |
+| `src/` | source submodules — `distribution-Developer_Tools` (cctools, ld64, tapi, …), llvm-project, swift, cpython, git, bmake, bsdmake |
 | `lib/` | library submodules — corecrypto, dyld, libplatform, libdispatch, `apple_internal_sdk` |
 | `include/` | headers vendored where the SDK ships none |
 | `mk/` | the build system |
@@ -157,7 +157,7 @@ Submodules track upstream rather than forks: llvm-project and swift from
 swiftlang, the Apple components from apple-oss-distributions (corecrypto from
 `apple/corecrypto`), CPython from python/cpython — each pinned to a release tag
 or branch. Currently clang 21.1.6 (`swift-6.3.3-RELEASE`), ld64 957.1, cctools
-1035.1.102, tapi 1600.0.11.8.
+1035.1.102, tapi 1600.0.11.8, bmake mk-20260808, bsdmake bsdmake-24.
 
 A few submodules stay on xnuports forks — `apple_internal_sdk`, `ld-internals`,
 `PlistBuddy`, `pngcrush`, `python-apple-support` — because they carry local

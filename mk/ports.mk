@@ -26,6 +26,23 @@ PORTS+=	distribution-Developer_Tools/gnumake gnumake usr/bin
 # ------------------------------------------------------------------
 PORTS+=	llvm-project llvm ${XCTOOLCHAIN}/usr/bin
 
+# ------------------------------------------------------------------
+# bmake -- the build system itself.  Ships as usr/bin/bmake with
+# its mk files in usr/share/bmake/mk/.  Autoconf build.
+#
+# Note: bmake is what drives this project's own build, so the
+# *system* bmake builds our bmake port.  The staged binary ends
+# up in the release tree alongside bsdmake and gnumake.
+# ------------------------------------------------------------------
+PORTS+=	bmake bmake usr/bin
+
+# ------------------------------------------------------------------
+# bsdmake -- Apple's BSD make, carried as a submodule at src/bsdmake/.
+# Built via mk/tool.mk (not mk/port.mk) because its Makefile depends
+# on <bsd.prog.mk> and friends, which are the very files it ships.
+# See mk/tool.d/bsdmake.mk.
+# ------------------------------------------------------------------
+
 # gm4 and bison are NOT enabled.  Both restore their missing gnulib
 # templates fine (mk/port.d/), but then their bundled gnulib -- which
 # predates the modern SDK by two decades -- substitutes its own
