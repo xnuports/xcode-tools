@@ -43,6 +43,7 @@
 
 #include "ini.h"
 #include "devpath.h"
+#include "sdkpath.h"
 
 /* General stuff */
 #define TOOL_VERSION "1.0.0"
@@ -324,19 +325,34 @@ static int default_cfg_handler(void *user, const char *section, const char *name
 static toolchain_config get_toolchain_info(const char *path)
 {
 	toolchain_config config;
-	char *info_path = NULL;
+	char info_path[PATH_MAX];
+	char *identifier;
 
-	info_path = (char *)malloc(PATH_MAX - 1);
-	sprintf(info_path, "%s/info.ini", path);
+	memset(&config, 0, sizeof(config));
 
-	if (ini_parse(info_path, toolchain_cfg_handler, &config) != (-1)) {
-		free(info_path);
+	/*
+	 * A stock toolchain describes itself with ToolchainInfo.plist, whose
+	 * only key is a reverse-DNS Identifier.  Take the last component as
+	 * the name, which is what our callers print, and fall through to
+	 * info.ini for a toolchain in the older layout.
+	 */
+	if ((identifier = xt_toolchain_identifier(path)) != NULL) {
+		char *last = strrchr(identifier, '.');
+
+		config.name = strdup(last != NULL ? last + 1 : identifier);
+		config.version = strdup("");
+		free(identifier);
 		return config;
-	} else {
-		fprintf(stderr, "xcrun: error: failed to retrieve toolchain info from '\%s\'. (errno=%s)\n", info_path, strerror(errno));
-		free(info_path);
-		exit(1);
 	}
+
+	snprintf(info_path, sizeof(info_path), "%s/info.ini", path);
+
+	if (ini_parse(info_path, toolchain_cfg_handler, &config) != (-1))
+		return config;
+
+	fprintf(stderr, "xcrun: error: failed to retrieve toolchain info from '%s'. (errno=%s)\n",
+		path, strerror(errno));
+	exit(1);
 }
 
 /**
@@ -347,19 +363,53 @@ static toolchain_config get_toolchain_info(const char *path)
 static sdk_config get_sdk_info(const char *path)
 {
 	sdk_config config;
-	char *info_path = NULL;
+	char info_path[PATH_MAX];
+	char *value;
 
-	info_path = (char *)malloc(PATH_MAX - 1);
-	sprintf(info_path, "%s/info.ini", path);
+	memset(&config, 0, sizeof(config));
 
-	if (ini_parse(info_path, sdk_cfg_handler, &config) != (-1)) {
-		free(info_path);
+	/*
+	 * Prefer SDKSettings.plist, which is what a stock SDK carries -- in
+	 * binary form there, XML in one we emit; sdkpath.c handles both.
+	 * An SDK in the older layout still answers through info.ini.
+	 */
+	if ((value = xt_sdk_setting(path, "Version")) != NULL) {
+		config.version = value;
+
+		if ((value = xt_sdk_setting(path, "CanonicalName")) != NULL) {
+			/* "macosx26.5" -- the name is the leading alphabetic run. */
+			size_t n = strcspn(value, "0123456789");
+			char *name = strndup(value, n);
+
+			config.name = (name != NULL) ? name : strdup(value);
+			free(value);
+		} else {
+			config.name = strdup("");
+		}
+
+		value = xt_sdk_setting(path, "DefaultDeploymentTarget");
+		config.deployment_target = (value != NULL) ? value : strdup("");
+
+		/*
+		 * Neither of these appears in SDKSettings.plist.  The
+		 * toolchain is a property of the Developer directory rather
+		 * than of the SDK, and the architecture comes from the host
+		 * or from -arch.
+		 */
+		config.toolchain = strdup("");
+		config.default_arch = strdup("");
+
 		return config;
-	} else {
-		fprintf(stderr, "xcrun: error: failed to retrieve sdk info from '\%s\'. (errno=%s)\n", info_path, strerror(errno));
-		free(info_path);
-		exit(1);
 	}
+
+	snprintf(info_path, sizeof(info_path), "%s/info.ini", path);
+
+	if (ini_parse(info_path, sdk_cfg_handler, &config) != (-1))
+		return config;
+
+	fprintf(stderr, "xcrun: error: failed to retrieve sdk info from '%s'. (errno=%s)\n",
+		path, strerror(errno));
+	exit(1);
 }
 
 /**
@@ -367,16 +417,77 @@ static sdk_config get_sdk_info(const char *path)
  * @arg path - path to xcrun.ini
  * @return: struct containing default config info
  */
+/* Defined below, once get_developer_path() is available. */
+static const char *default_cfg_path(void);
+
 static default_config get_default_info(const char *path)
 {
 	default_config config;
 
-	if (ini_parse(path, default_cfg_handler, &config) != (-1))
-		return config;
-	else {
-		fprintf(stderr, "xcrun: error: failed to retrieve default info from '\%s\'. (errno=%s)\n", path, strerror(errno));
-		exit(1);
+	memset(&config, 0, sizeof(config));
+
+	/*
+	 * A missing configuration is not an error: a Developer directory we
+	 * did not build -- a stock Xcode, say -- has no xcrun.ini, and the
+	 * defaults can be discovered from its layout instead.  See
+	 * default_sdk_name() and default_toolchain_name().
+	 */
+	(void)ini_parse(path, default_cfg_handler, &config);
+
+	return config;
+}
+
+/**
+ * @func default_sdk_name -- SDK to use when none was requested
+ *
+ * The configured default wins; failing that, any SDK present in the
+ * Developer directory does, which is what lets xcrun work against a
+ * stock Xcode with no configuration of ours in it at all.
+ *
+ * @return: SDK name, or NULL when the directory holds none
+ */
+static char *default_sdk_name(void)
+{
+	default_config config = get_default_info(default_cfg_path());
+	char *name;
+
+	if (config.sdk != NULL && *config.sdk != '\0')
+		return strdup(config.sdk);
+
+	if ((name = xt_first_sdk_name(developer_dir)) != NULL) {
+		verbose_printf(stdout, "xcrun: info: no configured sdk; using \'%s\'.\n", name);
+		return name;
 	}
+
+	fprintf(stderr, "xcrun: error: no sdk configured and none found in '%s'.\n",
+		developer_dir != NULL ? developer_dir : "(unset)");
+	exit(1);
+}
+
+/**
+ * @func default_toolchain_name -- toolchain to use when none was requested
+ *
+ * As above, with XcodeDefault as the last resort: it is the name a stock
+ * toolchain carries, and the one our own bundles emit.
+ *
+ * @return: toolchain name
+ */
+static char *default_toolchain_name(void)
+{
+	default_config config = get_default_info(default_cfg_path());
+	char *path;
+
+	if (config.toolchain != NULL && *config.toolchain != '\0')
+		return strdup(config.toolchain);
+
+	if ((path = xt_find_toolchain(developer_dir, "XcodeDefault")) != NULL) {
+		free(path);
+		return strdup("XcodeDefault");
+	}
+
+	fprintf(stderr, "xcrun: error: no toolchain configured and none found in '%s'.\n",
+		developer_dir != NULL ? developer_dir : "(unset)");
+	exit(1);
 }
 
 /**
@@ -459,25 +570,19 @@ static char *get_developer_path(void)
 static char *get_toolchain_path(const char *name)
 {
 	char *path = NULL;
-	char *devpath = NULL;
 
-	devpath = developer_dir;
-	path = (char *)malloc(PATH_MAX - 1);
-
-	if (devpath != NULL) {
-		sprintf(path, "%s/Toolchains/%s.toolchain", devpath, name);
-		if (validate_directory_path(path) != (-1))
-			return path;
-		else {
-			fprintf(stderr, "xcrun: error: \'%s\' is not a valid toolchain path.\n", path);
-			free(path);
-			exit(1);
-		}
-	} else {
+	if (developer_dir == NULL) {
 		fprintf(stderr, "xcrun: error: failed to retrieve developer path, do you have it set?\n");
-		free(path);
 		exit(1);
 	}
+
+	/* Apple's <name>.xctoolchain first, then the older <name>.toolchain. */
+	if ((path = xt_find_toolchain(developer_dir, name)) != NULL)
+		return path;
+
+	fprintf(stderr, "xcrun: error: \'%s\' is not a valid toolchain name in \'%s\'.\n",
+		name, developer_dir);
+	exit(1);
 }
 
 /**
@@ -516,25 +621,22 @@ static const char *default_cfg_path(void)
 static char *get_sdk_path(const char *name)
 {
 	char *path = NULL;
-	char *devpath = NULL;
 
-	devpath = developer_dir;
-	path = (char *)malloc(PATH_MAX - 1);
-
-	if (devpath != NULL) {
-		sprintf(path, "%s/SDKs/%s.sdk", devpath, name);
-		if (validate_directory_path(path) != (-1))
-			return path;
-		else {
-			fprintf(stderr, "xcrun: error: \'%s\' is not a valid sdk path.\n", path);
-			free(path);
-			exit(1);
-		}
-	} else {
+	if (developer_dir == NULL) {
 		fprintf(stderr, "xcrun: error: failed to retrieve developer path, do you have it set?\n");
-		free(path);
 		exit(1);
 	}
+
+	/*
+	 * Apple keeps SDKs inside their platform bundle; the older flat
+	 * <dev>/SDKs/<name>.sdk is still accepted.  See sdkpath.c.
+	 */
+	if ((path = xt_find_sdk(developer_dir, name)) != NULL)
+		return path;
+
+	fprintf(stderr, "xcrun: error: \'%s\' is not a valid sdk name in \'%s\'.\n",
+		name, developer_dir);
+	exit(1);
 }
 
 /**
@@ -811,7 +913,7 @@ static int request_command(const char *name, int argc, char *argv[])
 		if ((sdk_env = getenv("SDKROOT")) != NULL)
 			stripext(current_sdk, basename(sdk_env));
 		else
-			current_sdk = strdup(get_default_info(default_cfg_path()).sdk);
+			current_sdk = default_sdk_name();
 	}
 
 	if (current_toolchain == NULL) {
@@ -819,7 +921,7 @@ static int request_command(const char *name, int argc, char *argv[])
 		if ((toolchain_env = getenv("TOOLCHAINS")) != NULL)
 			stripext(current_toolchain, basename(toolchain_env));
 		else
-			current_toolchain = strdup(get_default_info(default_cfg_path()).toolchain);
+			current_toolchain = default_toolchain_name();
 	}
 
 	/* No matter the circumstance, search the developer dir. */
@@ -1058,7 +1160,7 @@ static int xcrun_main(int argc, char *argv[])
 		if ((sdk_env = getenv("SDKROOT")) != NULL)
 			stripext(current_sdk, basename(sdk_env));
 		else
-			current_sdk = strdup(get_default_info(default_cfg_path()).sdk);
+			current_sdk = default_sdk_name();
 	}
 
 	if (current_toolchain == NULL) {
@@ -1066,7 +1168,7 @@ static int xcrun_main(int argc, char *argv[])
 		if ((toolchain_env = getenv("TOOLCHAINS")) != NULL)
 			stripext(current_toolchain, basename(toolchain_env));
 		else
-			current_toolchain = strdup(get_default_info(default_cfg_path()).toolchain);
+			current_toolchain = default_toolchain_name();
 	}
 
 	/* Show SDK path? */
@@ -1077,7 +1179,8 @@ static int xcrun_main(int argc, char *argv[])
 
 	/* Show SDK version? */
 	if (ssdkv_f == 1) {
-		printf("%s SDK version %s\n", get_sdk_info(get_sdk_path(current_sdk)).name, get_sdk_info(get_sdk_path(current_sdk)).version);
+		/* Apple's xcrun prints the bare version and nothing else. */
+		printf("%s\n", get_sdk_info(get_sdk_path(current_sdk)).version);
 		exit(0);
 	}
 

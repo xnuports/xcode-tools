@@ -866,6 +866,23 @@ build/release/usr/bin/codesign -f -s - test_bin
 codesign --verify --strict test_bin
 ```
 
+### Keeping README.md current
+
+**Every commit that adds a tool, a port, or a user-visible feature updates
+`README.md` in the same commit.** Not afterwards, not in a batch later.
+
+`README.md` is the only file that answers "what does this project build today",
+and it is worthless the moment it stops being true. The specific things that go
+stale fastest:
+
+- the program and port counts, and the table of what lands where
+- the "What is missing" list, when something stops missing
+- the build instructions, when a target or tier knob changes
+
+`bmake list-progs` and `bmake list-ports` print the current inventory, and
+`bmake check` will tell you whether the tree actually contains what the README
+claims.
+
 ### Adding a New Tool
 
 1. Put the sources somewhere under `src/`. For our own reimplementations that

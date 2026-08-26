@@ -65,6 +65,24 @@ typedef struct plist_node {
  * Xcode project plists) or NULL on failure. */
 plist_node *plist_parse(const char *text, size_t len);
 
+/* Parse an Apple XML property list -- SDKSettings.plist and friends --
+ * into the same node tree, so plist_dict_get() works on either dialect.
+ * Implemented in xmlplist.c. */
+plist_node *plist_parse_xml(const char *text, size_t len);
+
+/* True when a buffer looks like XML rather than a NextSTEP plist. */
+int plist_looks_like_xml(const char *text, size_t len);
+
+/* Parse an Apple binary property list (bplist00), which is what a real
+ * Xcode SDK ships, into the same node tree.  Implemented in bplist.c. */
+plist_node *plist_parse_binary(const char *text, size_t len);
+
+/* True when a buffer carries the bplist00 magic. */
+int plist_looks_like_binary(const char *text, size_t len);
+
+/* Parse whichever of the three dialects the buffer holds. */
+plist_node *plist_parse_any(const char *text, size_t len);
+
 /* Release every allocation owned by a parsed plist tree. */
 void plist_free(plist_node *node);
 

@@ -42,6 +42,7 @@
 
 #include "xcodebuild.h"
 #include "devpath.h"
+#include "sdkpath.h"
 #include "ini.h"
 #include "plist.h"
 #include "project.h"
@@ -362,24 +363,16 @@ have_ini:;
 			snprintf(sdk, sizeof(sdk), "%s", name);
 			return sdk;
 		}
-		char sdks[PATH_MAX];
-		snprintf(sdks, sizeof(sdks), "%s/SDKs", devpath);
-		DIR *d = opendir(sdks);
-		if (d != NULL) {
-			struct dirent *e;
-			while ((e = readdir(d)) != NULL) {
-				if (endswith(e->d_name, ".sdk")) {
-					snprintf(sdk, sizeof(sdk), "%s", e->d_name);
-					char *dot = strstr(sdk, ".sdk");
-					if (dot) *dot = '\0';
-					closedir(d);
-					return sdk;
-				}
-			}
-			closedir(d);
+		/* Platform-aware, and prefers the host's SDK. */
+		char *found = xt_first_sdk_name(devpath);
+
+		if (found != NULL) {
+			snprintf(sdk, sizeof(sdk), "%s", found);
+			free(found);
+			return sdk;
 		}
 	}
-	snprintf(sdk, sizeof(sdk), "DarwinARM");
+	snprintf(sdk, sizeof(sdk), "MacOSX");
 	return sdk;
 }
 
@@ -403,15 +396,39 @@ const char *xbuild_resolve_toolchain_name(const xcodebuild_opts *opts, const cha
 	}
 
 	if (devpath != NULL && sdkname != NULL) {
-		char sdk_path[PATH_MAX];
-		snprintf(sdk_path, sizeof(sdk_path), "%s/SDKs/%s.sdk", devpath, sdkname);
+		char *sdk_path = xt_find_sdk(devpath, sdkname);
 		char name[256] = {0};
-		if (ini_get_value(sdk_path, "SDK", "toolchain", name, sizeof(name)) == 1 && name[0]) {
-			snprintf(tc, sizeof(tc), "%s", name);
+
+		/*
+		 * An SDK in the older layout names its toolchain in info.ini.
+		 * SDKSettings.plist has no equivalent: in Apple's layout the
+		 * toolchain belongs to the Developer directory, not the SDK.
+		 */
+		if (sdk_path != NULL) {
+			int got = ini_get_value(sdk_path, "SDK", "toolchain",
+						name, sizeof(name));
+
+			free(sdk_path);
+			if (got == 1 && name[0]) {
+				snprintf(tc, sizeof(tc), "%s", name);
+				return tc;
+			}
+		}
+	}
+
+	/* XcodeDefault is the name a stock toolchain carries, and the one
+	 * our own bundles emit. */
+	if (devpath != NULL) {
+		char *path = xt_find_toolchain(devpath, "XcodeDefault");
+
+		if (path != NULL) {
+			free(path);
+			snprintf(tc, sizeof(tc), "XcodeDefault");
 			return tc;
 		}
 	}
-	snprintf(tc, sizeof(tc), "%s", sdkname ? sdkname : "DarwinARM");
+
+	snprintf(tc, sizeof(tc), "%s", sdkname ? sdkname : "XcodeDefault");
 	return tc;
 }
 

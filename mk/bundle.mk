@@ -48,7 +48,7 @@ XT_DEFAULT_ARCH!=	uname -m 2>/dev/null || echo arm64
 XT_TOOLCHAIN_ID?=	com.apple.dt.toolchain.XcodeDefault
 XT_PLATFORM_ID?=	com.apple.platform.macosx
 
-bundles: bundle-dirs bundle-toolchain bundle-platform bundle-sdk bundle-compat bundle-shims bundle-config bundle-aliases
+bundles: bundle-dirs bundle-toolchain bundle-platform bundle-sdk bundle-shims bundle-config bundle-aliases
 	@${ECHO} "== bundles emitted =="
 	@${ECHO} "   toolchain: ${XCTOOLCHAIN} (${XT_TOOLCHAIN_ID})"
 	@${ECHO} "   sdk:       ${XT_SDK}.sdk ${XT_SDK_VERSION} (${XT_SDK_CANONICAL})"
@@ -58,8 +58,7 @@ bundle-dirs:
 	  Platforms/${XT_PLATFORM}.platform/Developer/SDKs/${XT_SDK}.sdk/usr/include \
 	  Platforms/${XT_PLATFORM}.platform/Developer/SDKs/${XT_SDK}.sdk/usr/lib \
 	  Platforms/${XT_PLATFORM}.platform/Developer/SDKs/${XT_SDK}.sdk/System/Library/Frameworks \
-	  Platforms/${XT_PLATFORM}.platform/Developer/Library \
-	  SDKs Toolchains
+	  Platforms/${XT_PLATFORM}.platform/Developer/Library
 	@mkdir -p ${RELEASE}/${d}
 .endfor
 
@@ -84,7 +83,7 @@ ${RELEASE}/usr/share/xcrun.ini: ${CONFIGS}/xcrun.ini
 
 # --- toolchain --------------------------------------------------------
 
-bundle-toolchain: ${TC_DIR}/ToolchainInfo.plist ${TC_DIR}/info.ini
+bundle-toolchain: ${TC_DIR}/ToolchainInfo.plist
 
 ${TC_DIR}/ToolchainInfo.plist:
 	@mkdir -p ${.TARGET:H}
@@ -97,17 +96,6 @@ ${TC_DIR}/ToolchainInfo.plist:
 	  echo '	<string>${XT_TOOLCHAIN_ID}</string>'; \
 	  echo '</dict>'; \
 	  echo '</plist>'; \
-	} > ${.TARGET}
-
-# info.ini is our own xcrun's metadata format.  It sits inside the
-# bundle so that xcrun keeps resolving while it still speaks the older
-# layout; teaching xcrun to read ToolchainInfo.plist is stage 4.
-${TC_DIR}/info.ini:
-	@mkdir -p ${.TARGET:H}
-	@{ \
-	  echo '[TOOLCHAIN]'; \
-	  echo 'name = ${XT_TOOLCHAIN}'; \
-	  echo 'version = ${XT_SDK_VERSION}'; \
 	} > ${.TARGET}
 
 # --- platform ---------------------------------------------------------
@@ -145,7 +133,7 @@ ${PLATFORM_DIR}/Info.plist:
 
 # --- sdk --------------------------------------------------------------
 
-bundle-sdk: ${SDK_DIR}/SDKSettings.plist ${SDK_DIR}/info.ini
+bundle-sdk: ${SDK_DIR}/SDKSettings.plist
 
 ${SDK_DIR}/SDKSettings.plist:
 	@mkdir -p ${.TARGET:H}
@@ -189,75 +177,35 @@ ${SDK_DIR}/SDKSettings.plist:
 	  echo '</plist>'; \
 	} > ${.TARGET}
 
-${SDK_DIR}/info.ini:
-	@mkdir -p ${.TARGET:H}
-	@{ \
-	  echo '[SDK]'; \
-	  echo 'name = ${XT_SDK}'; \
-	  echo 'version = ${XT_SDK_VERSION}'; \
-	  echo 'toolchain = ${XT_TOOLCHAIN}'; \
-	  echo 'default_arch = ${XT_DEFAULT_ARCH}'; \
-	  echo 'macosx_deployment_target = ${XT_DEPLOYMENT_TARGET}'; \
-	} > ${.TARGET}
-
-# --- compatibility ----------------------------------------------------
-#
-# Our xcrun still looks for <dev>/SDKs/<name>.sdk and
-# <dev>/Toolchains/<name>.toolchain with an info.ini inside.  Modern
-# Xcode has neither path -- SDKs live under Platforms/ and the toolchain
-# is .xctoolchain -- so these symlinks bridge the two until xcrun learns
-# the Apple layout (stage 4).  They are additive: nothing in Apple's
-# tree is displaced.
-
-bundle-compat: bundle-dirs bundle-sdk bundle-toolchain
-	@ln -sfn ../Platforms/${XT_PLATFORM}.platform/Developer/SDKs/${XT_SDK}.sdk \
-		${RELEASE}/SDKs/${XT_SDK}.sdk
-	@ln -sfn ${XT_TOOLCHAIN}.xctoolchain \
-		${RELEASE}/Toolchains/${XT_TOOLCHAIN}.toolchain
-
-# --- Apple's tool aliases ---------------------------------------------
-#
-# A stock toolchain points nm and otool at the LLVM implementations,
-# keeping the cctools builds beside them as nm-classic and otool-classic
-# (which is how mk/progs.mk installs ours).  Recreate those two links
-# once the llvm port has supplied the targets; without it the names are
-# simply absent rather than wrong.
-
-bundle-aliases: bundle-dirs
-.for a t in nm llvm-nm otool llvm-otool
-	@if [ -e ${TC_DIR}/usr/bin/${t} ] && [ ! -e ${TC_DIR}/usr/bin/${a} ]; then \
-		ln -sfn ${t} ${TC_DIR}/usr/bin/${a}; \
-		${ECHO} "alias: ${a} -> ${t}"; \
-	 fi
-.endfor
-
 # --- toolchain shims --------------------------------------------------
 #
-# scripts/ holds cc/c++/cpp/clang wrappers that drive the real compiler
-# through xcrun.  They locate xcrun relative to their own installed
-# location, so they are copied verbatim -- no path rewriting needed.
+# A stock toolchain ships cc and c++ as symlinks to clang and cpp as a
+# small script, so that is what we emit.  The cc/c++/clang wrapper
+# scripts this project carried before existed only because there was no
+# real clang to point at; the llvm port supplies one now, and a wrapper
+# that resolves its tool with "xcrun -find $0" would find itself.
 #
-# A shim is only installed when no real tool of that name is present.
-# `bundles` runs after `ports`, so once the llvm port has installed a
-# genuine clang, dropping the clang shim on top of it would be actively
-# harmful: the shim resolves its tool with "xcrun -find $0", which would
-# find the shim itself and recurse.  Real tools win; shims fill gaps.
+# Nothing is overwritten: a name a port already provided is left alone.
 
 SHIM_BIN=	${TC_DIR}/usr/bin
 
 bundle-shims: bundle-dirs
-.for s in cc c++ cpp clang
 	@mkdir -p ${SHIM_BIN}
+.for s in cc c++
 	@if [ -e ${SHIM_BIN}/${s} ]; then \
 		${ECHO} "shim: ${s} already provided by a port, not overwriting"; \
-	 else \
-		cp ${SCRIPTS}/${s}.sh ${SHIM_BIN}/${s} && chmod 755 ${SHIM_BIN}/${s}; \
+	 elif [ -e ${SHIM_BIN}/clang ]; then \
+		ln -sfn clang ${SHIM_BIN}/${s}; \
 	 fi
 .endfor
-	@[ -e ${SHIM_BIN}/clang++ ] || ln -sfn clang ${SHIM_BIN}/clang++
+	@[ -e ${SHIM_BIN}/clang++ ] || [ ! -e ${SHIM_BIN}/clang ] || \
+		ln -sfn clang ${SHIM_BIN}/clang++
+	@if [ ! -e ${SHIM_BIN}/cpp ]; then \
+		cp ${SCRIPTS}/cpp.sh ${SHIM_BIN}/cpp && chmod 755 ${SHIM_BIN}/cpp; \
+	 fi
 	@mkdir -p ${RELEASE}/usr/bin
 	@cp ${SCRIPTS}/xcrun-tool.sh ${RELEASE}/usr/bin/xcrun-tool
 	@chmod 755 ${RELEASE}/usr/bin/xcrun-tool
 
 .PHONY: bundles bundle-dirs bundle-toolchain bundle-platform bundle-sdk \
-	bundle-compat bundle-shims bundle-config bundle-aliases
+	bundle-shims bundle-config bundle-aliases

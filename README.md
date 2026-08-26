@@ -1,153 +1,157 @@
 xcode-tools
 ===========
-An open source reimplementation of Apple's Xcode command-line developer tools.
 
-Our goal is to produce a fully open-source SDK bundle that is function-to-function
-identical to Apple's proprietary Xcode Developer tools. All code follows Apple's
-open source releases (APSL/GPL/BSD/Apache where applicable) and our own BSD-licensed
-reimplementations where Apple has not released source.
+An open-source reimplementation of Apple's Xcode command-line developer tools.
 
-## Currently Built (38 programs)
+The goal is a `build/release/` tree that can stand in for
+`/Applications/Xcode.app/Contents/Developer` — the same layout, the same tool
+names, the same behaviour — built entirely from open source. Everything follows
+Apple's own releases (APSL/GPL/BSD/Apache as applicable), with BSD-licensed
+reimplementations of our own where Apple has published nothing.
 
-### Xcode Command-Line Tools (our reimplementations)
+## State
 
-| Tool | Lines of Code | Status |
-|------|--------------|--------|
-| **codesign** | ~2,500 lines (7 files) | Ad-hoc signing & verification complete |
-| **devicectl** | ~650 lines (2 files) | Device listing, pairing, basic management |
-| **notarytool** | ~1,200 lines (6 files) | App notarization via Apple API |
-| **pkgbuild** | ~900 lines (6 files) | Package (.pkg) creation with xar/BOM/payload |
-| **productbuild** | ~1,100 lines (7 files) | Product archive creation from distribution XML |
-| **simctl** | ~700 lines (4 files) | Simulator listing, creation, boot/shutdown |
-| **xcode-select** | ~250 lines (1 file) | Developer directory selection |
-| **xcodebuild** | ~1,200 lines (6 files) | Build orchestration, project parsing, SDK resolution |
-| **xcrun** | ~400 lines (3 files) | Tool locator and executor with SDK/toolchain support |
-| **xctrace** | ~400 lines (4 files) | Trace recording and export (stub) |
+A working C and C++ toolchain builds and links real programs today:
 
-Build system: **bmake** (BSD make), with one generic engine driven by an
-inventory — the same architecture as the sibling
-[apple-core](https://github.com/xnuports/apple-core) project:
-
-```
-Makefile → src/Makefile → mk/tool.mk   (once per entry in mk/progs.mk)
+```sh
+clang -isysroot $SDK -arch arm64 -c hello.c -o hello.o
+ld -o hello hello.o -lSystem -syslibroot $SDK -arch arm64 \
+   -platform_version macos 26.0 26.0
+./hello
 ```
 
-`mk/progs.mk` lists every program as `<src-dir> <program> <install-suffix>`;
-`mk/tool.mk` builds it; `mk/tool.d/<program>.mk` carries any per-tool flags.
-Sources belonging to submodules are compiled in place, read-only — nothing is
-ever written inside a submodule.
+— our clang, our ld64, our libtapi reading the SDK's `.tbd` stubs, and the
+result inspectable with our own `otool-classic`, `nm-classic` and `size-classic`.
 
-Build artifacts go to `build/`, and `build/release/` is a drop-in replacement for
-Xcode's `Developer/` directory.
+`xcrun` and `xcodebuild` read Apple's layout directly: they find SDKs inside
+platform bundles, parse `SDKSettings.plist` in binary, XML or NextSTEP form, and
+work against a stock Xcode with no configuration at all. `xcrun --show-sdk-path`,
+`--show-sdk-version` and `--find` match Apple's output exactly when pointed at
+one.
 
-### Binary Tools (from `src/dist-dev-tools/cctools`)
+**43 programs** build: 39 compiled directly, 4 through their own build systems.
 
-Built and installed to `Toolchains/XcodeDefault.xctoolchain/usr/bin`, matching
-where Xcode ships them:
-
-`ar`, `bitcode_strip`, `codesign_allocate`, `ctf_insert`, `install_name_tool`,
-`libtool` (plus `ranlib`), `lipo`, `nm-classic`, `nmedit`, `otool-classic`,
-`segedit`, `size-classic` (plus `size`), `strings`, `strip`, `vtool`
-
-Output is verified against Apple's counterparts. The `-classic` names are
-Apple's own: in a stock toolchain `nm` and `otool` are symlinks to `llvm-nm` /
-`llvm-otool`, with the cctools builds shipped alongside as `nm-classic` and
-`otool-classic`.
-
-`libtool` needs `make_obj_file_with_linker_options()` from Apple's
-`libcctoolshelper`, which ships in neither the open-source release nor Xcode
-itself. `src/cctools-helpers/` is our BSD-licensed reimplementation of it, so
-`libtool -ref-l` / `-ref-framework` work; the cctools submodule is untouched.
-
-### Developer Tools (from `src/dist-dev-tools`, `src/pngcrush`, `src/PlistBuddy`)
-
-| Where | Tools |
+| Where | What |
 |---|---|
-| `Toolchains/XcodeDefault.xctoolchain/usr/bin` | `asa`, `ctags`, `indent`, `lorder`, `rpcgen`, `unifdef` |
-| `usr/bin` | `headerdoc2html`, `hdxml2manxml`, `gatherheaderdoc`, `xml2man`, `resolveLinks`, `pngcrush` |
+| `usr/bin` | our 10 reimplementations, plus headerdoc, pngcrush, `xml2man`, `resolveLinks`, `make`/`gnumake` |
+| `Toolchains/XcodeDefault.xctoolchain/usr/bin` | `clang`/`clang++`/`cc`/`c++`/`cpp`, `ld`, the cctools set, the llvm-* tools, `dsymutil`, developer_cmds, `flex`, `gperf` |
+| `Toolchains/XcodeDefault.xctoolchain/usr/lib` | `libtapi.dylib`, clang's resource directory |
 | `usr/libexec` | `PlistBuddy` |
+| `Platforms/`, `Toolchains/` | emitted `.sdk` and `.xctoolchain` bundle metadata |
 
-Our `pngcrush` is newer than Apple's (1.8.1 / libpng 1.6.21 against their 1.6.4
-/ libpng 1.2.7), so it compresses a little harder; decoded images are
-byte-identical. `PlistBuddy` is not part of Xcode — stock macOS keeps it at
-`/usr/libexec/PlistBuddy` — but is built here since the project carries it.
+The SDK is a skeleton: it carries settings but no headers or libraries yet, so
+building against *our* SDK does not work — point `-isysroot` at Apple's for now.
+Populating it is the next major piece.
 
-### Submodule Components
+### Our own reimplementations
 
-| Component | Source Path | Description | Coverage |
-|-----------|-------------|-------------|----------|
-| **llvm-project** | `src/llvm-project/` | LLVM/Clang/LLDB/MLIR | C/C++/ObjC compiler, LLVM tools |
-| **swift** | `src/swift/` | Swift compiler | swiftc, swift-frontend, SPM, SourceKit |
-| **objc4** | `src/objc4/` | Objective-C runtime | Runtime library |
-| **pngcrush** | `src/pngcrush/` | PNG optimization | pngcrush v1.8.1 |
-| **dist-dev-tools** | `src/dist-dev-tools/` | Apple open-source dev tools (nested submodules) | cctools, ld64, bison, flex, gnumake, gperf, developer_cmds, headerdoc, tapi, pb_makefiles |
-| **git** | `src/git/` | Git v2.55.0 | git, git-receive-pack, git-shell, etc. |
-| **cpython** | `src/cpython/` | CPython 3.14.7 | python3, pip3, pydoc3, 2to3 |
-| **python-apple-support** | `src/python-apple-support/` | Python build system for Apple platforms | XCFramework packaging, cross-platform builds |
-| **PlistBuddy** | `src/PlistBuddy/` | Plist manipulation tool | Property list editing |
-| **xctoolchain** | `xctoolchain/` | Xcode toolchain configs | Build configurations |
-| **ld-internals** | `include/ld-internals/` | Apple linker internals | ld64 private APIs |
+`codesign` (ad-hoc signing, passes `codesign --verify --strict`), `xcrun`,
+`xcodebuild`, `xcode-select`, `pkgbuild`, `productbuild`, `simctl`,
+`notarytool`, `devicectl`, `xctrace` (stub).
 
-## Missing Tools vs. Full Xcode
+Also `make_obj_file_with_linker_options()`, reimplemented from scratch because
+Apple ships neither the source nor the library (`libcctoolshelper`) that
+`libtool` needs.
 
-See `docs/DOCUMENTATION.md` for a comprehensive audit. Key gaps:
+## Building
 
-- **Asset compilation:** No `actool` (asset catalogs), `TextureAtlas`, `copypng`
-- **Interface Builder:** No `ibtool`/`ibtoold` (nib/xib compilation)
-- **App Store delivery:** No `altool`, `iTMSTransporter`, `ipatool`
-- **Core ML:** No `coremlc` (model compilation)
-- **Core Data:** No `momc` (model compilation)
-- **File resources:** No `Rez`/`DeRez`/`SetFile`/`GetFileInfo`
-- **Debugging:** No `leaks`, `vmmap`, `atos`, `symbols`
-- **Code signing:** No certificate-based or CMS signing (ad-hoc only)
-- **Swift toolchain:** Swift submodule available but not yet built/integrated
-- **SDKs:** No iOS, watchOS, tvOS, visionOS, or macOS SDKs
-- **Not yet built:** LLVM toolchain (clang, swiftc), dist-dev-tools (ar, strip, lipo, otool, ld, bison, flex), Python, Git, pngcrush — sources available in submodules but not yet integrated into bmake build
-
-## Quick Start
+Requires Xcode (or the Command Line Tools) and `bmake`.
 
 ```sh
-# Build everything, then emit the toolchain and SDK bundles
+git clone --recurse-submodules https://github.com/xnuports/xcode-tools.git
+cd xcode-tools
+git submodule update --init --recursive
 bmake
-
-# Verify every inventory entry actually produced a binary
-bmake check
-
-# Print the inventory with install locations
-bmake list-progs
-
-# Output lands in build/release/, laid out like Xcode's Developer/
-ls build/release/usr/bin/
-
-# Clean build artifacts
-bmake clean
+bmake check        # verify every inventory entry produced a binary
 ```
 
-There is no `install` target: `build/release/` is the product.
-
-```
-build/release/usr/bin                                      our tools
-build/release/Toolchains/XcodeDefault.xctoolchain/usr/bin  cctools, ld64, clang, swiftc
-build/release/Platforms/<P>.platform/Developer/SDKs        SDK bundles
-```
-
-The tools locate their own Developer directory from the running binary, so a
-built or relocated tree works with no configuration:
+Everything lands in `build/release/`. There is no `install` target — the
+release tree *is* the product, and the tools locate their own Developer
+directory from the running binary, so a built or moved tree works with no
+configuration:
 
 ```sh
-build/release/usr/bin/xcrun --find strip
-build/release/usr/bin/xcrun lipo -info /bin/ls
+build/release/usr/bin/xcrun --find ld
+build/release/usr/bin/xcodebuild -showsdks
 ```
 
-Optional tiers:
+Useful targets:
+
+```sh
+bmake                   # build, then emit the bundle metadata
+bmake check             # every inventory entry produced a binary
+bmake list-progs        # the program inventory
+bmake list-ports        # the port inventory
+bmake clean             # remove build/, keeping the ports work directories
+bmake clean-ports       # remove the ports work directories
+bmake distclean         # remove build/ entirely
+```
+
+### Tiers
 
 ```sh
 bmake MK_TOOLCHAIN=no   # skip the binutils tier (cctools, ld64)
-bmake MK_PORTS=yes      # also build components with their own build
-                        # system (gperf, flex, make) -- slow, off by default
+bmake MK_PORTS=yes      # also build components with their own build system
 ```
+
+`MK_PORTS` is off by default because it includes LLVM: most of an hour on ten
+cores, and 2.7 GB of build directory. It is what supplies `clang`, the `llvm-*`
+tools, and `libtapi` — and therefore `ld`, which links against it. Note that
+`clean` deliberately spares `build/ports`, so an ordinary rebuild does not
+throw that away.
+
+## Build system
+
+`bmake`, with two engines driven by flat inventories — the same architecture as
+the sibling [apple-core](https://github.com/xnuports/apple-core) project:
+
+| | |
+|---|---|
+| `mk/tool.mk` | compiles a program from sources; driven by `mk/progs.mk` |
+| `mk/port.mk` | drives a component's own build system (autoconf, CMake); driven by `mk/ports.mk` |
+| `mk/tool.d/`, `mk/port.d/` | per-entry flags |
+| `mk/with-*.mk` | reusable link bundles |
+| `mk/bundle.mk` | emits the `.xctoolchain` and `.sdk` metadata |
+| `mk/patches/` | patches applied to a port's private copy |
+
+Adding a tool is one line in `mk/progs.mk`, plus a `mk/tool.d/<tool>.mk` only if
+it needs flags — sources are discovered automatically.
+
+**Submodules are never written to.** Every Makefile lives outside them and
+reaches in read-only; ports that cannot build out of tree get a private copy.
+`bmake check` exists because per-tool failures are ignored on purpose, so a
+broken tool would otherwise vanish from the release tree unnoticed.
+
+Two clean builds of the default set produce byte-identical binaries.
+
+## Layout
+
+| Path | |
+|---|---|
+| `src/xcode/` | our reimplementations (BSD-3-Clause) |
+| `src/xcode/common/` | shared helpers: plist parsers, SDK discovery, self-location |
+| `src/` | source submodules — cctools, ld64, llvm-project, swift, cpython, git, … |
+| `lib/` | library submodules — corecrypto, dyld, libplatform, libdispatch, `apple_internal_sdk` |
+| `include/` | headers vendored where the SDK ships none |
+| `mk/` | the build system |
+| `configs/`, `scripts/` | inputs to bundle emission |
+| `docs/CLAUDE.md` | full development notes, roadmap and rationale |
+
+## What is missing
+
+- **SDK contents** — headers, libraries, frameworks. The bundle exists; the
+  contents do not.
+- **Swift** — the submodule is there, not yet built.
+- **Python, Git** — sources carried, not yet ported to `mk/port.mk`.
+- **The `xc*` family** — `xccov`, `xcresulttool`, `xcstringstool`,
+  `xcsigningtool`, `xctest`, `xcdevice`, `xcdiagnose`.
+- **Apple-proprietary tools** — `actool`, `ibtool`, `momc`, `coremlc` and the
+  rest have no published source and need reimplementation.
+
+`docs/CLAUDE.md` has the full picture, including what each component needed and
+why several of them were harder than they looked.
 
 ## License
 
-Primary code: BSD-3-Clause (see `LICENSE.BSD-3`)
-Submodules retain their respective licenses (Apache 2.0, APSL, GPL, BSD, MIT, PSF, PNG License, etc.)
+Our code is BSD-3-Clause (`LICENSE.BSD-3`). Submodules keep their own licences:
+Apache-2.0 with LLVM exception, APSL, GPL, BSD, MIT, PSF and others.

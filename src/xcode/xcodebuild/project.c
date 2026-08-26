@@ -43,6 +43,7 @@
 #include "xcodebuild.h"
 #include "plist.h"
 #include "project.h"
+#include "sdkpath.h"
 
 static const char *pbxproj_name = "project.pbxproj";
 
@@ -429,14 +430,116 @@ static void list_dir(const char *base, const char *sub, const char *suffix)
 	closedir(d);
 }
 
+/*
+ * -showsdks, in the shape Apple's prints it: one group per platform,
+ * each entry the SDK's DisplayName padded out, then the -sdk flag that
+ * selects it, which is its CanonicalName.
+ *
+ * The old implementation listed the flat <dev>/SDKs directory and
+ * labelled everything "iOS SDKs" regardless of what it found.
+ */
+
+typedef struct {
+	char platform[64];
+	char display[128];
+	char canonical[128];
+} sdk_entry;
+
+typedef struct {
+	sdk_entry *items;
+	size_t count;
+	size_t cap;
+} sdk_list;
+
+static void collect_sdk(const char *platform, const char *sdkpath, void *ctx)
+{
+	sdk_list *list = (sdk_list *)ctx;
+	char *display, *canonical;
+	sdk_entry *e;
+
+	if (list->count == list->cap) {
+		size_t cap = list->cap ? list->cap * 2 : 16;
+		sdk_entry *items = realloc(list->items, cap * sizeof(*items));
+
+		if (items == NULL)
+			return;
+		list->items = items;
+		list->cap = cap;
+	}
+
+	e = &list->items[list->count];
+	memset(e, 0, sizeof(*e));
+
+	snprintf(e->platform, sizeof(e->platform), "%s",
+		 (platform != NULL && *platform) ? platform : "Unknown");
+
+	display = xt_sdk_setting(sdkpath, "DisplayName");
+	canonical = xt_sdk_setting(sdkpath, "CanonicalName");
+
+	if (display != NULL) {
+		snprintf(e->display, sizeof(e->display), "%s", display);
+		free(display);
+	} else {
+		/* No settings file: fall back to the directory name. */
+		const char *base = strrchr(sdkpath, '/');
+
+		snprintf(e->display, sizeof(e->display), "%s",
+			 base != NULL ? base + 1 : sdkpath);
+	}
+
+	if (canonical != NULL) {
+		snprintf(e->canonical, sizeof(e->canonical), "%s", canonical);
+		free(canonical);
+	}
+
+	list->count++;
+}
+
+static int sdk_entry_cmp(const void *a, const void *b)
+{
+	const sdk_entry *x = (const sdk_entry *)a;
+	const sdk_entry *y = (const sdk_entry *)b;
+	int c = strcmp(x->platform, y->platform);
+
+	return (c != 0) ? c : strcmp(x->display, y->display);
+}
+
 void project_show_sdks(const char *devpath)
 {
+	sdk_list list = { NULL, 0, 0 };
+	const char *group = NULL;
+	size_t i;
+
 	if (!is_dir(devpath)) {
 		fprintf(stderr, "xcodebuild: error: developer directory not found at '%s'\n", devpath);
 		return;
 	}
-	printf("iOS SDKs:\n");
-	list_dir(devpath, "SDKs", ".sdk");
+
+	xt_foreach_sdk(devpath, collect_sdk, &list);
+	if (list.count == 0) {
+		printf("No SDKs found in '%s'.\n", devpath);
+		return;
+	}
+
+	qsort(list.items, list.count, sizeof(*list.items), sdk_entry_cmp);
+
+	for (i = 0; i < list.count; i++) {
+		sdk_entry *e = &list.items[i];
+
+		if (group == NULL || strcmp(group, e->platform) != 0) {
+			if (group != NULL)
+				printf("\n");
+			printf("%s SDKs:\n", e->platform);
+			group = e->platform;
+		}
+
+		if (e->canonical[0] != '\0')
+			printf("\t%-30s\t-sdk %s\n", e->display, e->canonical);
+		else
+			printf("\t%s\n", e->display);
+	}
+
+	free(list.items);
 }
 
 void project_show_toolchains(const char *devpath)
@@ -446,5 +549,7 @@ void project_show_toolchains(const char *devpath)
 		return;
 	}
 	printf("Available toolchains:\n");
+	/* Apple's layout first, then the flat one this project used before. */
+	list_dir(devpath, "Toolchains", ".xctoolchain");
 	list_dir(devpath, "Toolchains", ".toolchain");
 }
