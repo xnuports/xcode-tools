@@ -51,3 +51,6 @@
 [submodule "lib/apple_internal_sdk"]
 	path = lib/apple_internal_sdk
 	url = https://github.com/xnuports/apple_internal_sdk.git
+[submodule "src/bsdmake"]
+	path = src/bsdmake
+	url = https://github.com/apple-oss-distributions/bsdmake
