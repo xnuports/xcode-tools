@@ -63,6 +63,13 @@ P_MAKE_ARGS=	clang llvm-nm llvm-otool llvm-objdump llvm-size \
 		llvm-strings dsymutil llvm-dwarfdump llvm-cov \
 		llvm-profdata libtapi
 
+# clang's resource directory -- its own stdarg.h, stddef.h and the rest.
+# Without it clang finds no builtin headers and anything past trivial C
+# fails with "'stdarg.h' file not found" from inside the SDK.  The
+# version component is read from the build rather than hardcoded.
+CLANG_RESOURCE_VER!=	ls ${P_WORKDIR}/build/lib/clang 2>/dev/null | head -1
+P_TREES=	lib/clang/${CLANG_RESOURCE_VER}
+
 # libtapi is a library, not a program, and ld64 links against it.  It is
 # staged into the toolchain's usr/lib rather than usr/bin.
 P_LIBS=		lib/libtapi.dylib

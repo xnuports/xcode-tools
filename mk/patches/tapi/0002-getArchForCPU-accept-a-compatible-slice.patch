@@ -1,0 +1,51 @@
+getArchForCPU: accept a compatible slice when sub-types need not match
+
+ld64 only sets tapi's ExactCpuSubType flag when the linker is enforcing
+dylib sub-type matching, which for arm64 it is not: Options.cpp leaves
+fEnforceDylibSubtypesMatch at its default of false for CPU_TYPE_ARM and
+CPU_TYPE_ARM64.  Fuzzy matching is therefore what is being asked for.
+
+getArchForCPU did not implement it.  On a miss it returned the requested
+architecture unchanged -- a slice the file does not contain -- and every
+subsequent symbol lookup against that slice came up empty.  The failure
+is silent: the .tbd loads, ld reports it under -t, and then every symbol
+is undefined.
+
+Current macOS SDKs make this reachable in the most ordinary way there is.
+libSystem.tbd declares its targets and reexports as
+
+    [ x86_64-macos, x86_64-maccatalyst, arm64e-macos, arm64e-maccatalyst ]
+
+with no arm64-macos at all, so "ld -arch arm64 -lSystem" resolved nothing
+and every C program failed to link.  Apple's own ld and ld-classic link
+arm64 against that SDK, so they accept the arm64e slice somewhere; this
+is the same behaviour, in the place the flag already promised it.
+
+Scanning for any slice of the same CPU type is exactly what "sub-types
+need not match" means, and it cannot fire when ExactCpuSubType is set.
+
+--- a/tools/libtapi/LinkerInterfaceFile.cpp
++++ b/tools/libtapi/LinkerInterfaceFile.cpp
+@@ -179,6 +179,22 @@
+ 
+   if (enforceCpuSubType)
+     return AK_unknown;
++
++  // Sub-type matching is not being enforced, so any slice of the same CPU
++  // type will do.  Returning the requested architecture unconditionally --
++  // as this did -- hands back a slice the file does not contain, and every
++  // symbol lookup against it then comes up empty.
++  //
++  // This is not hypothetical: current macOS SDKs describe the system
++  // libraries as arm64e only, with no arm64 target in libSystem.tbd, so an
++  // -arch arm64 link resolves nothing at all unless the arm64e slice is
++  // accepted here.
++  for (auto candidate : archs) {
++    if (getCPUTypeFromArchitecture(candidate).first ==
++        static_cast<uint32_t>(cpuType))
++      return candidate;
++  }
++
+   return arch;
+ }
+ 

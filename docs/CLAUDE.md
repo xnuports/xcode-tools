@@ -556,17 +556,27 @@ end-to-end: our clang, our ld, our libtapi
 `ld -v` reports in Apple's format:
 `@(#)PROGRAM:ld  PROJECT:ld64-956.6`.
 
-**Known gap: `-arch arm64` does not link against the current SDK; `arm64e`
-does.** The SDK's `libSystem.tbd` declares its targets and reexports as
-`[x86_64-macos, x86_64-maccatalyst, arm64e-macos, arm64e-maccatalyst]` — there
-is no `arm64-macos` — so an `-arch arm64` link finds the stub but resolves none
-of its reexported symbols. Apple's `ld` *and* `ld-classic` both link `arm64`
-against the same SDK, so they treat an arm64e slice as satisfying an arm64
-request somewhere we do not. Neither ld64 956.6's `textstub_dylib_file.cpp` nor
-tapi 2.0.0's `LinkerInterfaceFile.cpp` contains any arm64/arm64e fallback, so
-this is in Apple's newer builds (their ld-classic is 957.1) rather than
-something misconfigured here. Worth chasing before ld64 can be called a
-drop-in.
+**`-arch arm64` works, and the fix was a tapi bug, not something needing
+ld-prime.** Both arm64 and arm64e link and run, and the arm64 output carries the
+same load-command sequence and the same `libSystem.B.dylib` dependency as
+Apple's `ld-classic` produces.
+
+The chain is worth recording, because the symptom pointed nowhere near the
+cause. Current macOS SDKs declare `libSystem.tbd`'s targets and reexports as
+`[x86_64-macos, x86_64-maccatalyst, arm64e-macos, arm64e-maccatalyst]` — no
+`arm64-macos` at all. ld64 asks tapi for a slice, and only sets tapi's
+`ExactCpuSubType` flag when the linker is enforcing dylib sub-type matching —
+which for arm64 it is not: `Options.cpp` leaves `fEnforceDylibSubtypesMatch` at
+its default of `false` for `CPU_TYPE_ARM` and `CPU_TYPE_ARM64`. So fuzzy
+matching is what ld64 asked for, and tapi's `getArchForCPU` did not implement
+it: on a miss it returned the *requested* architecture unchanged, a slice the
+file does not contain, and every symbol lookup against it came up empty. The
+failure is silent — the `.tbd` loads, `ld -t` lists it, and then every symbol is
+undefined.
+
+`mk/patches/tapi/0002-getArchForCPU-accept-a-compatible-slice.patch` scans for
+any slice of the same CPU type, which is exactly what "sub-types need not match"
+means, and cannot fire when `ExactCpuSubType` is set.
 
 What it took to get here is in `mk/with-ld64.mk` and `mk/tool.d/ld.mk`:
 C++20, `-lxar`, the private-header paths, and four generated files standing in
@@ -748,7 +758,10 @@ them, matching a stock toolchain (where the cctools builds live alongside as
 `nm-classic` and `otool-classic`).
 
 `libtapi.dylib` is staged to the toolchain's `usr/lib` via `P_LIBS`, since ld64
-links against it. **`ports` runs before `progs`** in the top-level `all` for
+links against it, and clang's resource directory (`lib/clang/<ver>`) via
+`P_TREES`. That last one is not optional: without clang's own `stdarg.h` and
+friends, anything past trivial C fails with `'stdarg.h' file not found` raised
+from inside the SDK's headers, which reads like an SDK problem and is not. **`ports` runs before `progs`** in the top-level `all` for
 exactly that reason.
 
 What each needed, all of it non-obvious:
