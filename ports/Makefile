@@ -28,10 +28,10 @@ clean:
 # is the guard.
 check-ports:
 .for d p b in ${PORTS}
-	@test -e ${TOP}/build/release/${b}/${p} || \
-		{ ${ECHO} "MISSING: ${b}/${p}  (port src/${d}, see build/ports/${p}/*.log)"; exit 1; }
+	@${MAKE} -f ${TOP}/mk/port.mk TOP=${TOP} \
+		P_DIR=${d} P_NAME=${p} P_BIN=${b} check
 .endfor
-	@${ECHO} "check: every port produced a binary"
+	@${ECHO} "check: every port produced its binaries"
 
 list-ports:
 .for d p b in ${PORTS}

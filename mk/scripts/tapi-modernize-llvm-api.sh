@@ -19,6 +19,8 @@
 # spellings and, returning std::optional<...EntryRef>, behave the same in
 # the boolean and value contexts tapi uses them in.
 #
+# llvm/CodeGen/LowLevelType.h moved to llvm/CodeGenTypes/.
+#
 # lib/Core/FakeSymbols.cpp is a stub file: it defines a handful of LLVM
 # object-file entry points as llvm_unreachable so tapi does not have to
 # link the real implementations.  Being definitions, they have to track
@@ -38,7 +40,7 @@ set -e
 
 changed=0
 
-for f in $(grep -rl -E '\.(startswith|endswith|equals)\(|get(Directory|File)\(' \
+for f in $(grep -rl -E '\.(startswith|endswith|equals)\(|get(Directory|File)\(|llvm/CodeGen/LowLevelType\.h' \
 		--include='*.cpp' --include='*.h' . 2>/dev/null); do
 	sed -i.bak \
 		-e 's|\.startswith(|.starts_with(|g' \
@@ -48,6 +50,7 @@ for f in $(grep -rl -E '\.(startswith|endswith|equals)\(|get(Directory|File)\(' 
 		-e 's|getDirectory(|getOptionalDirectoryRef(|g' \
 		-e 's|\.getFile(|.getOptionalFileRef(|g' \
 		-e 's|->getFile(|->getOptionalFileRef(|g' \
+		-e 's|llvm/CodeGen/LowLevelType\.h|llvm/CodeGenTypes/LowLevelType.h|g' \
 		"$f"
 	rm -f "$f.bak"
 	changed=$((changed + 1))

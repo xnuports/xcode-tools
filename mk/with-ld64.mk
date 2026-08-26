@@ -62,6 +62,13 @@ T_CFLAGS+=	${CORECRYPTO_INC}
 # libxar as a .tbd.
 T_LDADD+=	-lxar
 
+# libtapi parses .tbd text stubs, which is how every system library is
+# described now.  It comes from the llvm port (mk/port.d/llvm.mk), which
+# stages it beside the toolchain's binaries; its install name is
+# @rpath/libtapi.dylib, so ld needs the matching rpath.
+TAPI_LIB=	${TOP}/build/release/${XCTOOLCHAIN}/usr/lib/libtapi.dylib
+T_LDADD+=	${TAPI_LIB} -Wl,-rpath,@executable_path/../lib
+
 # libstuff and the cctools/tapi/llvm headers ld64 parses Mach-O with.
 T_CFLAGS+=	-I${TOP}/src/dist-dev-tools/tapi/include
 .include "${TOP}/mk/with-libstuff.mk"

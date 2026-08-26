@@ -19,18 +19,20 @@ P_CMAKE_SRC=	llvm
 # reaches into CLANG_SOURCE_DIR -- and libtapi is the last thing standing
 # between ld64 and a working `ld`.
 #
-# It is NOT enabled: tapi 2.0.0 does not compile against LLVM 21.  The
-# mk/scripts/tapi-*.sh steps below carry it a long way (see the tapi-src
-# rule), but the drift eventually stops being mechanical: the code calls
-# .getError() on what is now a CustomizableOptional rather than an
-# ErrorOr, which needs the error handling restructured rather than
-# renamed.  Enabling it before that is done only breaks the LLVM build.
+# tapi 2.0.0 does not build against LLVM 21 as shipped; the tapi-src rule
+# below copies it and applies mk/scripts/tapi-*.sh plus mk/patches/tapi/.
 #
-# To resume, add these two back and keep working through `ninja libtapi`:
-#	-DLLVM_EXTERNAL_PROJECTS=tapi
-#	-DLLVM_EXTERNAL_TAPI_SOURCE_DIR=${P_WORKDIR}/tapi-src
+# LINKER_SUPPORTS_NO_INITS is forced off.  tapi asks the linker for
+# -Wl,-no_inits, which Apple wants because the linker dlopens libtapi and
+# they want no static-initializer cost; against LLVM 21 that fails, since
+# two dozen LLVM objects now carry initializers.  Nothing here needs the
+# property, so the check is answered in the negative rather than the flag
+# being fought.
 P_CONFIGURE_ARGS=	\
 	-DLLVM_ENABLE_PROJECTS=clang \
+	-DLLVM_EXTERNAL_PROJECTS=tapi \
+	-DLLVM_EXTERNAL_TAPI_SOURCE_DIR=${P_WORKDIR}/tapi-src \
+	-DLINKER_SUPPORTS_NO_INITS=FALSE \
 	-DLLVM_TARGETS_TO_BUILD="AArch64;X86" \
 	-DLLVM_ENABLE_ASSERTIONS=OFF \
 	-DLLVM_INCLUDE_TESTS=OFF \
@@ -50,6 +52,21 @@ P_NOSTAGE=	yes
 # Which of the built programs land in the toolchain.  Kept short on
 # purpose: this is the set the rest of the tree actually needs, not
 # everything LLVM installs.
+# Build only the targets we ship, not "all".
+#
+# This matters for more than build time: with tapi in the tree, "all"
+# also builds the tapi CLI tool and its APIVerifier/Frontend libraries,
+# which carry drift beyond what the scripts and patches cover (clang's
+# DiagnosticOptions is no longer reference-counted, for one).  libtapi
+# itself -- the only part ld64 needs -- builds clean.
+P_MAKE_ARGS=	clang llvm-nm llvm-otool llvm-objdump llvm-size \
+		llvm-strings dsymutil llvm-dwarfdump llvm-cov \
+		llvm-profdata libtapi
+
+# libtapi is a library, not a program, and ld64 links against it.  It is
+# staged into the toolchain's usr/lib rather than usr/bin.
+P_LIBS=		lib/libtapi.dylib
+
 P_PROGS=	bin/clang \
 		bin/llvm-nm \
 		bin/llvm-otool \
@@ -81,5 +98,4 @@ ${P_WORKDIR}/tapi-src/.patched:
 .endfor
 	@touch ${.TARGET}
 
-# Not a dependency of .configured while tapi is disabled; run it by hand
-# with `bmake -f mk/port.mk ... $$PWD/build/ports/llvm/tapi-src/.patched`.
+${P_WORKDIR}/.configured: ${P_WORKDIR}/tapi-src/.patched

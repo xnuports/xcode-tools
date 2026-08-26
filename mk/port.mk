@@ -20,6 +20,9 @@
 #
 #	P_PROGS		programs to stage, relative to the staged prefix
 #			(default: bin/${P_NAME})
+#	P_LIBS		libraries to stage, relative to the same prefix.
+#			They land in P_LIBDIR rather than beside the
+#			programs.
 #	P_BUILDSYS	"autoconf" (default) or "cmake"
 #	P_CONFIGURE	configure script, relative to the source dir
 #			(autoconf only; default: configure)
@@ -53,6 +56,7 @@ P_WORKDIR?=	${TOP}/build/ports/${P_NAME}
 
 P_STAGEDIR?=	${P_WORKDIR}/stage
 P_BINDIR?=	${TOP}/build/release/${P_BIN}
+P_LIBDIR?=	${TOP}/build/release/${XCTOOLCHAIN}/usr/lib
 
 .include "${TOP}/mk/xcodetools.sys.mk"
 
@@ -115,6 +119,11 @@ all: ${P_WORKDIR}/.staged
 .endfor
 .endfor
 	@${ECHO} "built: ${P_BIN}/${P_PROGS:T}${P_LINKS:D (+${P_LINKS})}"
+.for l in ${P_LIBS}
+	@mkdir -p ${P_LIBDIR}
+	@cp ${P_PROGSRC}/${l} ${P_LIBDIR}/${l:T}
+	@${ECHO} "staged: ${XCTOOLCHAIN}/usr/lib/${l:T}"
+.endfor
 
 # --- configure --------------------------------------------------------
 
@@ -171,12 +180,28 @@ ${P_WORKDIR}/.staged: ${P_WORKDIR}/.built
 		  tail -20 ${P_WORKDIR}/stage.log; exit 1; }
 	@touch ${.TARGET}
 
+# Verifying here rather than in ports/Makefile, because only this file
+# knows what a port actually produces: a port name is not a program name,
+# and llvm alone installs ten of them plus a library.
+check:
+.for f in ${P_PROGS}
+	@test -e ${P_BINDIR}/${f:T} || \
+		{ ${ECHO} "MISSING: ${P_BIN}/${f:T}  (port ${P_NAME}, see ${P_WORKDIR}/*.log)"; exit 1; }
+.endfor
+.for l in ${P_LIBS}
+	@test -e ${P_LIBDIR}/${l:T} || \
+		{ ${ECHO} "MISSING: ${XCTOOLCHAIN}/usr/lib/${l:T}  (port ${P_NAME})"; exit 1; }
+.endfor
+
 clean:
 	rm -rf ${P_WORKDIR}
 .for f in ${P_PROGS}
 	rm -f ${P_BINDIR}/${f:T}
 .endfor
+.for l in ${P_LIBS}
+	rm -f ${P_LIBDIR}/${l:T}
+.endfor
 
 .endif
 
-.PHONY: all clean
+.PHONY: all check clean

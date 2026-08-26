@@ -538,56 +538,57 @@ Notes:
   built here because the project carries it as a submodule, installed to
   `usr/libexec` as the closest match. It links `-framework CoreFoundation`.
 
-#### 2c. ld64 (compiles fully; blocked on libtapi)
+#### 2c. ld64 ✅
 
-Every one of ld64's sources now compiles — 36 C++ across `ld/`, `ld/parsers/`,
-`ld/passes/`, `ld/passes/stubs/` and `mach_o/`, plus `debugline.c` and
-`libcodedirectory.c` — and the link resolves everything except `tapi::*`.
+`ld` builds and links. It needs `libtapi`, which the llvm port stages, so it
+only appears with `MK_PORTS=yes`; `mk/progs.mk` gates the entry on that.
 
-`libtapi` builds only inside the LLVM tree: tapi's `CMakeLists.txt` uses
-`llvm_add_library` and reaches into `CLANG_SOURCE_DIR`. So ld64 waits on
-stage 5. Enabling it afterwards is one commented-out line in `mk/progs.mk`.
+End to end, with our own toolchain throughout:
 
-(Apple's shipped `XcodeDefault.xctoolchain/usr/lib/libtapi.dylib` would make
-`ld` link today, but it is a closed binary — the same objection as
-`libcodedirectory`, so we do not depend on it.)
+```
+$ clang -isysroot $SDK -arch arm64e -c e2e.c -o e2e.o     # our clang
+$ ld -o e2e e2e.o -lSystem -syslibroot $SDK -arch arm64e \
+     -platform_version macos 26.0 26.0                    # our ld64
+$ ./e2e
+end-to-end: our clang, our ld, our libtapi
+```
 
-What it took, all in `mk/with-ld64.mk` and `mk/tool.d/ld.mk`:
+`ld -v` reports in Apple's format:
+`@(#)PROGRAM:ld  PROJECT:ld64-956.6`.
 
-- **C++20**, for `std::string_view::starts_with`. It applies to the C++
-  sources only, via a new `T_CXXFLAGS` knob — ld64 has C sources too.
-- **Generated headers**, standing in for the xcodeproj's script phases:
-  `configure.h` (from `src/create_configure`; note it sets
-  `SUPPORT_ARCH_riscv32 0` for `XcodeDefault`, which is us), `compile_stubs.h`
-  (the csh script as a C string), `tapi/Version.inc` (version read out of
-  tapi's `CMakeLists.txt`), and `version.c` supplying
-  `ld_classicVersionString`, which `Options.cpp` declares `extern` but no
-  source defines — Apple's build system stamps it in.
-- **`-lxar`** for `bitcode_bundle.cpp`, and **`-lc++`**-style linkage handled
-  automatically because `tool.mk` picks `${CXX}` when any source is C++.
-- **Private headers**, now all in submodules: `include/ld-internals`,
-  `lib/libplatform` (`os/lock_private.h`), `lib/dyld` (`mach-o/dyld_priv.h`),
-  `lib/corecrypto`, and `lib/apple_internal_sdk` for the four that ship
-  nowhere else — `CrashReporterClient.h`, `os/base_private.h`,
-  `System/machine/cpu_capabilities.h` (+ its `arm`/`i386` variants) and
-  `Private/CommonCrypto/CommonDigestSPI.h`.
+**Known gap: `-arch arm64` does not link against the current SDK; `arm64e`
+does.** The SDK's `libSystem.tbd` declares its targets and reexports as
+`[x86_64-macos, x86_64-maccatalyst, arm64e-macos, arm64e-maccatalyst]` — there
+is no `arm64-macos` — so an `-arch arm64` link finds the stub but resolves none
+of its reexported symbols. Apple's `ld` *and* `ld-classic` both link `arm64`
+against the same SDK, so they treat an arm64e slice as satisfying an arm64
+request somewhere we do not. Neither ld64 956.6's `textstub_dylib_file.cpp` nor
+tapi 2.0.0's `LinkerInterfaceFile.cpp` contains any arm64/arm64e fallback, so
+this is in Apple's newer builds (their ld-classic is 957.1) rather than
+something misconfigured here. Worth chasing before ld64 can be called a
+drop-in.
 
-Three traps worth remembering:
+What it took to get here is in `mk/with-ld64.mk` and `mk/tool.d/ld.mk`:
+C++20, `-lxar`, the private-header paths, and four generated files standing in
+for the xcodeproj's script phases — `configure.h` from `src/create_configure`,
+`compile_stubs.h` as a C string, `tapi/Version.inc`, and `version.c` supplying
+`ld_classicVersionString`, which `Options.cpp` declares `extern` but no source
+defines.
+
+Three traps worth not rediscovering:
 
 1. **cctools ships its own stripped `mach-o/dyld_priv.h`**, without
    `dyld_unwind_sections`. dyld's copy has to win the header search — but
    putting all of `lib/dyld/include` first is wrong, because it also carries
    `dlfcn.h` and `mach-o/dyld.h`, which shadow the system and cctools headers
-   and break four otherwise-fine files. The fix is a generated shim directory
-   exposing only `mach-o/dyld_priv.h`.
-2. **Several Apple headers annotate with `bridgeos()`**, which the public
-   SDK's availability macros reject. The shims neuter `__API_AVAILABLE` and
-   friends around the include and restore them with `#pragma push_macro` /
-   `pop_macro` — clobbering them for the rest of the translation unit breaks
-   later system headers.
-3. **`tool.mk`'s out-of-directory source branch compiled everything with
-   `${CC}`.** clang dispatches on suffix so it appeared to work, but C++-only
-   flags could not be applied. It now dispatches on suffix explicitly.
+   and break four otherwise-fine files. A generated shim directory exposing
+   only that one header avoids both.
+2. **Several Apple headers annotate with `bridgeos()`**, which the public SDK's
+   availability macros reject. The shims neuter `__API_AVAILABLE` and friends
+   around the include and restore them with `#pragma push_macro`/`pop_macro`;
+   clobbering them for the rest of the file breaks later system headers.
+3. **`ld/passes/stubs/` is a subdirectory of `passes/`** and is easy to miss
+   when listing sources — the link fails on `ld::passes::stubs::doPass`.
 
 ### Stage 3 — `.xctoolchain` and `.sdk` bundle emission ✅
 
@@ -732,7 +733,7 @@ Building today:
 | `gperf` | 3.0.3 | yes |
 | `flex` | 2.6.4 | yes |
 | `gnumake` (as `make` + `gnumake`) | 3.81 | yes |
-| `llvm` — clang 21.1.6 plus `llvm-nm`, `llvm-otool`, `llvm-objdump`, `llvm-size`, `llvm-strings`, `llvm-dwarfdump`, `llvm-cov`, `llvm-profdata`, `dsymutil` | 21.1.6 | our own build |
+| `llvm` — clang 21.1.6, `libtapi.dylib`, plus `llvm-nm`, `llvm-otool`, `llvm-objdump`, `llvm-size`, `llvm-strings`, `llvm-dwarfdump`, `llvm-cov`, `llvm-profdata`, `dsymutil` | 21.1.6 | our own build |
 
 `llvm` is the port everything else waits on, and by far the longest —
 most of an hour on ten cores, which is the main reason `MK_PORTS` is off by
@@ -746,6 +747,10 @@ Once `llvm-nm` and `llvm-otool` exist, `bundles` links `nm` and `otool` at
 them, matching a stock toolchain (where the cctools builds live alongside as
 `nm-classic` and `otool-classic`).
 
+`libtapi.dylib` is staged to the toolchain's `usr/lib` via `P_LIBS`, since ld64
+links against it. **`ports` runs before `progs`** in the top-level `all` for
+exactly that reason.
+
 What each needed, all of it non-obvious:
 
 - **flex** — its bundled libtool links `libfl` as a dylib with
@@ -757,11 +762,10 @@ What each needed, all of it non-obvious:
   own project file. `P_PREPARE` appends it to the source and object lists. The
   port also installs its binary as `make`, not `gnumake`; Apple ships both, so
   `P_LINKS` supplies the second name.
-- **tapi — not building, and this is what still blocks ld64.** tapi builds
-  only inside the LLVM tree (`llvm_add_library`, `CLANG_SOURCE_DIR`), so
-  `mk/port.d/llvm.mk` has the `LLVM_EXTERNAL_PROJECTS=tapi` wiring ready and a
-  `tapi-src` rule that copies the submodule and patches the copy. Three
-  scripts under `mk/scripts/` carry it a long way:
+- **tapi — `libtapi.dylib` builds, and ld64 links against it.** tapi builds
+  only inside the LLVM tree (`llvm_add_library`, `CLANG_SOURCE_DIR`), so it is
+  an `LLVM_EXTERNAL_PROJECTS` entry, from a copy that `mk/port.d/llvm.mk`
+  patches. Three scripts under `mk/scripts/` handle the mechanical drift:
 
   | Script | Drift it repairs |
   |---|---|
@@ -769,12 +773,26 @@ What each needed, all of it non-obvious:
   | `tapi-fix-diagnostics.sh` | clang-tblgen now rejects diagnostics that start with a capital or end in punctuation; 8 messages reworded minimally |
   | `tapi-modernize-llvm-api.sh` | `startswith`/`endswith`/`equals` → `starts_with`/`ends_with`/`==`, `getDirectory`/`getFile` → the `getOptional*Ref` spellings, and the `TapiUniversal::create` stub signature |
 
-  It is **disabled** because the drift stops being mechanical: the code calls
-  `.getError()` on what is now a `CustomizableOptional` rather than an
-  `ErrorOr`, which needs the error handling restructured rather than renamed.
-  Leaving it enabled only breaks the LLVM build, so the two configure lines are
-  commented out with instructions to resume. tapi 2.0.0 against LLVM 21 is a
-  genuine porting job, not a scripted rewrite.
+  What the scripts cannot honestly express lives in `mk/patches/tapi/`, applied
+  after them so patches are written against the post-rename tree — the ports
+  tradition. The first restructures `InterfaceFileManager`'s error handling:
+  `getOptionalFileRef` returns a `CustomizableOptional` where the old
+  `getFile` returned an `ErrorOr`, so `.getError()` has no meaning any more.
+
+  Two further points, both deliberate:
+
+  - **`LINKER_SUPPORTS_NO_INITS` is forced off.** tapi asks for
+    `-Wl,-no_inits`, which Apple wants because the linker dlopens libtapi and
+    they want no static-initializer cost. Against LLVM 21 that link fails —
+    two dozen LLVM objects now carry initializers. Nothing here needs the
+    property, so the check is answered in the negative rather than the flag
+    fought.
+  - **The port builds named targets, not `all`.** With tapi in the tree, `all`
+    also builds the tapi CLI tool and its APIVerifier/Frontend libraries, which
+    carry drift beyond what the scripts and patches cover (clang's
+    `DiagnosticOptions` is no longer reference-counted). `libtapi` itself — the
+    only part ld64 needs — builds clean, so `P_MAKE_ARGS` names exactly what we
+    ship.
 
 - **gm4, bison** — not enabled. Both restore their missing gnulib templates
   fine (`mk/scripts/gnulib-restore-templates.sh` recreates `alloca_.h` and

@@ -64,13 +64,11 @@ PROGS+=	dist-dev-tools/cctools/misc vtool ${XCTOOLCHAIN}/usr/bin
 PROGS+=	dist-dev-tools/cctools/ar ar ${XCTOOLCHAIN}/usr/bin
 PROGS+=	dist-dev-tools/cctools/otool otool-classic ${XCTOOLCHAIN}/usr/bin
 
-# ld64 -- the linker.  NOT enabled yet: every source compiles and the
-# link resolves except for tapi::*, and libtapi builds only inside the
-# LLVM tree (tapi's CMakeLists uses llvm_add_library and reaches into
-# CLANG_SOURCE_DIR).  It therefore waits on stage 5.  Enabling it is
-# exactly this line:
-#
-#PROGS+=	dist-dev-tools/ld64 ld ${XCTOOLCHAIN}/usr/bin
+# ld64 -- the linker.  Needs libtapi, which the llvm port stages, so it
+# only builds with MK_PORTS=yes; without it the link fails on tapi::*.
+.if ${MK_PORTS:tl} == "yes"
+PROGS+=	dist-dev-tools/ld64 ld ${XCTOOLCHAIN}/usr/bin
+.endif
 
 # libtool builds against src/cctools-helpers/, our reimplementation of
 # make_obj_file_with_linker_options() -- the one thing libtool.c needs

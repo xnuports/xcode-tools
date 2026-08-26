@@ -4,6 +4,8 @@
 #
 # Targets:
 #	all		build every library and program into build/
+# ports runs before progs on purpose: ld64 links against libtapi, which
+# the llvm port stages, so the ports have to be in place first.
 #	ports		build components that carry their own build system
 #			(MK_PORTS=yes; off by default, they are slow)
 #	bundles		emit the .xctoolchain / .sdk bundle metadata
@@ -22,7 +24,7 @@ TOP?=		${.CURDIR}
 
 RELEASE=	${TOP}/build/release
 
-all: dirs lib progs ports bundles
+all: dirs lib ports progs bundles
 	@${ECHO} "== xcode-tools build complete =="
 	@${ECHO} "   release tree: ${RELEASE}"
 
