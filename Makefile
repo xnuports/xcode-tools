@@ -8,7 +8,9 @@
 #			(MK_PORTS=yes; off by default, they are slow)
 #	bundles		emit the .xctoolchain / .sdk bundle metadata
 #	check		verify every inventory entry produced a binary
-#	clean		remove build/ entirely
+#	clean		remove build/, keeping the ports work directories
+#	clean-ports	remove the ports work directories
+#	distclean	remove build/ entirely
 #	list-progs	print the tool inventory with release placements
 #
 # The release tree lands in build/release/ and is a drop-in replacement
@@ -51,7 +53,18 @@ list-progs:
 list-ports:
 	${MAKE} -C ${TOP}/ports TOP=${TOP} list-ports
 
+# clean deliberately spares build/ports.  A port can cost hours -- the
+# llvm port is most of an hour on ten cores -- and wiping that as part of
+# an ordinary rebuild is not what anyone means by "clean".  Use
+# clean-ports for that, or distclean for everything.
 clean:
+	find ${TOP}/build -mindepth 1 -maxdepth 1 ! -name ports -exec rm -rf {} + 2>/dev/null || true
+
+clean-ports:
+	rm -rf ${TOP}/build/ports
+
+distclean: clean clean-ports
 	rm -rf ${TOP}/build
 
-.PHONY: all dirs lib progs ports bundles check list-progs list-ports clean
+.PHONY: all dirs lib progs ports bundles check list-progs list-ports \
+	clean clean-ports distclean

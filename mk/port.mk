@@ -40,6 +40,11 @@
 #			copying and before configure -- the ports-style
 #			post-extract step.  Requires P_COPY (the default),
 #			since it modifies the tree.
+#	P_NOSTAGE	set to any value to skip the install step and take
+#			P_PROGS straight out of the build directory.  For
+#			a project like LLVM, whose install writes gigabytes
+#			of headers and libraries we do not ship, running it
+#			just to copy a dozen binaries is pure waste.
 #	P_NOBUILD	set to any value to turn the entry into a no-op
 
 TOP?=		${.CURDIR}
@@ -95,10 +100,16 @@ all clean:
 	@${ECHO} "skip: ${P_NAME} (P_NOBUILD)"
 .else
 
+.if defined(P_NOSTAGE)
+P_PROGSRC=	${P_OBJDIR}
+all: ${P_WORKDIR}/.built
+.else
+P_PROGSRC=	${P_STAGEDIR}${P_PREFIX}
 all: ${P_WORKDIR}/.staged
+.endif
 .for f in ${P_PROGS}
 	@mkdir -p ${P_BINDIR}
-	@cp ${P_STAGEDIR}${P_PREFIX}/${f} ${P_BINDIR}/${f:T}
+	@cp ${P_PROGSRC}/${f} ${P_BINDIR}/${f:T}
 .for l in ${P_LINKS}
 	@ln -f ${P_BINDIR}/${f:T} ${P_BINDIR}/${l}
 .endfor

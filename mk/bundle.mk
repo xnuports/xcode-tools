@@ -48,7 +48,7 @@ XT_DEFAULT_ARCH!=	uname -m 2>/dev/null || echo arm64
 XT_TOOLCHAIN_ID?=	com.apple.dt.toolchain.XcodeDefault
 XT_PLATFORM_ID?=	com.apple.platform.macosx
 
-bundles: bundle-dirs bundle-toolchain bundle-platform bundle-sdk bundle-compat bundle-shims bundle-config
+bundles: bundle-dirs bundle-toolchain bundle-platform bundle-sdk bundle-compat bundle-shims bundle-config bundle-aliases
 	@${ECHO} "== bundles emitted =="
 	@${ECHO} "   toolchain: ${XCTOOLCHAIN} (${XT_TOOLCHAIN_ID})"
 	@${ECHO} "   sdk:       ${XT_SDK}.sdk ${XT_SDK_VERSION} (${XT_SDK_CANONICAL})"
@@ -215,24 +215,49 @@ bundle-compat: bundle-dirs bundle-sdk bundle-toolchain
 	@ln -sfn ${XT_TOOLCHAIN}.xctoolchain \
 		${RELEASE}/Toolchains/${XT_TOOLCHAIN}.toolchain
 
+# --- Apple's tool aliases ---------------------------------------------
+#
+# A stock toolchain points nm and otool at the LLVM implementations,
+# keeping the cctools builds beside them as nm-classic and otool-classic
+# (which is how mk/progs.mk installs ours).  Recreate those two links
+# once the llvm port has supplied the targets; without it the names are
+# simply absent rather than wrong.
+
+bundle-aliases: bundle-dirs
+.for a t in nm llvm-nm otool llvm-otool
+	@if [ -e ${TC_DIR}/usr/bin/${t} ] && [ ! -e ${TC_DIR}/usr/bin/${a} ]; then \
+		ln -sfn ${t} ${TC_DIR}/usr/bin/${a}; \
+		${ECHO} "alias: ${a} -> ${t}"; \
+	 fi
+.endfor
+
 # --- toolchain shims --------------------------------------------------
 #
 # scripts/ holds cc/c++/cpp/clang wrappers that drive the real compiler
 # through xcrun.  They locate xcrun relative to their own installed
 # location, so they are copied verbatim -- no path rewriting needed.
+#
+# A shim is only installed when no real tool of that name is present.
+# `bundles` runs after `ports`, so once the llvm port has installed a
+# genuine clang, dropping the clang shim on top of it would be actively
+# harmful: the shim resolves its tool with "xcrun -find $0", which would
+# find the shim itself and recurse.  Real tools win; shims fill gaps.
 
 SHIM_BIN=	${TC_DIR}/usr/bin
 
 bundle-shims: bundle-dirs
 .for s in cc c++ cpp clang
 	@mkdir -p ${SHIM_BIN}
-	@cp ${SCRIPTS}/${s}.sh ${SHIM_BIN}/${s}
-	@chmod 755 ${SHIM_BIN}/${s}
+	@if [ -e ${SHIM_BIN}/${s} ]; then \
+		${ECHO} "shim: ${s} already provided by a port, not overwriting"; \
+	 else \
+		cp ${SCRIPTS}/${s}.sh ${SHIM_BIN}/${s} && chmod 755 ${SHIM_BIN}/${s}; \
+	 fi
 .endfor
-	@ln -sfn clang ${SHIM_BIN}/clang++
+	@[ -e ${SHIM_BIN}/clang++ ] || ln -sfn clang ${SHIM_BIN}/clang++
 	@mkdir -p ${RELEASE}/usr/bin
 	@cp ${SCRIPTS}/xcrun-tool.sh ${RELEASE}/usr/bin/xcrun-tool
 	@chmod 755 ${RELEASE}/usr/bin/xcrun-tool
 
 .PHONY: bundles bundle-dirs bundle-toolchain bundle-platform bundle-sdk \
-	bundle-compat bundle-shims bundle-config
+	bundle-compat bundle-shims bundle-config bundle-aliases

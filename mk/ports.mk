@@ -19,6 +19,13 @@ PORTS+=	dist-dev-tools/gperf gperf ${XCTOOLCHAIN}/usr/bin
 PORTS+=	dist-dev-tools/flex flex ${XCTOOLCHAIN}/usr/bin
 PORTS+=	dist-dev-tools/gnumake gnumake usr/bin
 
+# ------------------------------------------------------------------
+# LLVM and Clang.  By far the longest build in the tree -- most of an
+# hour on ten cores -- which is the main reason MK_PORTS is off by
+# default.  See mk/port.d/llvm.mk, including the notes on tapi.
+# ------------------------------------------------------------------
+PORTS+=	llvm-project llvm ${XCTOOLCHAIN}/usr/bin
+
 # gm4 and bison are NOT enabled.  Both restore their missing gnulib
 # templates fine (mk/port.d/), but then their bundled gnulib -- which
 # predates the modern SDK by two decades -- substitutes its own

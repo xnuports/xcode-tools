@@ -713,6 +713,9 @@ and make, which costs more than the rest of the tree together.
 bmake MK_PORTS=yes        # build the ports too
 bmake list-ports          # the port inventory
 bmake check MK_PORTS=yes  # verify every port produced its binary
+bmake clean               # keeps build/ports -- a port can cost hours
+bmake clean-ports         # remove the port work directories
+bmake distclean           # remove build/ entirely
 ```
 
 **`P_COPY` defaults to yes**, meaning the source is copied into
@@ -729,6 +732,19 @@ Building today:
 | `gperf` | 3.0.3 | yes |
 | `flex` | 2.6.4 | yes |
 | `gnumake` (as `make` + `gnumake`) | 3.81 | yes |
+| `llvm` — clang 21.1.6 plus `llvm-nm`, `llvm-otool`, `llvm-objdump`, `llvm-size`, `llvm-strings`, `llvm-dwarfdump`, `llvm-cov`, `llvm-profdata`, `dsymutil` | 21.1.6 | our own build |
+
+`llvm` is the port everything else waits on, and by far the longest —
+most of an hour on ten cores, which is the main reason `MK_PORTS` is off by
+default. It is configured for the two targets Apple ships on this hardware,
+with tests, docs, examples, benchmarks and bindings off; the build directory
+comes to 2.7 GB. `P_NOSTAGE` takes the wanted binaries straight out of the
+build tree, because LLVM's install target writes gigabytes of headers and
+libraries we do not ship.
+
+Once `llvm-nm` and `llvm-otool` exist, `bundles` links `nm` and `otool` at
+them, matching a stock toolchain (where the cctools builds live alongside as
+`nm-classic` and `otool-classic`).
 
 What each needed, all of it non-obvious:
 
@@ -741,6 +757,25 @@ What each needed, all of it non-obvious:
   own project file. `P_PREPARE` appends it to the source and object lists. The
   port also installs its binary as `make`, not `gnumake`; Apple ships both, so
   `P_LINKS` supplies the second name.
+- **tapi — not building, and this is what still blocks ld64.** tapi builds
+  only inside the LLVM tree (`llvm_add_library`, `CLANG_SOURCE_DIR`), so
+  `mk/port.d/llvm.mk` has the `LLVM_EXTERNAL_PROJECTS=tapi` wiring ready and a
+  `tapi-src` rule that copies the submodule and patches the copy. Three
+  scripts under `mk/scripts/` carry it a long way:
+
+  | Script | Drift it repairs |
+  |---|---|
+  | `tapi-shim-linker-flag.sh` | `llvm_check_linker_flag()` — the LLVM CMake module is gone; forwarded to CMake's `check_linker_flag` |
+  | `tapi-fix-diagnostics.sh` | clang-tblgen now rejects diagnostics that start with a capital or end in punctuation; 8 messages reworded minimally |
+  | `tapi-modernize-llvm-api.sh` | `startswith`/`endswith`/`equals` → `starts_with`/`ends_with`/`==`, `getDirectory`/`getFile` → the `getOptional*Ref` spellings, and the `TapiUniversal::create` stub signature |
+
+  It is **disabled** because the drift stops being mechanical: the code calls
+  `.getError()` on what is now a `CustomizableOptional` rather than an
+  `ErrorOr`, which needs the error handling restructured rather than renamed.
+  Leaving it enabled only breaks the LLVM build, so the two configure lines are
+  commented out with instructions to resume. tapi 2.0.0 against LLVM 21 is a
+  genuine porting job, not a scripted rewrite.
+
 - **gm4, bison** — not enabled. Both restore their missing gnulib templates
   fine (`mk/scripts/gnulib-restore-templates.sh` recreates `alloca_.h` and
   `getopt_.h`, which Apple's drops ship the *outputs* of but not the inputs),
