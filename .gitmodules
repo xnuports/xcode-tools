@@ -54,3 +54,6 @@
 [submodule "src/bsdmake"]
 	path = src/bsdmake
 	url = https://github.com/apple-oss-distributions/bsdmake
+[submodule "src/bmake"]
+	path = src/bmake
+	url = https://github.com/xnuports/bmake.git
