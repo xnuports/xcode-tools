@@ -5,12 +5,12 @@
 # in ld64.xcodeproj.
 .include "${TOP}/mk/with-ld64.mk"
 
-T_SRCS!=	cd ${TOP} && ls src/dist-dev-tools/ld64/src/ld/*.cpp \
-		    src/dist-dev-tools/ld64/src/ld/parsers/*.cpp \
-		    src/dist-dev-tools/ld64/src/ld/passes/*.cpp \
-		    src/dist-dev-tools/ld64/src/ld/passes/stubs/*.cpp \
-		    src/dist-dev-tools/ld64/src/mach_o/*.cpp \
-		    src/dist-dev-tools/ld64/src/ld/*.c 2>/dev/null
+T_SRCS!=	cd ${TOP} && ls src/distribution-Developer_Tools/ld64/src/ld/*.cpp \
+		    src/distribution-Developer_Tools/ld64/src/ld/parsers/*.cpp \
+		    src/distribution-Developer_Tools/ld64/src/ld/passes/*.cpp \
+		    src/distribution-Developer_Tools/ld64/src/ld/passes/stubs/*.cpp \
+		    src/distribution-Developer_Tools/ld64/src/mach_o/*.cpp \
+		    src/distribution-Developer_Tools/ld64/src/ld/*.c 2>/dev/null
 T_SRCS+=	build/gen/ld64/version.c
 
 # --- generated headers ------------------------------------------------
@@ -35,7 +35,10 @@ ${LD64_GEN}/configure.h:
 	  echo '#define LD_PAGE_SIZE 0x1000'; \
 	} > ${.TARGET}
 
-LD64_VERSION?=	956.6
+# From the submodule's tag, for the same reason as CCTOOLS_VERSION.
+# The tag is "ld64-957.1"; ld_classicVersionString wants the number.
+LD64_VERSION!=	git -C ${LD64} describe --tags --abbrev=0 2>/dev/null \
+		| sed 's|^ld64-||' || echo 0
 
 # compile_stubs.h wraps the compile_stubs csh script as a C string,
 # exactly as the xcodeproj's script phase does.
@@ -78,7 +81,7 @@ ${LD64_GEN}/version.c:
 # Version.inc.in; ld64 reaches it through tapi/Version.h.  The version is
 # read out of tapi's own CMakeLists so it tracks the submodule.
 TAPI_FULL_VERSION!=	sed -n 's/^set(TAPI_FULL_VERSION "\([^"]*\)".*/\1/p' \
-			${TOP}/src/dist-dev-tools/tapi/CMakeLists.txt 2>/dev/null || echo 2.0.0
+			${TOP}/src/distribution-Developer_Tools/tapi/CMakeLists.txt 2>/dev/null || echo 2.0.0
 
 ${LD64_GEN}/tapi/Version.inc:
 	@mkdir -p ${LD64_GEN}/tapi

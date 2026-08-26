@@ -1,19 +1,21 @@
 [submodule "llvm-project"]
 	path = src/llvm-project
 	url = https://github.com/swiftlang/llvm-project.git
-	branch = swift/release/6.4.x
+	branch = swift/release/6.3
 [submodule "PlistBuddy"]
 	path = src/PlistBuddy
 	url = https://github.com/xnuports/PlistBuddy
 [submodule "distribution-Developer_Tools"]
-	path = src/dist-dev-tools
-	url = https://github.com/xnuports/distribution-Developer_Tools.git
+	path = src/distribution-Developer_Tools
+	url = https://github.com/apple-oss-distributions/distribution-Developer_Tools.git
+	branch = rel/Developer_Tools-26
 [submodule "swift"]
 	path = src/swift
 	url = https://github.com/swiftlang/swift.git
 [submodule "src/objc4"]
 	path = src/objc4
-	url = https://github.com/xnuports/objc4.git
+	url = https://github.com/apple-oss-distributions/objc4.git
+	branch = rel/objc4-951
 [submodule "src/Python"]
 	path = src/python-apple-support
 	url = https://github.com/xnuports/Python-Apple-support/
@@ -22,26 +24,30 @@
 	url = https://github.com/xnuports/ld-internals.git
 [submodule "src/cpython"]
 	path = src/cpython
-	url = https://github.com/xnuports/cpython.git
+	url = https://github.com/python/cpython.git
 	branch = 3.14
 [submodule "src/git"]
 	path = src/git
-	url = https://github.com/xnuports/git
+	url = https://github.com/apple-oss-distributions/Git.git
 [submodule "src/pngcrush"]
 	path = src/pngcrush
 	url = https://github.com/xnuports/pngcrush.git
 [submodule "lib/libplatform"]
 	path = lib/libplatform
-	url = https://github.com/xnuports/libplatform.git
+	url = https://github.com/apple-oss-distributions/libplatform.git
+	branch = libplatform-375.120.2
 [submodule "lib/corecrypto"]
 	path = lib/corecrypto
-	url = https://github.com/xnuports/corecrypto.git
+	url = https://github.com/apple/corecrypto.git
+	branch = 2026-05
 [submodule "lib/dyld"]
 	path = lib/dyld
-	url = https://github.com/xnuports/dyld.git
+	url = https://github.com/apple-oss-distributions/dyld.git
+	branch = dyld-1378
 [submodule "lib/libdispatch"]
 	path = lib/libdispatch
-	url = https://github.com/xnuports/libdispatch.git
+	url = https://github.com/apple-oss-distributions/libdispatch.git
+	branch = libdispatch-1542.100.32
 [submodule "lib/apple_internal_sdk"]
 	path = lib/apple_internal_sdk
 	url = https://github.com/xnuports/apple_internal_sdk.git

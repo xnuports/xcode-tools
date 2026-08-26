@@ -130,7 +130,7 @@ Two clean builds of the default set produce byte-identical binaries.
 |---|---|
 | `src/xcode/` | our reimplementations (BSD-3-Clause) |
 | `src/xcode/common/` | shared helpers: plist parsers, SDK discovery, self-location |
-| `src/` | source submodules — cctools, ld64, llvm-project, swift, cpython, git, … |
+| `src/` | source submodules — `distribution-Developer_Tools` (cctools, ld64, tapi, …), llvm-project, swift, cpython, git |
 | `lib/` | library submodules — corecrypto, dyld, libplatform, libdispatch, `apple_internal_sdk` |
 | `include/` | headers vendored where the SDK ships none |
 | `mk/` | the build system |
@@ -150,6 +150,18 @@ Two clean builds of the default set produce byte-identical binaries.
 
 `docs/CLAUDE.md` has the full picture, including what each component needed and
 why several of them were harder than they looked.
+
+## Sources
+
+Submodules track upstream rather than forks: llvm-project and swift from
+swiftlang, the Apple components from apple-oss-distributions (corecrypto from
+`apple/corecrypto`), CPython from python/cpython — each pinned to a release tag
+or branch. Currently clang 21.1.6 (`swift-6.3.3-RELEASE`), ld64 957.1, cctools
+1035.1.102, tapi 1600.0.11.8.
+
+A few submodules stay on xnuports forks — `apple_internal_sdk`, `ld-internals`,
+`PlistBuddy`, `pngcrush`, `python-apple-support` — because they carry local
+changes or have no upstream to track.
 
 ## License
 

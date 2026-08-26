@@ -31,7 +31,7 @@ PROGS+=	xcode/xctrace xctrace usr/bin
 
 .if ${MK_TOOLCHAIN:tl} == "yes"
 # ------------------------------------------------------------------
-# cctools (src/dist-dev-tools/cctools) -- MK_TOOLCHAIN tier.
+# cctools (src/distribution-Developer_Tools/cctools) -- MK_TOOLCHAIN tier.
 #
 # Apple ships these in XcodeDefault.xctoolchain/usr/bin, not in
 # Developer/usr/bin (docs/DOCUMENTATION.md section 3.1).
@@ -48,26 +48,26 @@ PROGS+=	xcode/xctrace xctrace usr/bin
 # a mk/tool.d/<prog>.mk pinning T_SRCS to its own source; ar/ and otool/
 # are per-program directories and auto-discover.
 # ------------------------------------------------------------------
-PROGS+=	dist-dev-tools/cctools/misc bitcode_strip ${XCTOOLCHAIN}/usr/bin
-PROGS+=	dist-dev-tools/cctools/misc codesign_allocate ${XCTOOLCHAIN}/usr/bin
-PROGS+=	dist-dev-tools/cctools/misc ctf_insert ${XCTOOLCHAIN}/usr/bin
-PROGS+=	dist-dev-tools/cctools/misc install_name_tool ${XCTOOLCHAIN}/usr/bin
-PROGS+=	dist-dev-tools/cctools/misc lipo ${XCTOOLCHAIN}/usr/bin
-PROGS+=	dist-dev-tools/cctools/misc libtool ${XCTOOLCHAIN}/usr/bin
-PROGS+=	dist-dev-tools/cctools/misc nm-classic ${XCTOOLCHAIN}/usr/bin
-PROGS+=	dist-dev-tools/cctools/misc nmedit ${XCTOOLCHAIN}/usr/bin
-PROGS+=	dist-dev-tools/cctools/misc segedit ${XCTOOLCHAIN}/usr/bin
-PROGS+=	dist-dev-tools/cctools/misc size-classic ${XCTOOLCHAIN}/usr/bin
-PROGS+=	dist-dev-tools/cctools/misc strings ${XCTOOLCHAIN}/usr/bin
-PROGS+=	dist-dev-tools/cctools/misc strip ${XCTOOLCHAIN}/usr/bin
-PROGS+=	dist-dev-tools/cctools/misc vtool ${XCTOOLCHAIN}/usr/bin
-PROGS+=	dist-dev-tools/cctools/ar ar ${XCTOOLCHAIN}/usr/bin
-PROGS+=	dist-dev-tools/cctools/otool otool-classic ${XCTOOLCHAIN}/usr/bin
+PROGS+=	distribution-Developer_Tools/cctools/misc bitcode_strip ${XCTOOLCHAIN}/usr/bin
+PROGS+=	distribution-Developer_Tools/cctools/misc codesign_allocate ${XCTOOLCHAIN}/usr/bin
+PROGS+=	distribution-Developer_Tools/cctools/misc ctf_insert ${XCTOOLCHAIN}/usr/bin
+PROGS+=	distribution-Developer_Tools/cctools/misc install_name_tool ${XCTOOLCHAIN}/usr/bin
+PROGS+=	distribution-Developer_Tools/cctools/misc lipo ${XCTOOLCHAIN}/usr/bin
+PROGS+=	distribution-Developer_Tools/cctools/misc libtool ${XCTOOLCHAIN}/usr/bin
+PROGS+=	distribution-Developer_Tools/cctools/misc nm-classic ${XCTOOLCHAIN}/usr/bin
+PROGS+=	distribution-Developer_Tools/cctools/misc nmedit ${XCTOOLCHAIN}/usr/bin
+PROGS+=	distribution-Developer_Tools/cctools/misc segedit ${XCTOOLCHAIN}/usr/bin
+PROGS+=	distribution-Developer_Tools/cctools/misc size-classic ${XCTOOLCHAIN}/usr/bin
+PROGS+=	distribution-Developer_Tools/cctools/misc strings ${XCTOOLCHAIN}/usr/bin
+PROGS+=	distribution-Developer_Tools/cctools/misc strip ${XCTOOLCHAIN}/usr/bin
+PROGS+=	distribution-Developer_Tools/cctools/misc vtool ${XCTOOLCHAIN}/usr/bin
+PROGS+=	distribution-Developer_Tools/cctools/ar ar ${XCTOOLCHAIN}/usr/bin
+PROGS+=	distribution-Developer_Tools/cctools/otool otool-classic ${XCTOOLCHAIN}/usr/bin
 
 # ld64 -- the linker.  Needs libtapi, which the llvm port stages, so it
 # only builds with MK_PORTS=yes; without it the link fails on tapi::*.
 .if ${MK_PORTS:tl} == "yes"
-PROGS+=	dist-dev-tools/ld64 ld ${XCTOOLCHAIN}/usr/bin
+PROGS+=	distribution-Developer_Tools/ld64 ld ${XCTOOLCHAIN}/usr/bin
 .endif
 
 # libtool builds against src/cctools-helpers/, our reimplementation of
@@ -81,28 +81,28 @@ PROGS+=	dist-dev-tools/ld64 ld ${XCTOOLCHAIN}/usr/bin
 .endif # MK_TOOLCHAIN
 
 # ------------------------------------------------------------------
-# developer_cmds (src/dist-dev-tools/developer_cmds).
+# developer_cmds (src/distribution-Developer_Tools/developer_cmds).
 #
 # Xcode ships these in XcodeDefault.xctoolchain/usr/bin -- not in
 # Developer/usr/bin, and not to be confused with the system copies in
 # /usr/bin, which are apple-core's territory.  lorder is a shell script.
 # ------------------------------------------------------------------
-PROGS+=	dist-dev-tools/developer_cmds/asa asa ${XCTOOLCHAIN}/usr/bin
-PROGS+=	dist-dev-tools/developer_cmds/ctags ctags ${XCTOOLCHAIN}/usr/bin
-PROGS+=	dist-dev-tools/developer_cmds/indent indent ${XCTOOLCHAIN}/usr/bin
-PROGS+=	dist-dev-tools/developer_cmds/lorder lorder ${XCTOOLCHAIN}/usr/bin
-PROGS+=	dist-dev-tools/developer_cmds/rpcgen rpcgen ${XCTOOLCHAIN}/usr/bin
-PROGS+=	dist-dev-tools/developer_cmds/unifdef unifdef ${XCTOOLCHAIN}/usr/bin
+PROGS+=	distribution-Developer_Tools/developer_cmds/asa asa ${XCTOOLCHAIN}/usr/bin
+PROGS+=	distribution-Developer_Tools/developer_cmds/ctags ctags ${XCTOOLCHAIN}/usr/bin
+PROGS+=	distribution-Developer_Tools/developer_cmds/indent indent ${XCTOOLCHAIN}/usr/bin
+PROGS+=	distribution-Developer_Tools/developer_cmds/lorder lorder ${XCTOOLCHAIN}/usr/bin
+PROGS+=	distribution-Developer_Tools/developer_cmds/rpcgen rpcgen ${XCTOOLCHAIN}/usr/bin
+PROGS+=	distribution-Developer_Tools/developer_cmds/unifdef unifdef ${XCTOOLCHAIN}/usr/bin
 
 # ------------------------------------------------------------------
-# headerdoc (src/dist-dev-tools/headerdoc) -- Perl, installed as scripts.
+# headerdoc (src/distribution-Developer_Tools/headerdoc) -- Perl, installed as scripts.
 # Xcode ships these in Developer/usr/bin.
 # ------------------------------------------------------------------
-PROGS+=	dist-dev-tools/headerdoc headerdoc2html usr/bin
-PROGS+=	dist-dev-tools/headerdoc/xmlman hdxml2manxml usr/bin
-PROGS+=	dist-dev-tools/headerdoc/xmlman xml2man usr/bin
-PROGS+=	dist-dev-tools/headerdoc/xmlman resolveLinks usr/bin
-PROGS+=	dist-dev-tools/headerdoc gatherheaderdoc usr/bin
+PROGS+=	distribution-Developer_Tools/headerdoc headerdoc2html usr/bin
+PROGS+=	distribution-Developer_Tools/headerdoc/xmlman hdxml2manxml usr/bin
+PROGS+=	distribution-Developer_Tools/headerdoc/xmlman xml2man usr/bin
+PROGS+=	distribution-Developer_Tools/headerdoc/xmlman resolveLinks usr/bin
+PROGS+=	distribution-Developer_Tools/headerdoc gatherheaderdoc usr/bin
 
 # ------------------------------------------------------------------
 # pngcrush (src/pngcrush) -- Developer/usr/bin.  Bundles its own libpng

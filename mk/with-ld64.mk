@@ -1,6 +1,6 @@
 # mk/with-ld64.mk
 #
-# Shared fragment for programs built out of src/dist-dev-tools/ld64.
+# Shared fragment for programs built out of src/distribution-Developer_Tools/ld64.
 # Translates ld64.xcodeproj's build settings, plus the generated headers
 # its Xcode script phases produce (see mk/tool.d/ld.mk).
 #
@@ -9,7 +9,7 @@
 .if !defined(_WITH_LD64_MK)
 _WITH_LD64_MK=	yes
 
-LD64=		${TOP}/src/dist-dev-tools/ld64
+LD64=		${TOP}/src/distribution-Developer_Tools/ld64
 LD64_SRC=	${LD64}/src
 LD64_GEN=	${TOP}/build/gen/ld64
 
@@ -70,7 +70,7 @@ TAPI_LIB=	${TOP}/build/release/${XCTOOLCHAIN}/usr/lib/libtapi.dylib
 T_LDADD+=	${TAPI_LIB} -Wl,-rpath,@executable_path/../lib
 
 # libstuff and the cctools/tapi/llvm headers ld64 parses Mach-O with.
-T_CFLAGS+=	-I${TOP}/src/dist-dev-tools/tapi/include
+T_CFLAGS+=	-I${TOP}/src/distribution-Developer_Tools/tapi/include
 .include "${TOP}/mk/with-libstuff.mk"
 
 .endif # _WITH_LD64_MK

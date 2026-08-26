@@ -68,9 +68,9 @@ xcode-tools/
 │   ├── Makefile                    # .for loop over mk/progs.mk
 │   ├── PlistBuddy/                 # Submodule: open-source PlistBuddy
 │   ├── python-apple-support/       # Submodule: Python build system for Apple platforms
-│   ├── cpython/                    # Submodule: CPython 3.14.7 source
-│   ├── git/                        # Submodule: Git v2.55.0 source
-│   ├── dist-dev-tools/             # Submodule: Apple open-source dev tools (nested)
+│   ├── cpython/                    # Submodule: CPython v3.14.6 (upstream)
+│   ├── git/                        # Submodule: Apple's Git-155 (upstream)
+│   ├── distribution-Developer_Tools/             # Submodule: Apple open-source dev tools (nested)
 │   │   ├── CoreOSMakefiles/        # Build system makefiles
 │   │   ├── Git/                    # Apple's Git fork (Git-155)
 │   │   ├── bison/                  # GNU Bison
@@ -137,41 +137,56 @@ execution requires the LLVM toolchain to be built and installed first.**
 
 ## 5. Submodules with Available Source
 
+**Sources track upstream, not forks.** `llvm-project` and `swift` come from
+swiftlang, the Apple components from apple-oss-distributions (corecrypto from
+`apple/corecrypto`), and CPython from python/cpython, each pinned to the tag or
+release branch named below. The remaining submodules — `apple_internal_sdk`,
+`ld-internals`, `PlistBuddy`, `pngcrush`, `python-apple-support` — stay on
+xnuports forks, either because they carry local changes or because there is no
+upstream to track.
+
+Component versions are read from each submodule's own git tag at build time
+(see `CCTOOLS_VERSION` in `mk/with-cctools.mk` and `LD64_VERSION` in
+`mk/tool.d/ld.mk`) rather than written down, because a hardcoded version lies
+the moment a submodule is bumped. `distribution-Developer_Tools/release.json`
+has exactly that problem and is not used.
+
+
 These submodules provide source code for tools previously listed as "no source":
 
 | Submodule | Path | Version | Tools Covered |
 |-----------|------|---------|---------------|
-| `llvm-project` | `src/llvm-project/` | swift-6.4.x | clang, swift-frontend, llvm-*, lld, lldb, dsymutil, dwarfdump, clang-format, clangd |
-| `swift` | `src/swift/` | heads/main | swiftc, swift-frontend, swift-driver, SPM, swift-format, sourcekitd |
-| `objc4` | `src/objc4/` | heads/main | ObjC runtime (libobjc.A.dylib) |
-| `dist-dev-tools` | `src/dist-dev-tools/` | 26.0.1 | See nested submodules below |
-| `git` | `src/git/` | v2.55.0 | git, git-receive-pack, git-shell, git-upload-pack |
-| `cpython` | `src/cpython/` | v3.14.7 | python3, pip3, pydoc3, 2to3 |
+| `llvm-project` | `src/llvm-project/` | swift-6.3.3-RELEASE | clang, swift-frontend, llvm-*, lld, lldb, dsymutil, dwarfdump, clang-format, clangd |
+| `swift` | `src/swift/` | swift-6.3.3-RELEASE | swiftc, swift-frontend, swift-driver, SPM, swift-format, sourcekitd |
+| `objc4` | `src/objc4/` | rel/objc4-951 | ObjC runtime (libobjc.A.dylib) |
+| `distribution-Developer_Tools` | `src/distribution-Developer_Tools/` | rel/Developer_Tools-26 | See nested submodules below |
+| `git` | `src/git/` | Git-155 | git, git-receive-pack, git-shell, git-upload-pack |
+| `cpython` | `src/cpython/` | v3.14.6 | python3, pip3, pydoc3, 2to3 |
 | `python-apple-support` | `src/python-apple-support/` | heads/main | **Reference only** — a meta-build system for Python XCFrameworks. We build Python ourselves, so this is kept for reference rather than used. |
 | `PlistBuddy` | `src/PlistBuddy/` | heads/main | PlistBuddy |
 | `pngcrush` | `src/pngcrush/` | v1.8.1 | pngcrush |
 | `xctoolchain` | `xctoolchain/` | heads/master | **Reference only** — generic `.xcconfig` build settings, not a source of the `.xctoolchain` bundle format |
 | `ld-internals` | `include/ld-internals/` | heads/main | ld64 private headers |
 
-### dist-dev-tools Nested Submodules
+### distribution-Developer_Tools Nested Submodules
 
 | Sub-submodule | Path | Version | Tools |
 |--------------|------|---------|-------|
-| `cctools` | `src/dist-dev-tools/cctools/` | 1030.6.3 | ar, nm, lipo, strip, otool, vtool, install_name_tool, bitcode_strip, codesign_allocate, ctf_insert, libtool, segedit, etc. |
-| `ld64` | `src/dist-dev-tools/ld64/` | 956.6 | ld, ld-classic |
-| `developer_cmds` | `src/dist-dev-tools/developer_cmds/` | 87 | asa, ctags, indent, lorder, rpcgen, unifdef |
-| `headerdoc` | `src/dist-dev-tools/headerdoc/` | 8.9.32 | headerdoc2html, hdxml2manxml |
-| `bison` | `src/dist-dev-tools/bison/` | 16 | bison |
-| `flex` | `src/dist-dev-tools/flex/` | 35 | flex, flex++ |
-| `gnumake` | `src/dist-dev-tools/gnumake/` | 136 | make, gnumake |
-| `gperf` | `src/dist-dev-tools/gperf/` | 15 | gperf |
-| `gm4` | `src/dist-dev-tools/gm4/` | 19 | gm4 |
-| `tapi` | `src/dist-dev-tools/tapi/` | 1600.0.11.8 | tapi |
-| `pb_makefiles` | `src/dist-dev-tools/pb_makefiles/` | 1009 | Build system makefiles |
-| `bootstrap_cmds` | `src/dist-dev-tools/bootstrap_cmds/` | 138 | Bootstrap commands |
-| `CoreOSMakefiles` | `src/dist-dev-tools/CoreOSMakefiles/` | 79 | Build system infrastructure |
-| `Git` | `src/dist-dev-tools/Git/` | 155 | Apple's Git fork |
-| `libgit2` | `src/dist-dev-tools/libgit2/` | 30 | Git library |
+| `cctools` | `src/distribution-Developer_Tools/cctools/` | 1035.1.102 | ar, nm, lipo, strip, otool, vtool, install_name_tool, bitcode_strip, codesign_allocate, ctf_insert, libtool, segedit, etc. |
+| `ld64` | `src/distribution-Developer_Tools/ld64/` | 957.1 | ld, ld-classic |
+| `developer_cmds` | `src/distribution-Developer_Tools/developer_cmds/` | 87 | asa, ctags, indent, lorder, rpcgen, unifdef |
+| `headerdoc` | `src/distribution-Developer_Tools/headerdoc/` | 8.9.32 | headerdoc2html, hdxml2manxml |
+| `bison` | `src/distribution-Developer_Tools/bison/` | 16 | bison |
+| `flex` | `src/distribution-Developer_Tools/flex/` | 35 | flex, flex++ |
+| `gnumake` | `src/distribution-Developer_Tools/gnumake/` | 136 | make, gnumake |
+| `gperf` | `src/distribution-Developer_Tools/gperf/` | 15 | gperf |
+| `gm4` | `src/distribution-Developer_Tools/gm4/` | 19 | gm4 |
+| `tapi` | `src/distribution-Developer_Tools/tapi/` | 1600.0.11.8 | tapi |
+| `pb_makefiles` | `src/distribution-Developer_Tools/pb_makefiles/` | 1009 | Build system makefiles |
+| `bootstrap_cmds` | `src/distribution-Developer_Tools/bootstrap_cmds/` | 138 | Bootstrap commands |
+| `CoreOSMakefiles` | `src/distribution-Developer_Tools/CoreOSMakefiles/` | 79 | Build system infrastructure |
+| `Git` | `src/distribution-Developer_Tools/Git/` | 155 | Apple's Git fork |
+| `libgit2` | `src/distribution-Developer_Tools/libgit2/` | 30 | Git library |
 
 ---
 
@@ -222,18 +237,18 @@ These submodules provide source code for tools previously listed as "no source":
 | CreateIPA | App Store | ❌ No source (Apple proprietary) |
 | iphoneos-optimize | Asset | ❌ No source (Apple proprietary) |
 | placeholderutil | App Store | ❌ No source (Apple proprietary) |
-| xml2man | Docs | ✅ Source: `src/dist-dev-tools/headerdoc/xmlman/` — built |
+| xml2man | Docs | ✅ Source: `src/distribution-Developer_Tools/headerdoc/xmlman/` — built |
 | agent, ba-package, ba-serve | Build Assistant | ❌ No source (Apple internal) |
 | backgroundassets-debug | Debug | ❌ No source (Apple internal) |
 | compositeMD5 | Archive | ❌ No source (Apple internal) |
 | convertRichTextToAscii | Conversion | ❌ No source (Apple internal) |
 | filtercalltree | Debug | ❌ No source (Apple internal) |
-| resolveLinks | File | ✅ Source: `src/dist-dev-tools/headerdoc/xmlman/` — built |
+| resolveLinks | File | ✅ Source: `src/distribution-Developer_Tools/headerdoc/xmlman/` — built |
 | swinfo | File | ❌ No source (Apple internal) |
 | stringdups | File | ❌ No source (Apple internal) |
 | extractLocStrings | Localization | ❌ No source (Apple proprietary) |
-| gatherheaderdoc | Docs | ✅ Available via dist-dev-tools/headerdoc (as `gatherHeaderDoc.pl`) |
-| unifdef | Dev command | ✅ Source: `src/dist-dev-tools/developer_cmds/unifdef/` |
+| gatherheaderdoc | Docs | ✅ Available via distribution-Developer_Tools/headerdoc (as `gatherHeaderDoc.pl`) |
+| unifdef | Dev command | ✅ Source: `src/distribution-Developer_Tools/developer_cmds/unifdef/` |
 | c89, c99 | Compatibility | ✅ Covered by clang (aliased) |
 | metal, metal-package-builder | Graphics | ❌ No source (Apple proprietary) |
 | mig | IPC | ❌ No source (not in open-source releases) |
@@ -554,7 +569,7 @@ end-to-end: our clang, our ld, our libtapi
 ```
 
 `ld -v` reports in Apple's format:
-`@(#)PROGRAM:ld  PROJECT:ld64-956.6`.
+`@(#)PROGRAM:ld  PROJECT:ld64-957.1`.
 
 **`-arch arm64` works, and the fix was a tapi bug, not something needing
 ld-prime.** Both arm64 and arm64e link and run, and the arm64 output carries the
@@ -1017,7 +1032,7 @@ All code must comply with these rules:
 git clone --recurse-submodules https://github.com/xnuports/xcode-tools.git
 cd xcode-tools
 
-# 2. Initialize nested submodules (dist-dev-tools has sub-submodules)
+# 2. Initialize nested submodules (distribution-Developer_Tools has sub-submodules)
 git submodule update --init --recursive
 
 # 3. Build all tools we can build right now

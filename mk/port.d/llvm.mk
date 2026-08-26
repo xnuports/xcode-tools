@@ -91,11 +91,11 @@ P_PROGS=	bin/clang \
 ${P_WORKDIR}/tapi-src/.patched:
 	@mkdir -p ${P_WORKDIR}
 	@rsync -a --delete --exclude '.git' \
-		${TOP}/src/dist-dev-tools/tapi/ ${P_WORKDIR}/tapi-src/
+		${TOP}/src/distribution-Developer_Tools/tapi/ ${P_WORKDIR}/tapi-src/
 	@cd ${P_WORKDIR}/tapi-src && ${TOP}/mk/scripts/tapi-shim-linker-flag.sh \
 		${TOP}/mk/scripts/tapi-linker-flag-shim.cmake
 	@cd ${P_WORKDIR}/tapi-src && ${TOP}/mk/scripts/tapi-fix-diagnostics.sh
-	@cd ${P_WORKDIR}/tapi-src && ${TOP}/mk/scripts/tapi-modernize-llvm-api.sh
+	@cd ${P_WORKDIR}/tapi-src && ${TOP}/mk/scripts/tapi-modernize-llvm-api.sh ${TOP}/src/llvm-project
 # Patches come last, so they are written against the post-script tree.
 # These are the changes the scripts cannot honestly express: real edits
 # rather than renames.  bmake does not glob in .for, hence the != here.

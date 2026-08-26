@@ -23,7 +23,7 @@ xcode-tools/
 │   ├── python-apple-support/         # Submodule: Python build system for Apple platforms
 │   ├── cpython/                      # Submodule: CPython 3.14.7 source
 │   ├── git/                          # Submodule: Git v2.55.0 source
-│   ├── dist-dev-tools/               # Submodule: Apple open-source dev tools (nested submodules)
+│   ├── distribution-Developer_Tools/               # Submodule: Apple open-source dev tools (nested submodules)
 │   │   ├── CoreOSMakefiles/          # Build system makefiles
 │   │   ├── Git/                      # Apple's Git fork (Git-155)
 │   │   ├── bison/                    # GNU Bison
@@ -430,18 +430,18 @@ We currently have **10 open-source reimaginations** of Apple's command-line tool
 | swift-format | Toolchain usr/bin | `src/swift/` | ✅ Source available |
 | clang-format | Toolchain usr/bin | `src/llvm-project/clang-tools-extra/` | ✅ Source available |
 | clangd | Toolchain usr/bin | `src/llvm-project/clang-tools-extra/` | ✅ Source available |
-| ld | Toolchain usr/bin | `src/dist-dev-tools/ld64/` | ✅ Source available (submodule) |
-| ld-classic | Toolchain usr/bin | `src/dist-dev-tools/ld64/` | ✅ Source available |
-| ar | Toolchain usr/bin | `src/dist-dev-tools/cctools/` | ✅ Source available |
-| libtool | Toolchain usr/bin | `src/dist-dev-tools/cctools/` | ✅ Source available |
-| lipo | Toolchain usr/bin | `src/dist-dev-tools/cctools/` | ✅ Source available |
+| ld | Toolchain usr/bin | `src/distribution-Developer_Tools/ld64/` | ✅ Source available (submodule) |
+| ld-classic | Toolchain usr/bin | `src/distribution-Developer_Tools/ld64/` | ✅ Source available |
+| ar | Toolchain usr/bin | `src/distribution-Developer_Tools/cctools/` | ✅ Source available |
+| libtool | Toolchain usr/bin | `src/distribution-Developer_Tools/cctools/` | ✅ Source available |
+| lipo | Toolchain usr/bin | `src/distribution-Developer_Tools/cctools/` | ✅ Source available |
 | otool | Toolchain usr/bin | `src/llvm-project/llvm/` | ✅ In a stock toolchain `otool` is `llvm-otool`; the cctools build ships as `otool-classic` |
 | nm | Toolchain usr/bin | `src/llvm-project/llvm/` | ✅ In a stock toolchain `nm` is a symlink to `llvm-nm`; the cctools build ships as `nm-classic` |
-| ranlib | Toolchain usr/bin | `src/dist-dev-tools/cctools/` | ✅ Source available |
-| strip | Toolchain usr/bin | `src/dist-dev-tools/cctools/` | ✅ Source available |
+| ranlib | Toolchain usr/bin | `src/distribution-Developer_Tools/cctools/` | ✅ Source available |
+| strip | Toolchain usr/bin | `src/distribution-Developer_Tools/cctools/` | ✅ Source available |
 | dsymutil | Toolchain usr/bin | `src/llvm-project/llvm/` | ✅ Source available |
 | dwarfdump | Toolchain usr/bin | `src/llvm-project/llvm/` | ✅ Source available |
-| bitcode_strip | Toolchain usr/bin | `src/dist-dev-tools/cctools/` | ✅ Source available |
+| bitcode_strip | Toolchain usr/bin | `src/distribution-Developer_Tools/cctools/` | ✅ Source available |
 | llvm-cov | Toolchain usr/bin | `src/llvm-project/llvm/` | ✅ Source available |
 | llvm-profdata | Toolchain usr/bin | `src/llvm-project/llvm/` | ✅ Source available |
 | llvm-nm | Toolchain usr/bin | `src/llvm-project/llvm/` | ✅ Source available |
@@ -451,15 +451,15 @@ We currently have **10 open-source reimaginations** of Apple's command-line tool
 | llvm-cxxfilt | Toolchain usr/bin | `src/llvm-project/llvm/` | ✅ Source available |
 | llvm-readtapi | Toolchain usr/bin | `src/llvm-project/llvm/` | ✅ Source available |
 | llvm-stat-cache | Toolchain usr/bin | `src/llvm-project/llvm/` | ✅ Source available |
-| tapi | Toolchain usr/lib | `src/dist-dev-tools/tapi/` | ✅ Source available |
-| make | usr/bin | `src/dist-dev-tools/gnumake/` | ✅ Source available |
-| gnumake | usr/bin | `src/dist-dev-tools/gnumake/` | ✅ Source available |
+| tapi | Toolchain usr/lib | `src/distribution-Developer_Tools/tapi/` | ✅ Source available |
+| make | usr/bin | `src/distribution-Developer_Tools/gnumake/` | ✅ Source available |
+| gnumake | usr/bin | `src/distribution-Developer_Tools/gnumake/` | ✅ Source available |
 | g++ | usr/bin | `src/llvm-project/` (via clang) | ✅ Source available |
 | gcc | usr/bin | `src/llvm-project/` (via clang) | ✅ Source available |
-| bison | Toolchain usr/bin | `src/dist-dev-tools/bison/` | ✅ Source available |
-| flex | Toolchain usr/bin | `src/dist-dev-tools/flex/` | ✅ Source available |
-| gm4 | Toolchain usr/bin | `src/dist-dev-tools/gm4/` | ✅ Source available |
-| gperf | Toolchain usr/bin | `src/dist-dev-tools/gperf/` | ✅ Source available |
+| bison | Toolchain usr/bin | `src/distribution-Developer_Tools/bison/` | ✅ Source available |
+| flex | Toolchain usr/bin | `src/distribution-Developer_Tools/flex/` | ✅ Source available |
+| gm4 | Toolchain usr/bin | `src/distribution-Developer_Tools/gm4/` | ✅ Source available |
+| gperf | Toolchain usr/bin | `src/distribution-Developer_Tools/gperf/` | ✅ Source available |
 
 ### 3.2 Apple-Specific Tools (No Open Source Equivalents)
 
@@ -490,8 +490,8 @@ We currently have **10 open-source reimaginations** of Apple's command-line tool
 | xcdebug | Debug | Debug log analysis |
 | xcindex-test | Debug | Index testing |
 | gcov | Coverage | Coverage data processing | ✅ Alternative: llvm-cov (`src/llvm-project/`) |
-| headerdoc2html | Docs | Header documentation generator | ✅ Source available (`src/dist-dev-tools/headerdoc/`) |
-| hdxml2manxml | Docs | Header docs to man page XML | ✅ Source available (`src/dist-dev-tools/headerdoc/`) |
+| headerdoc2html | Docs | Header documentation generator | ✅ Source available (`src/distribution-Developer_Tools/headerdoc/`) |
+| hdxml2manxml | Docs | Header docs to man page XML | ✅ Source available (`src/distribution-Developer_Tools/headerdoc/`) |
 | sdef | Scripting | Scripting definition file generator |
 | sdp | Scripting | Scripting definition compiler |
 | scntool | SceneKit | SceneKit asset tool |
@@ -514,7 +514,7 @@ We currently have **10 open-source reimaginations** of Apple's command-line tool
 | xcstringstool | Localization | String manipulation tool |
 | xctest | Testing | Unit test runner |
 | xed | IDE | Source editor (GUI) | N/A |
-| xml2man | Docs | Man page generator | ✅ Available via headerdoc (`src/dist-dev-tools/headerdoc/`) |
+| xml2man | Docs | Man page generator | ✅ Available via headerdoc (`src/distribution-Developer_Tools/headerdoc/`) |
 | agent | Agent | Background service management | N/A (Apple internal) |
 | ba-package | Build | Build assistant packaging | N/A (Apple internal) |
 | ba-serve | Build | Build assistant server | N/A (Apple internal) |
@@ -532,7 +532,7 @@ We currently have **10 open-source reimaginations** of Apple's command-line tool
 | stringdups | File | String deduplication | N/A (Apple internal) |
 | filtercalltree | Debug | Call tree filtering | N/A (Apple internal) |
 | extractLocStrings | Localization | Localization string extraction | N/A (Apple internal) |
-| gatherheaderdoc | Docs | Header doc gathering | ✅ Source available (`src/dist-dev-tools/headerdoc/`) |
+| gatherheaderdoc | Docs | Header doc gathering | ✅ Source available (`src/distribution-Developer_Tools/headerdoc/`) |
 | desdp | Debug | Dispatch profiling tool |
 | desdp | Debug | Dispatch profiling tool |
 | stapler | Code Signing | Signature stapling | ❌ |
@@ -577,7 +577,7 @@ We currently have **10 open-source reimaginations** of Apple's command-line tool
 - swift-demangle (via llvm-project)
 - libSwiftSourceKit (via swift submodule)
 
-**Build & Assembly Tools (we have via dist-dev-tools):**
+**Build & Assembly Tools (we have via distribution-Developer_Tools):**
 - ar, ranlib, libtool, ld (via ld64/cctools)
 - lipo, otool, nm (via cctools)
 - dsymutil (via llvm-project)
@@ -607,8 +607,8 @@ We currently have **10 open-source reimaginations** of Apple's command-line tool
 - swift-static
 - swift-symbolgraph-extract
 - swift-synthesize-interface
-- vtool (✅ available via dist-dev-tools/cctools/)
-- unifdef (✅ available via dist-dev-tools/developer_cmds/)
+- vtool (✅ available via distribution-Developer_Tools/cctools/)
+- unifdef (✅ available via distribution-Developer_Tools/developer_cmds/)
 - unwinddump
 - c89, c99
 
@@ -659,7 +659,7 @@ We currently have **10 open-source reimaginations** of Apple's command-line tool
 - Apple-specific Clang extensions (CAS, caching)
 - `clang-cache` and `clang-cas-test` (Apple's Caching Clang)
 - Metal compiler
-- MIG (requires dist-dev-tools)
+- MIG (requires distribution-Developer_Tools)
 
 ### swift Submodule
 
@@ -678,9 +678,9 @@ We currently have **10 open-source reimaginations** of Apple's command-line tool
 - Swift plugin server
 - Swift symbol graph extraction (partially covered)
 
-### dist-dev-tools Submodule
+### distribution-Developer_Tools Submodule
 
-**Source:** `src/dist-dev-tools/` (Apple Developer Tools 26.0.1)
+**Source:** `src/distribution-Developer_Tools/` (Apple Developer Tools 26.0.1)
 
 **What it covers:**
 - cctools (ar, ranlib, strip, lipo, otool, nm, strings, size, vtool, segedit, etc.)
@@ -699,7 +699,7 @@ We currently have **10 open-source reimaginations** of Apple's command-line tool
 - Missing `mig` (Mach Interface Generator — not in open-source releases)
 - Missing `dsymutil` in cctools (use LLVM's from `src/llvm-project/` instead)
 
-### cctools (within dist-dev-tools)
+### cctools (within distribution-Developer_Tools)
 
 **What it covers:**
 - `ar` — static library archiver
@@ -719,7 +719,7 @@ We currently have **10 open-source reimaginations** of Apple's command-line tool
 - `check_dylib`, `checksyms`, `cmpdylib`, `indr`, `inout`, `pagestuff`, `seg_addr_table`, `seg_hack`
 - `redo_prebinding` (legacy)
 
-### ld64 (within dist-dev-tools)
+### ld64 (within distribution-Developer_Tools)
 
 **What it covers:**
 - `ld` — Apple's Mach-O linker
@@ -728,7 +728,7 @@ We currently have **10 open-source reimaginations** of Apple's command-line tool
 **Gaps:**
 - Requires `libgit2` and other build dependencies
 
-### developer_cmds (within dist-dev-tools)
+### developer_cmds (within distribution-Developer_Tools)
 
 **What it covers:**
 - `asa` — append space after each line (for Fortran compatibility)
@@ -738,14 +738,14 @@ We currently have **10 open-source reimaginations** of Apple's command-line tool
 - `rpcgen` — RPC protocol generator
 - `unifdef` — conditional compilation removal
 
-### headerdoc (within dist-dev-tools)
+### headerdoc (within distribution-Developer_Tools)
 
 **What it covers:**
 - `headerdoc2html` — header documentation to HTML
 - `hdxml2manxml` — header doc XML to man page XML
 - `gatherHeaderDoc.pl` — gathering header documentation
 
-### pb_makefiles (within dist-dev-tools)
+### pb_makefiles (within distribution-Developer_Tools)
 
 **What it covers:**
 - Project Builder build system makefiles
@@ -789,7 +789,7 @@ We currently have **10 open-source reimaginations** of Apple's command-line tool
 **What it covers:**
 - Full Git source code (git, git-receive-pack, git-shell, git-upload-archive, git-upload-pack)
 - Apple's Xcode ships Git in its Developer/usr/bin — our source matches the same Git version
-- Includes `libgit2` is already available in dist-dev-tools (as a library)
+- Includes `libgit2` is already available in distribution-Developer_Tools (as a library)
 - Note: Apple's git includes Apple-specific patches (credential helpers, keychain integration)
 
 **Gaps:**
@@ -914,17 +914,17 @@ We currently have **10 open-source reimaginations** of Apple's command-line tool
 | Localization | ❌ | ✅ Full | genstrings, actool, etc. |
 | Python tools | ✅ Source available | ✅ Full | CPython 3.14.7 + build system |
 | Git | ✅ Source available | ✅ Full | Git v2.55.0 (`src/git/`) |
-| Binary tools (ar, strip, lipo, otool, nm, etc.) | ✅ Source available | ✅ Full | Via `src/dist-dev-tools/cctools/` |
-| Linker (ld, ld-classic) | ✅ Source available | ✅ Full | Via `src/dist-dev-tools/ld64/` |
-| Dev utilities (asa, ctags, indent, lorder, rpcgen, unifdef) | ✅ Source available | ✅ Full | Via `src/dist-dev-tools/developer_cmds/` |
-| Header docs (headerdoc2html, hdxml2manxml) | ✅ Source available | ✅ Full | Via `src/dist-dev-tools/headerdoc/` |
+| Binary tools (ar, strip, lipo, otool, nm, etc.) | ✅ Source available | ✅ Full | Via `src/distribution-Developer_Tools/cctools/` |
+| Linker (ld, ld-classic) | ✅ Source available | ✅ Full | Via `src/distribution-Developer_Tools/ld64/` |
+| Dev utilities (asa, ctags, indent, lorder, rpcgen, unifdef) | ✅ Source available | ✅ Full | Via `src/distribution-Developer_Tools/developer_cmds/` |
+| Header docs (headerdoc2html, hdxml2manxml) | ✅ Source available | ✅ Full | Via `src/distribution-Developer_Tools/headerdoc/` |
 | pngcrush | ✅ Source available | ✅ Full | pngcrush v1.8.1 (`src/pngcrush/`) |
 
 ## 8. Roadmap Recommendations
 
 ### Phase 1: Toolchain & Infrastructure
 1. Build and integrate the LLVM toolchain (clang, swiftc, ld, ar, etc.) from submodules
-2. Integrate dist-dev-tools (cctools, ld64, bison, flex, gnumake, gperf, developer_cmds, headerdoc, tapi, pb_makefiles)
+2. Integrate distribution-Developer_Tools (cctools, ld64, bison, flex, gnumake, gperf, developer_cmds, headerdoc, tapi, pb_makefiles)
 3. Build and install CPython 3.14.7 (`src/cpython/`) using `python-apple-support` build system
 4. Build and install Git v2.55.0 (`src/git/`)
 5. Set up SDK directories with info.ini files
@@ -964,7 +964,7 @@ We currently have **10 open-source reimaginations** of Apple's command-line tool
 | Swift | Apache-2.0 + BSD Runtime | `src/swift/` |
 | Objective-C runtime | Apple Public Source License | `src/objc4/` |
 | PlistBuddy | Apple Public Source License | `src/PlistBuddy/` |
-| dist-dev-tools | Mixed (Apple APL, GPL, BSD) | `src/dist-dev-tools/` |
+| distribution-Developer_Tools | Mixed (Apple APL, GPL, BSD) | `src/distribution-Developer_Tools/` |
 | Git | GPL-2.0 | `src/git/` |
 | CPython | PSF-2.0 | `src/cpython/` |
 | Python-Apple-Support | BSD-3-Clause | `src/python-apple-support/` |

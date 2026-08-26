@@ -1,7 +1,7 @@
 # mk/with-cctools.mk
 #
 # Shared fragment: include from any mk/tool.d/<prog>.mk built out of
-# src/dist-dev-tools/cctools.  Supplies the include paths and defines
+# src/distribution-Developer_Tools/cctools.  Supplies the include paths and defines
 # that Apple's cctools.xcconfig / public_tool.xcconfig set, translated
 # out of Xcode build settings.
 #
@@ -12,7 +12,7 @@
 .if !defined(_WITH_CCTOOLS_MK)
 _WITH_CCTOOLS_MK=	yes
 
-CCTOOLS=	${TOP}/src/dist-dev-tools/cctools
+CCTOOLS=	${TOP}/src/distribution-Developer_Tools/cctools
 
 # Xcode uses a recursive "include/**" header search.  Only the top level
 # and stuff/ are actually needed; adding the rest (mach/, mach-o/) would
@@ -38,8 +38,13 @@ T_CFLAGS+=	-DLTO_SUPPORT
 
 # Stamped into libstuff/apple_version.c and printed by several tools on
 # request.  Apple defaults this to "cctools-localbuild" outside their
-# build system; we know the real tag from dist-dev-tools/release.json.
-CCTOOLS_VERSION?=	cctools-1030.6.3
+# build system; we know the real tag from distribution-Developer_Tools/release.json.
+#
+# Taken from the submodule's own tag rather than written here or read
+# from distribution-Developer_Tools' release.json: both go stale the moment the
+# submodule is bumped, and release.json in particular lags its own
+# nested checkouts.
+CCTOOLS_VERSION!=	git -C ${CCTOOLS} describe --tags --abbrev=0 2>/dev/null || echo cctools-unknown
 T_CFLAGS+=	-DCURRENT_PROJECT_VERSION=\"${CCTOOLS_VERSION}\"
 
 # NOT set: CODEDIRECTORY_SUPPORT.  Apple enables it for macOS and Xcode

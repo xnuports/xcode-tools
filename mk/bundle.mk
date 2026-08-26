@@ -179,6 +179,24 @@ ${SDK_DIR}/SDKSettings.plist:
 
 # --- toolchain shims --------------------------------------------------
 #
+# --- Apple's tool aliases ---------------------------------------------
+#
+# A stock toolchain points nm and otool at the LLVM implementations,
+# keeping the cctools builds beside them as nm-classic and otool-classic
+# (which is how mk/progs.mk installs ours).  Recreate those two links
+# once the llvm port has supplied the targets; without it the names are
+# simply absent rather than wrong.
+
+bundle-aliases: bundle-dirs
+.for a t in nm llvm-nm otool llvm-otool
+	@if [ -e ${TC_DIR}/usr/bin/${t} ] && [ ! -e ${TC_DIR}/usr/bin/${a} ]; then \
+		ln -sfn ${t} ${TC_DIR}/usr/bin/${a}; \
+		${ECHO} "alias: ${a} -> ${t}"; \
+	 fi
+.endfor
+
+# --- toolchain shims --------------------------------------------------
+#
 # A stock toolchain ships cc and c++ as symlinks to clang and cpp as a
 # small script, so that is what we emit.  The cc/c++/clang wrapper
 # scripts this project carried before existed only because there was no

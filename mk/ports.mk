@@ -11,13 +11,13 @@
 .if ${MK_PORTS:tl} == "yes"
 
 # ------------------------------------------------------------------
-# GNU autoconf trees from dist-dev-tools.  Xcode ships all of these in
+# GNU autoconf trees from distribution-Developer_Tools.  Xcode ships all of these in
 # XcodeDefault.xctoolchain/usr/bin, except make/gnumake which live in
 # Developer/usr/bin.
 # ------------------------------------------------------------------
-PORTS+=	dist-dev-tools/gperf gperf ${XCTOOLCHAIN}/usr/bin
-PORTS+=	dist-dev-tools/flex flex ${XCTOOLCHAIN}/usr/bin
-PORTS+=	dist-dev-tools/gnumake gnumake usr/bin
+PORTS+=	distribution-Developer_Tools/gperf gperf ${XCTOOLCHAIN}/usr/bin
+PORTS+=	distribution-Developer_Tools/flex flex ${XCTOOLCHAIN}/usr/bin
+PORTS+=	distribution-Developer_Tools/gnumake gnumake usr/bin
 
 # ------------------------------------------------------------------
 # LLVM and Clang.  By far the longest build in the tree -- most of an
@@ -38,8 +38,8 @@ PORTS+=	llvm-project llvm ${XCTOOLCHAIN}/usr/bin
 # system headers or updating the vendored gnulib.  Their port.d
 # fragments are in place for whoever picks that up.
 #
-#PORTS+=	dist-dev-tools/gm4 gm4 ${XCTOOLCHAIN}/usr/bin
-#PORTS+=	dist-dev-tools/bison bison ${XCTOOLCHAIN}/usr/bin
+#PORTS+=	distribution-Developer_Tools/gm4 gm4 ${XCTOOLCHAIN}/usr/bin
+#PORTS+=	distribution-Developer_Tools/bison bison ${XCTOOLCHAIN}/usr/bin
 #
 # Apple also ships lex, yacc and m4 in the toolchain, but they are
 # distinct binaries rather than links to flex/bison/gm4, so they are not

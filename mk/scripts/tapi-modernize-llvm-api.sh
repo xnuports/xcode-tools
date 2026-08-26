@@ -24,8 +24,10 @@
 # lib/Core/FakeSymbols.cpp is a stub file: it defines a handful of LLVM
 # object-file entry points as llvm_unreachable so tapi does not have to
 # link the real implementations.  Being definitions, they have to track
-# LLVM's declarations exactly, and TapiUniversal::create has since gained
-# a SkipUnknownTriples parameter.
+# LLVM's declarations exactly, and TapiUniversal::create differs across
+# LLVM branches -- some declare a SkipUnknownTriples parameter, some do
+# not, and tapi drops disagree with them in both directions.  So rather
+# than assume, read what this LLVM declares and match it.
 #
 # Every edit here is mechanical and semantics-preserving.  The method
 # rewrites require a leading dot, so unrelated identifiers are untouched.
@@ -59,14 +61,38 @@ done
 [ "$changed" -gt 0 ] && \
 	echo "  modernized StringRef calls in $changed tapi files"
 
-# FakeSymbols.cpp stubs must match LLVM's current declarations.
+# FakeSymbols.cpp stubs must match LLVM's current declarations.  Which
+# way to adjust depends on the LLVM being built against, so consult its
+# header rather than assuming.
 fs="lib/Core/FakeSymbols.cpp"
-if [ -f "$fs" ] && ! grep -q 'SkipUnknownTriples' "$fs"; then
-	sed -i.bak \
-		-e 's|TapiUniversal::create(MemoryBufferRef Source)|TapiUniversal::create(MemoryBufferRef Source, bool SkipUnknownTriples)|' \
-		"$fs"
-	rm -f "$fs.bak"
-	echo "  updated TapiUniversal::create stub for the current LLVM signature"
+hdr="${1:-}/llvm/include/llvm/Object/TapiUniversal.h"
+
+if [ -f "$fs" ] && [ -f "$hdr" ]; then
+	if grep -q 'create(MemoryBufferRef Source, *bool' "$hdr"; then
+		want_param=1
+	else
+		want_param=0
+	fi
+
+	if grep -q 'TapiUniversal::create(MemoryBufferRef Source, *bool' "$fs"; then
+		has_param=1
+	else
+		has_param=0
+	fi
+
+	if [ "$want_param" = 1 ] && [ "$has_param" = 0 ]; then
+		sed -i.bak \
+			-e 's|TapiUniversal::create(MemoryBufferRef Source)|TapiUniversal::create(MemoryBufferRef Source, bool SkipUnknownTriples)|' \
+			"$fs"
+		rm -f "$fs.bak"
+		echo "  added SkipUnknownTriples to the TapiUniversal::create stub"
+	elif [ "$want_param" = 0 ] && [ "$has_param" = 1 ]; then
+		sed -i.bak \
+			-e 's|TapiUniversal::create(MemoryBufferRef Source, *bool [A-Za-z_]*)|TapiUniversal::create(MemoryBufferRef Source)|' \
+			"$fs"
+		rm -f "$fs.bak"
+		echo "  removed SkipUnknownTriples from the TapiUniversal::create stub"
+	fi
 fi
 
 exit 0

@@ -8,7 +8,7 @@
 # Not meant to be invoked by hand; ports/Makefile recurses into this
 # file once per entry of mk/ports.mk:
 #
-#	bmake -f mk/port.mk TOP=<repo> P_DIR=dist-dev-tools/gperf \
+#	bmake -f mk/port.mk TOP=<repo> P_DIR=distribution-Developer_Tools/gperf \
 #	                     P_NAME=gperf P_BIN=<install-suffix>
 #
 # Everything happens outside the submodule.  Autoconf trees are

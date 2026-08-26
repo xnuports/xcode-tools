@@ -12,7 +12,7 @@ TOP?=		${.CURDIR}/..
 .include "${TOP}/mk/xcodetools.sys.mk"
 
 OBJBASE=	${TOP}/build/lib
-CCTOOLS=	${TOP}/src/dist-dev-tools/cctools
+CCTOOLS=	${TOP}/src/distribution-Developer_Tools/cctools
 
 # Same flags Apple's libstuff.xcconfig and cctools.xcconfig set; see
 # mk/with-cctools.mk for the reasoning behind each one.
