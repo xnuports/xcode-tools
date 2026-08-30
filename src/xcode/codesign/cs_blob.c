@@ -101,6 +101,37 @@ sbb_add(struct superblob_builder *b, uint32_t type,
 	return 0;
 }
 
+/*
+ * Order the index by slot type.
+ *
+ * The embedded-signature index has to be sorted ascending by type: the
+ * loader looks slots up by binary search, so an unsorted index is not
+ * merely untidy, it makes the whole signature unreadable -- macOS
+ * reports "code object is not signed at all" even though every blob is
+ * present and well formed.
+ *
+ * Sorting here rather than relying on the order sbb_add() is called in
+ * means a caller cannot reintroduce the problem by adding a slot in the
+ * wrong place.  That is exactly how it arose: the alternate SHA-1
+ * CodeDirectory (0x1000) was added straight after the primary one, so
+ * it landed ahead of requirements (2) and entitlements (5).  Ad-hoc
+ * signing has no alternate directory, which is why only certificate
+ * signing was affected.
+ */
+static void
+sbb_sort(struct superblob_builder *b)
+{
+	int i, j;
+
+	for (i = 1; i < b->count; i++) {
+		struct cs_blob_entry key = b->blobs[i];
+
+		for (j = i - 1; j >= 0 && b->blobs[j].type > key.type; j--)
+			b->blobs[j + 1] = b->blobs[j];
+		b->blobs[j + 1] = key;
+	}
+}
+
 int
 sbb_emit(struct superblob_builder *b, uint8_t *out, size_t *out_len)
 {
@@ -111,6 +142,8 @@ sbb_emit(struct superblob_builder *b, uint8_t *out, size_t *out_len)
 
 	if (*out_len < total)
 		return -1;
+
+	sbb_sort(b);
 
 	be_write32(out, CSMAGIC_EMBEDDED_SIGNATURE);
 	be_write32(out + 4, (uint32_t)total);
@@ -777,9 +810,21 @@ build_cms_signature(const uint8_t *cd_hash_sha1,
 	BIO_get_mem_ptr(bio_out, &bptr);
 	if (!bptr || !bptr->data || bptr->length <= 0) goto cleanup;
 
-	if (*out_len < (size_t)bptr->length) goto cleanup;
-	memcpy(out, bptr->data, bptr->length);
-	*out_len = bptr->length;
+	/*
+	 * Wrap the CMS in a blob header.  Every member of the embedded
+	 * signature carries its own magic and length -- the loader reads
+	 * the header to find the payload -- so handing back bare DER
+	 * produces a signature macOS cannot parse at all, reported as
+	 * "code object is not signed at all" rather than as a bad
+	 * signature.  build_adhoc_wrapper() writes the same header for the
+	 * empty ad-hoc case, which is why only certificate signing was
+	 * affected.
+	 */
+	if (*out_len < (size_t)bptr->length + 8) goto cleanup;
+	be_write32(out, CSMAGIC_BLOBWRAPPER);
+	be_write32(out + 4, (uint32_t)(bptr->length + 8));
+	memcpy(out + 8, bptr->data, bptr->length);
+	*out_len = (size_t)bptr->length + 8;
 	ret = 0;
 
 cleanup:

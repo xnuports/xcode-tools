@@ -66,7 +66,9 @@ VM interfaces it uses are the real ones on macOS.
 
 ### Our own reimplementations
 
-`codesign` (ad-hoc signing, passes `codesign --verify --strict`), `xcrun`,
+`codesign` (ad-hoc signing, passes `codesign --verify --strict`; certificate
+signing produces a CMS signature macOS reads, but not yet one it validates —
+see below), `xcrun`,
 `xcodebuild`, `xcode-select`, `pkgbuild`, `productbuild`, `simctl`,
 `notarytool`, `devicectl`, `xctrace` (stub).
 
@@ -166,6 +168,12 @@ Two clean builds of the default set produce byte-identical binaries.
 - **Python, Git** — sources carried (CPython 3.14.6, git 2.50.1, the version Apple's Git-155 wraps), not yet ported to `mk/port.mk`.
 - **The `xc*` family** — `xccov`, `xcresulttool`, `xcstringstool`,
   `xcsigningtool`, `xctest`, `xcdevice`, `xcdiagnose`.
+- **Certificate signing is incomplete.** `codesign -s <identity.p12>` now
+  produces a real CMS signature that macOS parses and reports in full, but
+  `codesign -v` still answers "Unknown format in import" — Security cannot
+  import the certificates out of our CMS. Ad-hoc signing is unaffected and
+  verifies strictly. Keychain identities are also not implemented: `-s <name>`
+  treats the name as a file path rather than looking it up.
 - **`vmmap` is unverified** — it builds, but examining a process needs
   `task_for_pid`, which macOS grants only to root or an entitled binary.
   Apple's copy is codesigned for it; ours is not, so it reports a privilege
