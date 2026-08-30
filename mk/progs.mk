@@ -111,6 +111,12 @@ PROGS+=	distribution-Developer_Tools/headerdoc gatherheaderdoc usr/bin
 PROGS+=	pngcrush/pngcrush pngcrush usr/bin
 
 # ------------------------------------------------------------------
+# vmmap (src/vmmap) -- a third-party implementation of a tool Apple
+# ships in Developer/usr/bin but has never open-sourced.
+# ------------------------------------------------------------------
+PROGS+=	vmmap/src vmmap usr/bin
+
+# ------------------------------------------------------------------
 # bsdmake (src/bsdmake).
 #
 # Note usr/local/bin, not usr/bin: Xcode ships neither bsdmake nor

@@ -29,7 +29,7 @@ work against a stock Xcode with no configuration at all. `xcrun --show-sdk-path`
 `--show-sdk-version` and `--find` match Apple's output exactly when pointed at
 one.
 
-**47 programs** build: 41 compiled directly, 6 through their own build systems.
+**48 programs** build: 42 compiled directly, 6 through their own build systems.
 
 | Where | What |
 |---|---|
@@ -59,6 +59,10 @@ byte-identical to Apple's.
 The SDK is a skeleton: it carries settings but no headers or libraries yet, so
 building against *our* SDK does not work — point `-isysroot` at Apple's for now.
 Populating it is the next major piece.
+
+`vmmap` is a third-party implementation (MIT, written for Darling) of a tool
+Apple ships but has never open-sourced. It compiles unmodified here — the Mach
+VM interfaces it uses are the real ones on macOS.
 
 ### Our own reimplementations
 
@@ -162,6 +166,10 @@ Two clean builds of the default set produce byte-identical binaries.
 - **Python, Git** — sources carried (CPython 3.14.6, git 2.50.1, the version Apple's Git-155 wraps), not yet ported to `mk/port.mk`.
 - **The `xc*` family** — `xccov`, `xcresulttool`, `xcstringstool`,
   `xcsigningtool`, `xctest`, `xcdevice`, `xcdiagnose`.
+- **`vmmap` is unverified** — it builds, but examining a process needs
+  `task_for_pid`, which macOS grants only to root or an entitled binary.
+  Apple's copy is codesigned for it; ours is not, so it reports a privilege
+  error rather than a memory map unless run under `sudo`.
 - **Apple-proprietary tools** — `actool`, `ibtool`, `momc`, `coremlc` and the
   rest have no published source and need reimplementation.
 
