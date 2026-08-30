@@ -66,9 +66,10 @@ VM interfaces it uses are the real ones on macOS.
 
 ### Our own reimplementations
 
-`codesign` (ad-hoc signing, passes `codesign --verify --strict`; certificate
-signing produces a CMS signature macOS reads, but not yet one it validates —
-see below), `xcrun`,
+`codesign` (ad-hoc and certificate signing; a keychain identity signs through
+Security, so `codesign -s "Apple Development"` produces a signature Apple's own
+`codesign --verify` accepts as valid and as satisfying its designated
+requirement), `xcrun`,
 `xcodebuild`, `xcode-select`, `pkgbuild`, `productbuild`, `simctl`,
 `notarytool`, `devicectl`, `xctrace` (stub).
 
@@ -168,12 +169,17 @@ Two clean builds of the default set produce byte-identical binaries.
 - **Python, Git** — sources carried (CPython 3.14.6, git 2.50.1, the version Apple's Git-155 wraps), not yet ported to `mk/port.mk`.
 - **The `xc*` family** — `xccov`, `xcresulttool`, `xcstringstool`,
   `xcsigningtool`, `xctest`, `xcdevice`, `xcdiagnose`.
-- **Certificate signing is incomplete.** `codesign -s <identity.p12>` now
-  produces a real CMS signature that macOS parses and reports in full, but
-  `codesign -v` still answers "Unknown format in import" — Security cannot
-  import the certificates out of our CMS. Ad-hoc signing is unaffected and
-  verifies strictly. Keychain identities are also not implemented: `-s <name>`
-  treats the name as a file path rather than looking it up.
+- **Certificate signing has two gaps left.** Signing with a keychain identity
+  is complete and verifies. Signing from a `.p12` still reports no authority,
+  because a self-signed certificate cannot satisfy the `anchor apple generic`
+  term our designated requirement always emits. The Apple hash-agility version 2
+  attribute is also omitted: its dictionary is keyed by an algorithm identifier
+  with no documented mapping, and a wrong key yields an attribute that makes the
+  signature unreadable. Version 1, which carries the cdhashes property list, is
+  emitted.
+- **`codesign` does not implement `-i`/`--identifier`,** and cannot sign
+  universal binaries — signing a fat file yields "invalid or unsupported format
+  for signature". Both predate the signing work above.
 - **`vmmap` is unverified** — it builds, but examining a process needs
   `task_for_pid`, which macOS grants only to root or an entitled binary.
   Apple's copy is codesigned for it; ours is not, so it reports a privilege

@@ -302,7 +302,12 @@ build_requirements_blob(const char *bundle_id,
 	}
 	append_be32(expr, &eo, kReqMatchExists);
 
-	size_t inner_len = 8 + eo;
+	/*
+	 * A requirement blob is magic, length, kind, then the expression.
+	 * Without the kind word the first operator is read as the kind
+	 * and the whole requirement is rejected as an unsupported type.
+	 */
+	size_t inner_len = 12 + eo;
 	size_t total = 20 + inner_len;
 
 	if (out_len < total)
@@ -315,7 +320,8 @@ build_requirements_blob(const char *bundle_id,
 	be_write32(out + 16, 20);
 	be_write32(out + 20, CSMAGIC_REQUIREMENT);
 	be_write32(out + 24, (uint32_t)inner_len);
-	memcpy(out + 28, expr, eo);
+	be_write32(out + 28, kReqKindExpression);
+	memcpy(out + 32, expr, eo);
 
 	return total;
 }
@@ -652,8 +658,63 @@ cleanup:
 	return ret;
 }
 
+/*
+ * Pull the display name and team identifier out of a signing
+ * certificate.  Apple carries the team identifier in the subject's
+ * Organizational Unit, and codesign(1) reports "notset" when the
+ * certificate has none.
+ */
+void
+cert_copy_names(X509 *cert, char *team_id_out, size_t team_id_len,
+    char *cert_cn_out, size_t cert_cn_len)
+{
+	static const struct {
+		int nid;
+		int is_team;
+	} fields[] = {
+		{ NID_commonName, 0 },
+		{ NID_organizationalUnitName, 1 },
+	};
+
+	if (cert_cn_out != NULL && cert_cn_len > 0)
+		cert_cn_out[0] = '\0';
+	if (team_id_out != NULL && team_id_len > 0)
+		team_id_out[0] = '\0';
+
+	for (size_t i = 0; cert != NULL && i < sizeof(fields) / sizeof(fields[0]); i++) {
+		char *dst = fields[i].is_team ? team_id_out : cert_cn_out;
+		size_t dstlen = fields[i].is_team ? team_id_len : cert_cn_len;
+		X509_NAME *name;
+		X509_NAME_ENTRY *entry;
+		ASN1_STRING *str;
+		int idx, slen;
+
+		if (dst == NULL || dstlen == 0)
+			continue;
+
+		name = X509_get_subject_name(cert);
+		idx = X509_NAME_get_index_by_NID(name, fields[i].nid, -1);
+		if (idx < 0)
+			continue;
+		if ((entry = X509_NAME_get_entry(name, idx)) == NULL)
+			continue;
+		if ((str = X509_NAME_ENTRY_get_data(entry)) == NULL)
+			continue;
+
+		slen = ASN1_STRING_length(str);
+		if (slen > 0 && (size_t)slen < dstlen) {
+			memcpy(dst, ASN1_STRING_get0_data(str), (size_t)slen);
+			dst[slen] = '\0';
+		}
+	}
+
+	if (team_id_out != NULL && team_id_len > 0 && team_id_out[0] == '\0')
+		snprintf(team_id_out, team_id_len, "notset");
+}
+
 int
-load_identity_info(const char *cert_file, const char *key_file,
+load_identity_info(const char *keychain_id,
+    const char *cert_file, const char *key_file,
     const char *p12_file, const char *key_password,
     char *team_id_out, size_t team_id_len,
     char *cert_cn_out, size_t cert_cn_len)
@@ -663,48 +724,17 @@ load_identity_info(const char *cert_file, const char *key_file,
 	STACK_OF(X509) *cas = NULL;
 	int ret = -1;
 
+	/* A keychain identity is described by Security, not OpenSSL. */
+	if (keychain_id != NULL)
+		return keychain_identity_info(keychain_id,
+		    team_id_out, team_id_len, cert_cn_out, cert_cn_len);
+
 	if (load_identity(cert_file, key_file, p12_file, key_password,
 	    &pkey, &cert, &cas) != 0)
 		return -1;
 
-	if (cert_cn_out && cert) {
-		X509_NAME *name = X509_get_subject_name(cert);
-		int idx = X509_NAME_get_index_by_NID(name, NID_commonName, -1);
-		if (idx >= 0) {
-			X509_NAME_ENTRY *entry = X509_NAME_get_entry(name, idx);
-			if (entry) {
-				ASN1_STRING *str = X509_NAME_ENTRY_get_data(entry);
-				if (str) {
-					int slen = ASN1_STRING_length(str);
-					if (slen > 0 && (size_t)slen < cert_cn_len) {
-						memcpy(cert_cn_out, ASN1_STRING_get0_data(str), slen);
-						cert_cn_out[slen] = '\0';
-					}
-				}
-			}
-		}
-	}
-
-	if (team_id_out && cert) {
-		X509_NAME *name = X509_get_subject_name(cert);
-		int idx = X509_NAME_get_index_by_NID(name,
-		    NID_organizationalUnitName, -1);
-		if (idx >= 0) {
-			X509_NAME_ENTRY *entry = X509_NAME_get_entry(name, idx);
-			if (entry) {
-				ASN1_STRING *str = X509_NAME_ENTRY_get_data(entry);
-				if (str) {
-					int slen = ASN1_STRING_length(str);
-					if (slen > 0 && (size_t)slen < team_id_len) {
-						memcpy(team_id_out, ASN1_STRING_get0_data(str), slen);
-						team_id_out[slen] = '\0';
-					}
-				}
-			}
-		}
-	}
-	if (team_id_out && !team_id_out[0])
-		strncpy(team_id_out, "notset", team_id_len - 1);
+	cert_copy_names(cert, team_id_out, team_id_len,
+	    cert_cn_out, cert_cn_len);
 
 	ret = 0;
 	if (pkey) EVP_PKEY_free(pkey);
@@ -714,9 +744,10 @@ load_identity_info(const char *cert_file, const char *key_file,
 }
 
 int
-build_cms_signature(const uint8_t *cd_hash_sha1,
-    size_t cd_hash_len,
+build_cms_signature(const uint8_t *cd_blob,
+    size_t cd_blob_len,
     const char *cdhashes_plist, const char *cd_sha256_hex,
+    const char *keychain_id,
     const char *cert_file, const char *key_file,
     const char *p12_file, const char *key_password,
     uint8_t *out, size_t *out_len, char *team_id_out, size_t team_id_len,
@@ -731,54 +762,23 @@ build_cms_signature(const uint8_t *cd_hash_sha1,
 	ASN1_OBJECT *obj1 = NULL, *obj2 = NULL;
 	int ret = -1;
 
+	/*
+	 * An identity from the keychain is signed with by Security,
+	 * which can use a private key that cannot be copied out of it.
+	 */
+	if (keychain_id != NULL)
+		return keychain_cms_sign(keychain_id, cd_blob, cd_blob_len,
+		    cdhashes_plist, out, out_len, team_id_out, team_id_len,
+		    cert_cn_out, cert_cn_len);
+
 	if (load_identity(cert_file, key_file, p12_file, key_password,
 	    &pkey, &cert, &other_certs) != 0)
 		return -1;
 
-	/* Extract cert CN and team ID */
-	if (cert_cn_out && cert) {
-		X509_NAME *name = X509_get_subject_name(cert);
-		int idx = X509_NAME_get_index_by_NID(name, NID_commonName, -1);
-		if (idx >= 0) {
-			X509_NAME_ENTRY *entry = X509_NAME_get_entry(name, idx);
-			if (entry) {
-				ASN1_STRING *str = X509_NAME_ENTRY_get_data(entry);
-				if (str) {
-					int slen = ASN1_STRING_length(str);
-					if (slen > 0 && (size_t)slen < cert_cn_len) {
-						memcpy(cert_cn_out, ASN1_STRING_get0_data(str), slen);
-						cert_cn_out[slen] = '\0';
-					}
-				}
-			}
-		}
-	}
+	cert_copy_names(cert, team_id_out, team_id_len,
+	    cert_cn_out, cert_cn_len);
 
-	if (team_id_out) {
-		if (cert) {
-			X509_NAME *name = X509_get_subject_name(cert);
-			int idx = X509_NAME_get_index_by_NID(name,
-			    NID_organizationalUnitName, -1);
-			if (idx >= 0) {
-				X509_NAME_ENTRY *entry = X509_NAME_get_entry(name, idx);
-				if (entry) {
-					ASN1_STRING *str = X509_NAME_ENTRY_get_data(entry);
-					if (str) {
-						int slen = ASN1_STRING_length(str);
-						if (slen > 0 && (size_t)slen < team_id_len) {
-							memcpy(team_id_out, ASN1_STRING_get0_data(str), slen);
-							team_id_out[slen] = '\0';
-						}
-					}
-				}
-			}
-		}
-		if (!team_id_out[0])
-			strncpy(team_id_out, "notset", team_id_len - 1);
-	}
-
-	size_t real_len = cd_hash_len > 0 ? cd_hash_len : 20;
-	bio_in = BIO_new_mem_buf(cd_hash_sha1, (int)real_len);
+	bio_in = BIO_new_mem_buf(cd_blob, (int)cd_blob_len);
 	if (!bio_in) goto cleanup;
 
 	int flags = CMS_PARTIAL | CMS_DETACHED | CMS_NOSMIMECAP | CMS_BINARY;

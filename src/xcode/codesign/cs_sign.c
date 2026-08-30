@@ -79,9 +79,10 @@ sign_arch(struct arch_info *ai,
     const char *identifier, const char *ent_xml, size_t ent_xml_len,
     int adhoc, const char *cert_cn, const char *team_id,
     uint32_t cd_flags, uint32_t page_size_log2,
+    const char *keychain_id,
     const char *cert_file, const char *key_file,
     const char *p12_file, const char *key_password,
-    uint8_t *sig_out, size_t *sig_len)
+    uint8_t *sig_out, size_t *sig_len, size_t sig_out_cap)
 {
 	uint64_t code_limit = ai->code_limit;
 	uint64_t code_limit64 = 0;
@@ -196,8 +197,6 @@ sign_arch(struct arch_info *ai,
 	size_t cd_len = 88 + ident_len + team_len +
 	    n_special * CS_SHA256_LEN + n_pages * CS_SHA256_LEN;
 	uint32_t n_blobs = 3; /* CD, REQ, SIG */
-	if (!adhoc)
-		n_blobs++; /* ALT_CD */
 	if (ent_xml_blob_len > 0)
 		n_blobs++;
 	if (ent_der_blob_len > 0)
@@ -377,18 +376,41 @@ sign_arch(struct arch_info *ai,
 		for (int i = 0; i < CS_SHA256_LEN; i++)
 			sprintf(cd256_hex + i * 2, "%02x", cd256_hash[i]);
 
-		uint8_t cdhash[CS_SHA1_LEN];
-		sha1_raw(cd256_buf, cd256_len, cdhash);
+		/*
+		 * Hash agility carries each CodeDirectory hash truncated
+		 * to twenty bytes -- the same value codesign(1) prints as
+		 * CandidateCDHash -- inside a complete property list.  A
+		 * bare dict fragment is not a plist and makes the whole
+		 * attribute, and with it the signature, unreadable.
+		 */
 		char cdhash_b64[64];
-		EVP_EncodeBlock((unsigned char *)cdhash_b64, cdhash, CS_SHA1_LEN);
-		char plist_buf[512];
+		EVP_EncodeBlock((unsigned char *)cdhash_b64, cd256_hash,
+		    CS_SHA1_LEN);
+		char plist_buf[640];
 		snprintf(plist_buf, sizeof(plist_buf),
-		    "<dict><key>cdhashes</key><array><data>%s</data></array></dict>",
+		    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+		    "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" "
+		    "\"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n"
+		    "<plist version=\"1.0\">\n"
+		    "<dict>\n"
+		    "\t<key>cdhashes</key>\n"
+		    "\t<array>\n"
+		    "\t\t<data>\n"
+		    "\t\t%s\n"
+		    "\t\t</data>\n"
+		    "\t</array>\n"
+		    "</dict>\n"
+		    "</plist>",
 		    cdhash_b64);
 
+		/*
+		 * The CMS covers the CodeDirectory itself, detached; its
+		 * message digest is what codesign(1) reports as CMSDigest
+		 * and compares against the CodeDirectory hash.
+		 */
 		sig_blob_len = sizeof(sig_blob_buf);
-		if (build_cms_signature(cdhash, CS_SHA1_LEN,
-		    plist_buf, cd256_hex,
+		if (build_cms_signature(cd256_buf, cd256_len,
+		    plist_buf, cd256_hex, keychain_id,
 		    cert_file, key_file, p12_file, key_password,
 		    sig_blob_buf, &sig_blob_len,
 		    NULL, 0, NULL, 0) != 0) {
@@ -402,8 +424,12 @@ sign_arch(struct arch_info *ai,
 	struct superblob_builder sbb;
 	sbb_init(&sbb);
 	sbb_add(&sbb, CSSLOT_CODEDIRECTORY, cd256_buf, cd256_len);
-	if (!adhoc && cd1_len > 0)
-		sbb_add(&sbb, CSSLOT_ALTERNATE_CODEDIRECTORIES, cd1_buf, cd1_len);
+	/*
+	 * One SHA-256 CodeDirectory, as codesign(1) itself emits.  A
+	 * SHA-1 directory in the alternate slot becomes the one the CMS
+	 * is expected to cover, and nothing on a current system asks for
+	 * it.  The SHA-1 digests stay in the hash-agility attribute.
+	 */
 	sbb_add(&sbb, CSSLOT_REQUIREMENTS, req_blob, req_len);
 
 	if (ent_xml_blob_len > 0)
@@ -415,6 +441,24 @@ sign_arch(struct arch_info *ai,
 
 	/* Emit */
 	if (sbb_emit(&sbb, sig_out, sig_len) != 0) {
+		free(sha256_hashes);
+		free(sha1_hashes);
+		return -1;
+	}
+
+	/*
+	 * The load command was written with the estimated size before the
+	 * code pages were hashed, so page zero -- which contains it --
+	 * seals that number.  Hand back a blob of exactly that size,
+	 * zero-padded past the superblob, rather than shrinking the load
+	 * command afterwards and invalidating the hash we just sealed.
+	 */
+	if (sig_len_est >= *sig_len && sig_len_est <= sig_out_cap) {
+		memset(sig_out + *sig_len, 0, sig_len_est - *sig_len);
+		*sig_len = sig_len_est;
+	} else if (sig_len_est < *sig_len) {
+		fprintf(stderr, "codesign: signature larger than reserved space "
+		    "(%zu > %zu)\n", *sig_len, sig_len_est);
 		free(sha256_hashes);
 		free(sha1_hashes);
 		return -1;
@@ -489,8 +533,17 @@ sign_macho(const char *path, const char *identity, int force,
 	char cert_cn[256] = {0};
 	char team_id[32] = {0};
 
-	if (!adhoc && (p12_file || (cert_file && key_file))) {
-		if (load_identity_info(cert_file, key_file, p12_file,
+	/*
+	 * With no certificate or key file to read, a non-ad-hoc identity
+	 * names something in the keychain; codesign(1) has already
+	 * checked that the name matches.
+	 */
+	const char *keychain_id = NULL;
+	if (!adhoc && identity != NULL && p12_file == NULL && cert_file == NULL)
+		keychain_id = identity;
+
+	if (!adhoc && (keychain_id || p12_file || (cert_file && key_file))) {
+		if (load_identity_info(keychain_id, cert_file, key_file, p12_file,
 		    key_password, team_id, sizeof(team_id),
 		    cert_cn, sizeof(cert_cn)) != 0) {
 			if (!g_continue_on_error) {
@@ -530,8 +583,8 @@ sign_macho(const char *path, const char *identity, int force,
 		    adhoc, cert_cn,
 		    team_id[0] ? team_id : NULL,
 		    cd_flags, page_size_log2,
-		    cert_file, key_file, p12_file, key_password,
-		    sig_buf, &sig_len) != 0) {
+		    keychain_id, cert_file, key_file, p12_file, key_password,
+		    sig_buf, &sig_len, sizeof(sig_buf)) != 0) {
 			fprintf(stderr, "codesign: signing failed for %s\n", path);
 			result = 1;
 			goto sign_cleanup;

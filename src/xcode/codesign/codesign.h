@@ -11,6 +11,8 @@
 #include <stdint.h>
 #include <stddef.h>
 
+#include <openssl/x509.h>
+
 #define CODESIGN_VERSION "0.1.0 (compat 16.0)"
 
 #define CSMAGIC_CODEDIRECTORY           0xfade0c02
@@ -52,6 +54,9 @@
 #define kReqOpTrue                      1
 #define kReqOpIdent                     2
 #define kReqOpAppleGenericAnchor        15
+/* Requirement kinds; an expression is the only one emitted here. */
+#define kReqKindExpression              1
+
 #define kReqOpAnd                       6
 #define kReqOpCertField                11
 #define kReqOpCertGeneric              14
@@ -151,20 +156,36 @@ size_t build_entitlements_xml(const char *plist_xml,
                               uint8_t *out, size_t out_len);
 size_t build_entitlements_der(const char *plist_xml,
                               uint8_t *out, size_t out_len);
-int    build_cms_signature(const uint8_t *cd_hash_sha1,
-                           size_t cd_hash_len,
+int    build_cms_signature(const uint8_t *cd_blob,
+                           size_t cd_blob_len,
                            const char *cdhashes_plist,
                            const char *cd_sha256_hex,
+                           const char *keychain_id,
                            const char *cert_file, const char *key_file,
                            const char *p12_file, const char *key_password,
                            uint8_t *out, size_t *out_len,
                            char *team_id_out, size_t team_id_len,
                            char *cert_cn_out, size_t cert_cn_len);
-int    load_identity_info(const char *cert_file, const char *key_file,
+int    load_identity_info(const char *keychain_id,
+                           const char *cert_file, const char *key_file,
                            const char *p12_file, const char *key_password,
                            char *team_id_out, size_t team_id_len,
                            char *cert_cn_out, size_t cert_cn_len);
+void   cert_copy_names(X509 *cert, char *team_id_out, size_t team_id_len,
+                           char *cert_cn_out, size_t cert_cn_len);
 int    build_adhoc_wrapper(uint8_t *out, size_t *out_len);
+
+/* cs_keychain.c -- signing with an identity held in the keychain. */
+int    keychain_identity_exists(const char *name);
+int    keychain_identity_info(const char *name,
+                           char *team_id, size_t team_len,
+                           char *cert_cn, size_t cn_len);
+int    keychain_cms_sign(const char *name,
+                           const uint8_t *content, size_t content_len,
+                           const char *cdhashes_plist,
+                           uint8_t *out, size_t *out_len,
+                           char *team_id, size_t team_len,
+                           char *cert_cn, size_t cn_len);
 void   sha1_raw(const uint8_t *data, size_t len, uint8_t *out);
 void   sha256_raw(const uint8_t *data, size_t len, uint8_t *out);
 

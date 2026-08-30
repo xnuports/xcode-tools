@@ -256,8 +256,19 @@ main(int argc, char **argv)
 			/* Could be a .p12 file */
 			p12_file = identity;
 		} else {
-			/* Keychain identity name */
-			cert_file = identity;
+			/*
+			 * Anything else names an identity in the
+			 * keychain, matched on the certificate's common
+			 * name and used to sign in cs_keychain.c.  It is
+			 * resolved here so a name that matches nothing
+			 * fails before any file is touched.
+			 */
+			if (!keychain_identity_exists(identity)) {
+				fprintf(stderr,
+				    "%s: no identity found matching '%s'\n",
+				    progname, identity);
+				return 1;
+			}
 		}
 	}
 
