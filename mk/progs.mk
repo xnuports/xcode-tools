@@ -111,6 +111,15 @@ PROGS+=	distribution-Developer_Tools/headerdoc gatherheaderdoc usr/bin
 PROGS+=	pngcrush/pngcrush pngcrush usr/bin
 
 # ------------------------------------------------------------------
+# bsdmake (src/bsdmake).
+#
+# Note usr/local/bin, not usr/bin: Xcode ships neither bsdmake nor
+# bmake, so putting them on the parity surface would misrepresent the
+# tree.  They are ours, useful, and kept where that is obvious.
+# ------------------------------------------------------------------
+PROGS+=	bsdmake bsdmake usr/local/bin
+
+# ------------------------------------------------------------------
 # PlistBuddy (src/PlistBuddy).
 #
 # Note this one is not part of Xcode's Developer directory at all --

@@ -15,6 +15,10 @@
 # XcodeDefault.xctoolchain/usr/bin, except make/gnumake which live in
 # Developer/usr/bin.
 # ------------------------------------------------------------------
+# bmake, the tool this project is built with -- see the note in
+# mk/progs.mk about usr/local/bin.
+PORTS+=	bmake bmake usr/local/bin
+
 PORTS+=	distribution-Developer_Tools/gperf gperf ${XCTOOLCHAIN}/usr/bin
 PORTS+=	distribution-Developer_Tools/flex flex ${XCTOOLCHAIN}/usr/bin
 PORTS+=	distribution-Developer_Tools/gnumake gnumake usr/bin

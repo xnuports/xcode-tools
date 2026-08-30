@@ -1,36 +1,28 @@
-# bmake -- the build system itself.
+# bmake -- NetBSD make, and the tool this project is built with.
 #
-# Ships as usr/bin/bmake.  Its own mk files go to usr/share/bmake/mk/
-# rather than usr/share/mk/, because the latter is where Apple keeps
-# bsdmake's mk files and where the system bmake already looks.
+# Building it matters for bootstrapping: without it the tree cannot be
+# built at all, so shipping one removes the last external build
+# dependency beyond a C compiler.
 #
-# bmake's Makefile uses BSD make syntax (.include, .-include) and
-# cannot be driven by GNU make.  The system bmake (already present
-# on any Mac with Xcode/CLT) builds our bmake from source.
+# It is an autoconf tree, but its configure wants a writable source
+# directory for its own generated files, so the default P_COPY applies.
+# bmake's Makefile installs under its own /usr/local regardless of the
+# --prefix configure was given, so the staged paths carry that prefix.
+P_PROGS=	local/bin/bmake
 
-# Use the system bmake to drive the build — its Makefile is not
-# compatible with GNU make.
-P_MAKE=			bmake
+# Driven with bmake, not make: its Makefile is written in bmake syntax
+# (".if exists", ".for"), and GNU make stops at "missing separator".
+# Bootstrapping a make with a make is circular only in principle -- the
+# host already has one, and this replaces the dependency on it.
+P_MAKE=		bmake
 
-# bmake's configure does not understand --disable-dependency-tracking
-# or --disable-nls.  Suppress the generic autotools flags.
-P_NO_AUTOTOOLS_FLAGS=	yes
-
-P_CONFIGURE_ARGS=	--with-default-sys-path=${P_PREFIX}/share/bmake/mk \
-			--without-makefile
-
-# bmake's configure has a re-exec that loses --prefix.  Work around
-# by passing prefix= on the bmake command line, which overrides the
-# ?= in Makefile.config.
-P_MAKE_ARGS=		prefix=${P_PREFIX}
-
-# bmake's install puts mk files in ${prefix}/share/mk/.  We want them
-# in usr/share/bmake/mk/ instead, so they don't overwrite Apple's
-# (bsdmake's) mk files and so bmake's own binary can find them via
-# its compiled-in DEFAULT_SYS_PATH.
-P_POST_STAGE=		mkdir -p ${TOP}/build/release/usr/share/bmake/mk && \
-			cp -R ${P_STAGEDIR}${P_PREFIX}/share/mk/* \
-				${TOP}/build/release/usr/share/bmake/mk/ && \
-			rm -rf ${P_STAGEDIR}${P_PREFIX}/share/mk
-
-P_PROGS=		bin/bmake
+# bmake needs its mk fragments at runtime or it reports "no system rules
+# (sys.mk)".  Its install target places them, but only when driven by
+# bmake -- under GNU make the install-mk rule is skipped silently, which
+# is the other half of why P_MAKE is set above.
+#
+# The binary looks in its configured prefix by default, so point
+# MAKESYSPATH at these when running it from the release tree:
+#
+#	MAKESYSPATH=<developer>/usr/local/share/mk bmake ...
+P_RELEASE_TREES=	local/share/mk usr/local/share/mk

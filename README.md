@@ -29,7 +29,7 @@ work against a stock Xcode with no configuration at all. `xcrun --show-sdk-path`
 `--show-sdk-version` and `--find` match Apple's output exactly when pointed at
 one.
 
-**44 programs** build: 40 compiled directly, 4 through their own build systems.
+**47 programs** build: 41 compiled directly, 6 through their own build systems.
 
 | Where | What |
 |---|---|
@@ -37,7 +37,24 @@ one.
 | `Toolchains/XcodeDefault.xctoolchain/usr/bin` | `clang`/`clang++`/`cc`/`c++`/`cpp`, `ld`, the cctools set, the llvm-* tools, `dsymutil`, developer_cmds, `flex`, `gperf` |
 | `Toolchains/XcodeDefault.xctoolchain/usr/lib` | `libtapi.dylib`, clang's resource directory |
 | `usr/libexec` | `PlistBuddy` |
+| `usr/local/bin` | `bmake`, `bsdmake` |
+| `Makefiles/` | `CoreOS` and `pb_makefiles` build fragments |
 | `Platforms/`, `Toolchains/` | emitted `.sdk` and `.xctoolchain` bundle metadata |
+
+`bmake` and `bsdmake` sit in `usr/local/bin` rather than `usr/bin` because
+Xcode ships neither — they are ours, and building them removes the last
+external build dependency beyond a C compiler. Both need their system rules
+pointed at explicitly, and the two differ in how:
+
+```sh
+MAKESYSPATH=<developer>/usr/local/share/mk bmake ...
+bsdmake -m <developer>/usr/local/share/bsdmake/mk ...
+```
+
+`Makefiles/CoreOS` is generated the way Apple's own rules generate it —
+`Standard/Commands.make` and `Variables.make` come from the `.in` templates
+through `unifdef`, using the `unifdef` this tree builds. The result is
+byte-identical to Apple's.
 
 The SDK is a skeleton: it carries settings but no headers or libraries yet, so
 building against *our* SDK does not work — point `-isysroot` at Apple's for now.
@@ -142,7 +159,7 @@ Two clean builds of the default set produce byte-identical binaries.
 - **SDK contents** — headers, libraries, frameworks. The bundle exists; the
   contents do not.
 - **Swift** — the submodule is there, not yet built.
-- **Python, Git** — sources carried, not yet ported to `mk/port.mk`.
+- **Python, Git** — sources carried (CPython 3.14.6, git 2.50.1, the version Apple's Git-155 wraps), not yet ported to `mk/port.mk`.
 - **The `xc*` family** — `xccov`, `xcresulttool`, `xcstringstool`,
   `xcsigningtool`, `xctest`, `xcdevice`, `xcdiagnose`.
 - **Apple-proprietary tools** — `actool`, `ibtool`, `momc`, `coremlc` and the

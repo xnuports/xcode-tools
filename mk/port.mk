@@ -29,6 +29,12 @@
 #			the reason this exists: without lib/clang/<ver>,
 #			clang cannot find its own stdarg.h and anything
 #			beyond trivial C fails to compile.
+#	P_RELEASE_TREES	directories to stage anywhere in the release
+#			tree, as alternating <src> <dest> words: <src>
+#			relative to the same place P_PROGS reads from,
+#			<dest> relative to build/release.  For a port that
+#			installs runtime data outside the toolchain --
+#			bmake's mk fragments, for instance.
 #	P_BUILDSYS	"autoconf" (default) or "cmake"
 #	P_CONFIGURE	configure script, relative to the source dir
 #			(autoconf only; default: configure)
@@ -141,7 +147,9 @@ all: ${P_WORKDIR}/.staged
 .endif
 .for f in ${P_PROGS}
 	@mkdir -p ${P_BINDIR}
+	@rm -f ${P_BINDIR}/${f:T}
 	@cp ${P_PROGSRC}/${f} ${P_BINDIR}/${f:T}
+	@chmod u+w ${P_BINDIR}/${f:T}
 .for l in ${P_LINKS}
 	@ln -f ${P_BINDIR}/${f:T} ${P_BINDIR}/${l}
 .endfor
@@ -149,6 +157,7 @@ all: ${P_WORKDIR}/.staged
 	@${ECHO} "built: ${P_BIN}/${P_PROGS:T}${P_LINKS:D (+${P_LINKS})}"
 .for l in ${P_LIBS}
 	@mkdir -p ${P_LIBDIR}
+	@rm -f ${P_LIBDIR}/${l:T}
 	@cp ${P_PROGSRC}/${l} ${P_LIBDIR}/${l:T}
 	@${ECHO} "staged: ${XCTOOLCHAIN}/usr/lib/${l:T}"
 .endfor
@@ -157,6 +166,12 @@ all: ${P_WORKDIR}/.staged
 	@rm -rf ${TOP}/build/release/${XCTOOLCHAIN}/usr/${t}
 	@cp -R ${P_PROGSRC}/${t} ${TOP}/build/release/${XCTOOLCHAIN}/usr/${t}
 	@${ECHO} "staged: ${XCTOOLCHAIN}/usr/${t}/"
+.endfor
+.for src dst in ${P_RELEASE_TREES}
+	@mkdir -p ${TOP}/build/release/${dst:H}
+	@rm -rf ${TOP}/build/release/${dst}
+	@cp -R ${P_PROGSRC}/${src} ${TOP}/build/release/${dst}
+	@${ECHO} "staged: ${dst}/"
 .endfor
 
 # --- configure --------------------------------------------------------

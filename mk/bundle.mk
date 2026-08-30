@@ -48,7 +48,7 @@ XT_DEFAULT_ARCH!=	uname -m 2>/dev/null || echo arm64
 XT_TOOLCHAIN_ID?=	com.apple.dt.toolchain.XcodeDefault
 XT_PLATFORM_ID?=	com.apple.platform.macosx
 
-bundles: bundle-dirs bundle-toolchain bundle-platform bundle-sdk bundle-shims bundle-config bundle-aliases
+bundles: bundle-dirs bundle-toolchain bundle-platform bundle-sdk bundle-shims bundle-config bundle-aliases bundle-makefiles
 	@${ECHO} "== bundles emitted =="
 	@${ECHO} "   toolchain: ${XCTOOLCHAIN} (${XT_TOOLCHAIN_ID})"
 	@${ECHO} "   sdk:       ${XT_SDK}.sdk ${XT_SDK_VERSION} (${XT_SDK_CANONICAL})"
@@ -179,6 +179,59 @@ ${SDK_DIR}/SDKSettings.plist:
 
 # --- toolchain shims --------------------------------------------------
 #
+# --- Makefiles/ -------------------------------------------------------
+#
+# Xcode ships a Makefiles directory holding the build-system fragments
+# other projects include: Carbon, CoreOS, VersioningSystems and
+# pb_makefiles.  Two of those we have sources for.
+#
+# CoreOSMakefiles' own install rules do three things -- copy the tree,
+# drop the copied Makefile, and generate Standard/{Commands,Variables}.make
+# from the .in templates with unifdef -- and that is reproduced here.
+# The unifdef used is the one this tree builds, from developer_cmds.
+#
+# bsdmake's system makefiles go alongside, since it reports "no system
+# rules (sys.mk)" without them and macOS has no /usr/share/mk, which is
+# the path compiled into it.  bsdmake takes them with -m:
+#
+#	bsdmake -m <developer>/usr/local/share/bsdmake/mk ...
+#
+# (bmake uses MAKESYSPATH for the same purpose; the two differ.)
+
+DEVTOOLS=	${TOP}/src/distribution-Developer_Tools
+UNIFDEF=	${TC_DIR}/usr/bin/unifdef
+
+bundle-makefiles: bundle-dirs
+	@mkdir -p ${RELEASE}/Makefiles
+.if exists(${DEVTOOLS}/CoreOSMakefiles)
+	@rsync -a --delete --exclude '.git' \
+		${DEVTOOLS}/CoreOSMakefiles/ ${RELEASE}/Makefiles/CoreOS/
+	@rm -f ${RELEASE}/Makefiles/CoreOS/Makefile
+	@if [ -x ${UNIFDEF} ]; then \
+		for i in Commands Variables; do \
+			[ -f ${RELEASE}/Makefiles/CoreOS/Standard/$$i.in ] || continue; \
+			${UNIFDEF} -UBSDMAKESTYLE -t \
+				${RELEASE}/Makefiles/CoreOS/Standard/$$i.in \
+				> ${RELEASE}/Makefiles/CoreOS/Standard/$$i.make; \
+			rm -f ${RELEASE}/Makefiles/CoreOS/Standard/$$i.in; \
+		done; \
+		${ECHO} "makefiles: CoreOS (Commands/Variables generated with our unifdef)"; \
+	 else \
+		${ECHO} "makefiles: CoreOS (unifdef not built; .in templates left in place)"; \
+	 fi
+.endif
+.if exists(${DEVTOOLS}/pb_makefiles)
+	@rsync -a --delete --exclude '.git' \
+		${DEVTOOLS}/pb_makefiles/ ${RELEASE}/Makefiles/pb_makefiles/
+	@${ECHO} "makefiles: pb_makefiles"
+.endif
+.if exists(${TOP}/src/bsdmake/mk)
+	@mkdir -p ${RELEASE}/usr/local/share/bsdmake
+	@rsync -a --delete --exclude '.git' \
+		${TOP}/src/bsdmake/mk/ ${RELEASE}/usr/local/share/bsdmake/mk/
+	@${ECHO} "makefiles: bsdmake system rules"
+.endif
+
 # --- Apple's tool aliases ---------------------------------------------
 #
 # A stock toolchain points nm and otool at the LLVM implementations,
@@ -226,4 +279,4 @@ bundle-shims: bundle-dirs
 	@chmod 755 ${RELEASE}/usr/bin/xcrun-tool
 
 .PHONY: bundles bundle-dirs bundle-toolchain bundle-platform bundle-sdk \
-	bundle-shims bundle-config bundle-aliases
+	bundle-shims bundle-config bundle-aliases bundle-makefiles
