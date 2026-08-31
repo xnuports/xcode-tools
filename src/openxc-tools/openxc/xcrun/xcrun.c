@@ -123,6 +123,23 @@ static char *progname;
 static const char *const sdk_exts[] = { ".sdk", NULL };
 static const char *const toolchain_exts[] = { ".xctoolchain", ".toolchain", NULL };
 
+/*
+ * basename(3) may write through its argument and may return a pointer
+ * into storage the next call overwrites.  Both matter here: the paths
+ * come from getenv(), which is not ours to modify, and a result kept
+ * across another call changes underneath us -- which is what made
+ * `TOOLCHAINS=... xcrun --find clang` report the toolchain as the
+ * command it could not find.  So basename only ever sees a private
+ * copy, and its result is copied out before anything else runs.
+ */
+static char *dup_basename(const char *path)
+{
+	char buf[PATH_MAX];
+
+	snprintf(buf, sizeof(buf), "%s", (path != NULL) ? path : "");
+	return strdup(basename(buf));
+}
+
 static void stripext(char *dst, size_t dstlen, const char *src,
                      const char *const *exts)
 {
@@ -150,6 +167,16 @@ static void stripext(char *dst, size_t dstlen, const char *src,
 
 	memcpy(dst, src, len);
 	dst[len] = '\0';
+}
+
+/* Name of an SDK or toolchain given a path to it. */
+static void name_from_path(char *dst, size_t dstlen, const char *path,
+                           const char *const *exts)
+{
+	char buf[PATH_MAX];
+
+	snprintf(buf, sizeof(buf), "%s", (path != NULL) ? path : "");
+	stripext(dst, dstlen, basename(buf), exts);
 }
 
 /* helper function to test for the authenticity of an sdk */
@@ -927,6 +954,26 @@ static char *search_command(const char *name, char *dirs)
  * @arg argv -- arguments to be passed if program found
  * @return: -1 on failed search, 0 on successful search, no return on execute
  */
+/*
+ * Which toolchain an SDK should be searched alongside.
+ *
+ * An SDK may name one, but in practice none does -- neither the bundles
+ * this tree emits nor Apple's own SDKSettings.plist carries a toolchain
+ * key -- so the answer is almost always the toolchain already selected.
+ * Passing the empty name straight through is what made any
+ * `xcrun --sdk <name> --find <tool>` fail with "'' is not a valid
+ * toolchain name" instead of finding the tool.
+ */
+static char *sdk_toolchain_name(const char *sdkpath)
+{
+	const char *name = get_sdk_info(sdkpath).toolchain;
+
+	if (name == NULL || *name == '\0')
+		name = current_toolchain;
+
+	return strdup((name != NULL) ? name : "");
+}
+
 static int request_command(const char *name, int argc, char *argv[])
 {
 	char *cmd = NULL;	/* used to hold our command's absolute path */
@@ -942,7 +989,7 @@ static int request_command(const char *name, int argc, char *argv[])
 	if (current_sdk == NULL) {
 		current_sdk = (char *)malloc(XCRUN_NAME_MAX);
 		if ((sdk_env = getenv("SDKROOT")) != NULL)
-			stripext(current_sdk, XCRUN_NAME_MAX, basename(sdk_env), sdk_exts);
+			name_from_path(current_sdk, XCRUN_NAME_MAX, sdk_env, sdk_exts);
 		else
 			current_sdk = default_sdk_name();
 	}
@@ -950,8 +997,8 @@ static int request_command(const char *name, int argc, char *argv[])
 	if (current_toolchain == NULL) {
 		current_toolchain = (char *)malloc(XCRUN_NAME_MAX);
 		if ((toolchain_env = getenv("TOOLCHAINS")) != NULL)
-			stripext(current_toolchain, XCRUN_NAME_MAX, basename(toolchain_env),
-				 toolchain_exts);
+			name_from_path(current_toolchain, XCRUN_NAME_MAX, toolchain_env,
+				       toolchain_exts);
 		else
 			current_toolchain = default_toolchain_name();
 	}
@@ -961,7 +1008,7 @@ static int request_command(const char *name, int argc, char *argv[])
 
 	/* If we implicitly specified an sdk, search the sdk and it's associated toolchain. */
 	if (explicit_sdk_mode == 1) {
-		toolch_name = strdup(get_sdk_info(get_sdk_path(current_sdk)).toolchain);
+		toolch_name = sdk_toolchain_name(get_sdk_path(current_sdk));
 		sprintf((search_string + strlen(search_string)), "%s/usr/bin:%s/usr/bin", get_sdk_path(current_sdk), get_toolchain_path(toolch_name));
 		goto do_search;
 	}
@@ -977,7 +1024,7 @@ static int request_command(const char *name, int argc, char *argv[])
 		sprintf((search_string + strlen(search_string)), "%s/usr/bin:", alternate_sdk_path);
 		/* We also want to append an associated toolchain if this is really an SDK folder. */
 		if (test_sdk_authenticity(alternate_sdk_path) == 1) {
-			toolch_name = strdup(get_sdk_info(alternate_sdk_path).toolchain);
+			toolch_name = sdk_toolchain_name(alternate_sdk_path);
 			sprintf((search_string + strlen(search_string)), "%s/usr/bin", get_toolchain_path(toolch_name));
 			/* We now have a toolchain, so skip to search. */
 			goto do_search;
@@ -1079,12 +1126,12 @@ static int xcrun_main(int argc, char *argv[])
 					break;
 				case 'r':
 					run_f = 1;
-					tool_called = basename(optarg);
+					tool_called = dup_basename(optarg);
 					++argc_offset;
 					break;
 				case 'f':
 					find_f = 1;
-					tool_called = basename(optarg);
+					tool_called = dup_basename(optarg);
 					++argc_offset;
 					break;
 				case 'n':
@@ -1163,13 +1210,13 @@ static int xcrun_main(int argc, char *argv[])
 				break;
 		}
 	} else { /* We are just executing a program. */
-		tool_called = basename(argv[1]);
+		tool_called = dup_basename(argv[1]);
 		++argc_offset;
 	}
 
 	/* The last non-option argument may be the command called. */
 	if (optind < argc && ((run_f == 0 || find_f == 0) && tool_called == NULL)) {
-		tool_called = basename(argv[optind++]);
+		tool_called = dup_basename(argv[optind++]);
 		++argc_offset;
 	}
 
@@ -1191,7 +1238,7 @@ static int xcrun_main(int argc, char *argv[])
 	if (current_sdk == NULL) {
 		current_sdk = (char *)malloc(XCRUN_NAME_MAX);
 		if ((sdk_env = getenv("SDKROOT")) != NULL)
-			stripext(current_sdk, XCRUN_NAME_MAX, basename(sdk_env), sdk_exts);
+			name_from_path(current_sdk, XCRUN_NAME_MAX, sdk_env, sdk_exts);
 		else
 			current_sdk = default_sdk_name();
 	}
@@ -1199,8 +1246,8 @@ static int xcrun_main(int argc, char *argv[])
 	if (current_toolchain == NULL) {
 		current_toolchain = (char *)malloc(XCRUN_NAME_MAX);
 		if ((toolchain_env = getenv("TOOLCHAINS")) != NULL)
-			stripext(current_toolchain, XCRUN_NAME_MAX, basename(toolchain_env),
-				 toolchain_exts);
+			name_from_path(current_toolchain, XCRUN_NAME_MAX, toolchain_env,
+				       toolchain_exts);
 		else
 			current_toolchain = default_toolchain_name();
 	}
@@ -1308,7 +1355,7 @@ int main(int argc, char *argv[])
 	char *this_tool = NULL;
 
 	/* Strip out any path name that may have been passed into argv[0] */
-	this_tool = basename(argv[0]);
+	this_tool = dup_basename(argv[0]);
 	progname = this_tool;
 
 	/* Get our developer dir */
