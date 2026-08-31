@@ -265,50 +265,69 @@ append_padded_bytes(uint8_t *buf, size_t *off,
 }
 
 size_t
-build_requirements_blob(const char *bundle_id,
-    const char *cert_cn, uint8_t *out, size_t out_len)
+build_requirements_blob(const char *bundle_id, const struct signer_info *si,
+    uint8_t *out, size_t out_len)
 {
-	if (!cert_cn || !*cert_cn) {
-		size_t total = 12;
-		if (out_len < total)
+	uint8_t expr[2048];
+	size_t eo = 0;
+	size_t inner_len, total;
+
+	/* Nothing to name: an empty requirement set, as for ad-hoc code. */
+	if (si == NULL || si->cert_cn[0] == '\0') {
+		if (out_len < 12)
 			return 0;
 		be_write32(out, CSMAGIC_REQUIREMENTS);
 		be_write32(out + 4, 12);
 		be_write32(out + 8, 0);
-		return total;
+		return 12;
 	}
-
-	uint8_t expr[2048];
-	size_t eo = 0;
 
 	append_be32(expr, &eo, kReqOpAnd);
 	append_be32(expr, &eo, kReqOpIdent);
 	append_padded_str(expr, &eo, bundle_id);
-	append_be32(expr, &eo, kReqOpAnd);
-	append_be32(expr, &eo, kReqOpAppleGenericAnchor);
-	append_be32(expr, &eo, kReqOpAnd);
-	append_be32(expr, &eo, kReqOpCertField);
-	append_be32(expr, &eo, 0);  /* leaf */
-	append_padded_str(expr, &eo, "subject.CN");
-	append_be32(expr, &eo, kReqMatchEqual);
-	append_padded_str(expr, &eo, cert_cn);
-	append_be32(expr, &eo, kReqOpCertGeneric);
-	append_be32(expr, &eo, 1);  /* intermediate */
-	{
-		static const uint8_t oid[] = {
-			0x2A, 0x86, 0x48, 0x86, 0xF7, 0x63, 0x64, 0x06, 0x02, 0x01
-		};
-		append_padded_bytes(expr, &eo, oid, sizeof(oid));
-	}
-	append_be32(expr, &eo, kReqMatchExists);
 
-	/*
-	 * A requirement blob is magic, length, kind, then the expression.
-	 * Without the kind word the first operator is read as the kind
-	 * and the whole requirement is rejected as an unsupported type.
-	 */
-	size_t inner_len = 12 + eo;
-	size_t total = 20 + inner_len;
+	if (si->apple_anchored) {
+		/*
+		 * identifier "x" and anchor apple generic
+		 *   and certificate leaf[subject.CN] = "<name>"
+		 *   and certificate 1[field.1.2.840.113635.100.6.2.1] exists
+		 */
+		append_be32(expr, &eo, kReqOpAnd);
+		append_be32(expr, &eo, kReqOpAppleGenericAnchor);
+		append_be32(expr, &eo, kReqOpAnd);
+		append_be32(expr, &eo, kReqOpCertField);
+		append_be32(expr, &eo, 0);	/* leaf */
+		append_padded_str(expr, &eo, "subject.CN");
+		append_be32(expr, &eo, kReqMatchEqual);
+		append_padded_str(expr, &eo, si->cert_cn);
+		append_be32(expr, &eo, kReqOpCertGeneric);
+		append_be32(expr, &eo, 1);	/* intermediate */
+		{
+			static const uint8_t oid[] = {
+				0x2A, 0x86, 0x48, 0x86, 0xF7, 0x63,
+				0x64, 0x06, 0x02, 0x01
+			};
+
+			append_padded_bytes(expr, &eo, oid, sizeof(oid));
+		}
+		append_be32(expr, &eo, kReqMatchExists);
+	} else if (si->have_leaf) {
+		/*
+		 * identifier "x" and certificate leaf = H"<hash>"
+		 *
+		 * A certificate outside Apple's chain cannot satisfy
+		 * "anchor apple generic", so the requirement names the
+		 * leaf itself -- which is what codesign(1) emits for one.
+		 */
+		append_be32(expr, &eo, kReqOpAnchorHash);
+		append_be32(expr, &eo, 0);	/* leaf */
+		append_padded_bytes(expr, &eo, si->leaf_hash, CS_SHA1_LEN);
+	} else {
+		return 0;
+	}
+
+	inner_len = 12 + eo;
+	total = 20 + inner_len;
 
 	if (out_len < total)
 		return 0;
@@ -318,6 +337,11 @@ build_requirements_blob(const char *bundle_id,
 	be_write32(out + 8, 1);
 	be_write32(out + 12, kSecDesignatedRequirementType);
 	be_write32(out + 16, 20);
+	/*
+	 * A requirement blob is magic, length, kind, then the expression.
+	 * Without the kind word the first operator is read as the kind
+	 * and the whole requirement is rejected as an unsupported type.
+	 */
 	be_write32(out + 20, CSMAGIC_REQUIREMENT);
 	be_write32(out + 24, (uint32_t)inner_len);
 	be_write32(out + 28, kReqKindExpression);
@@ -659,14 +683,14 @@ cleanup:
 }
 
 /*
- * Pull the display name and team identifier out of a signing
- * certificate.  Apple carries the team identifier in the subject's
- * Organizational Unit, and codesign(1) reports "notset" when the
- * certificate has none.
+ * Describe a signing certificate: the display name, the team identifier
+ * Apple carries in the subject's Organizational Unit, the hash that pins
+ * the leaf, and whether the certificate is one Apple issued.
+ *
+ * codesign(1) reports "notset" when a certificate carries no team.
  */
 void
-cert_copy_names(X509 *cert, char *team_id_out, size_t team_id_len,
-    char *cert_cn_out, size_t cert_cn_len)
+cert_fill_signer(X509 *cert, struct signer_info *si)
 {
 	static const struct {
 		int nid;
@@ -675,22 +699,21 @@ cert_copy_names(X509 *cert, char *team_id_out, size_t team_id_len,
 		{ NID_commonName, 0 },
 		{ NID_organizationalUnitName, 1 },
 	};
+	unsigned int hash_len = 0;
 
-	if (cert_cn_out != NULL && cert_cn_len > 0)
-		cert_cn_out[0] = '\0';
-	if (team_id_out != NULL && team_id_len > 0)
-		team_id_out[0] = '\0';
+	if (si == NULL)
+		return;
+
+	memset(si, 0, sizeof(*si));
 
 	for (size_t i = 0; cert != NULL && i < sizeof(fields) / sizeof(fields[0]); i++) {
-		char *dst = fields[i].is_team ? team_id_out : cert_cn_out;
-		size_t dstlen = fields[i].is_team ? team_id_len : cert_cn_len;
+		char *dst = fields[i].is_team ? si->team_id : si->cert_cn;
+		size_t dstlen = fields[i].is_team ?
+		    sizeof(si->team_id) : sizeof(si->cert_cn);
 		X509_NAME *name;
 		X509_NAME_ENTRY *entry;
 		ASN1_STRING *str;
 		int idx, slen;
-
-		if (dst == NULL || dstlen == 0)
-			continue;
 
 		name = X509_get_subject_name(cert);
 		idx = X509_NAME_get_index_by_NID(name, fields[i].nid, -1);
@@ -708,16 +731,40 @@ cert_copy_names(X509 *cert, char *team_id_out, size_t team_id_len,
 		}
 	}
 
-	if (team_id_out != NULL && team_id_len > 0 && team_id_out[0] == '\0')
-		snprintf(team_id_out, team_id_len, "notset");
+	if (si->team_id[0] == '\0')
+		snprintf(si->team_id, sizeof(si->team_id), "notset");
+
+	if (cert == NULL)
+		return;
+
+	/*
+	 * The leaf hash is the certificate's SHA-1 fingerprint, which is
+	 * what a designated requirement names it by.
+	 */
+	if (X509_digest(cert, EVP_sha1(), si->leaf_hash, &hash_len) == 1 &&
+	    hash_len == CS_SHA1_LEN)
+		si->have_leaf = 1;
+
+	/*
+	 * Only a certificate issued by Apple can satisfy "anchor apple
+	 * generic"; Apple issues through organizations named "Apple Inc.".
+	 */
+	{
+		X509_NAME *issuer = X509_get_issuer_name(cert);
+		char org[128] = { 0 };
+
+		if (X509_NAME_get_text_by_NID(issuer, NID_organizationName,
+		    org, (int)sizeof(org)) > 0 &&
+		    strcmp(org, "Apple Inc.") == 0)
+			si->apple_anchored = 1;
+	}
 }
 
 int
 load_identity_info(const char *keychain_id,
     const char *cert_file, const char *key_file,
     const char *p12_file, const char *key_password,
-    char *team_id_out, size_t team_id_len,
-    char *cert_cn_out, size_t cert_cn_len)
+    struct signer_info *si)
 {
 	EVP_PKEY *pkey = NULL;
 	X509 *cert = NULL;
@@ -726,15 +773,13 @@ load_identity_info(const char *keychain_id,
 
 	/* A keychain identity is described by Security, not OpenSSL. */
 	if (keychain_id != NULL)
-		return keychain_identity_info(keychain_id,
-		    team_id_out, team_id_len, cert_cn_out, cert_cn_len);
+		return keychain_identity_info(keychain_id, si);
 
 	if (load_identity(cert_file, key_file, p12_file, key_password,
 	    &pkey, &cert, &cas) != 0)
 		return -1;
 
-	cert_copy_names(cert, team_id_out, team_id_len,
-	    cert_cn_out, cert_cn_len);
+	cert_fill_signer(cert, si);
 
 	ret = 0;
 	if (pkey) EVP_PKEY_free(pkey);
@@ -746,7 +791,7 @@ load_identity_info(const char *keychain_id,
 int
 build_cms_signature(const uint8_t *cd_blob,
     size_t cd_blob_len,
-    const char *cdhashes_plist, const char *cd_sha256_hex,
+    const char *cdhashes_plist,
     const char *keychain_id,
     const char *cert_file, const char *key_file,
     const char *p12_file, const char *key_password,
@@ -759,7 +804,7 @@ build_cms_signature(const uint8_t *cd_blob,
 	BIO *bio_in = NULL, *bio_out = NULL;
 	CMS_ContentInfo *cms = NULL;
 	CMS_SignerInfo *si = NULL;
-	ASN1_OBJECT *obj1 = NULL, *obj2 = NULL;
+	ASN1_OBJECT *obj1 = NULL;
 	int ret = -1;
 
 	/*
@@ -775,8 +820,15 @@ build_cms_signature(const uint8_t *cd_blob,
 	    &pkey, &cert, &other_certs) != 0)
 		return -1;
 
-	cert_copy_names(cert, team_id_out, team_id_len,
-	    cert_cn_out, cert_cn_len);
+	if (team_id_out != NULL || cert_cn_out != NULL) {
+		struct signer_info tmp;
+
+		cert_fill_signer(cert, &tmp);
+		if (cert_cn_out != NULL && cert_cn_len > 0)
+			snprintf(cert_cn_out, cert_cn_len, "%s", tmp.cert_cn);
+		if (team_id_out != NULL && team_id_len > 0)
+			snprintf(team_id_out, team_id_len, "%s", tmp.team_id);
+	}
 
 	bio_in = BIO_new_mem_buf(cd_blob, (int)cd_blob_len);
 	if (!bio_in) goto cleanup;
@@ -788,16 +840,18 @@ build_cms_signature(const uint8_t *cd_blob,
 	si = CMS_add1_signer(cms, cert, pkey, EVP_sha256(), flags);
 	if (!si) goto cleanup;
 
+	/*
+	 * Hash agility: an octet string holding the cdhashes property
+	 * list, which is how codesign(1) writes it.  The version 2
+	 * attribute is left out for the reason given in cs_keychain.c --
+	 * its value is keyed by an algorithm identifier with no
+	 * documented mapping, and a wrong one makes the signature
+	 * unreadable rather than merely incomplete.
+	 */
 	obj1 = OBJ_txt2obj(OID_CDHASHES, 1);
 	if (!obj1) goto cleanup;
-	if (!CMS_signed_add1_attr_by_OBJ(si, obj1, V_ASN1_UTF8STRING,
+	if (!CMS_signed_add1_attr_by_OBJ(si, obj1, V_ASN1_OCTET_STRING,
 	    (const unsigned char *)cdhashes_plist, (int)strlen(cdhashes_plist)))
-		goto cleanup;
-
-	obj2 = OBJ_txt2obj(OID_CDHASHES2, 1);
-	if (!obj2) goto cleanup;
-	if (!CMS_signed_add1_attr_by_OBJ(si, obj2, V_ASN1_OCTET_STRING,
-	    (const unsigned char *)cd_sha256_hex, (int)strlen(cd_sha256_hex)))
 		goto cleanup;
 
 	if (!CMS_final(cms, bio_in, NULL, flags)) goto cleanup;
@@ -832,7 +886,6 @@ cleanup:
 	if (bio_out) BIO_free(bio_out);
 	if (cms) CMS_ContentInfo_free(cms);
 	if (obj1) ASN1_OBJECT_free(obj1);
-	if (obj2) ASN1_OBJECT_free(obj2);
 	if (pkey) EVP_PKEY_free(pkey);
 	if (cert) X509_free(cert);
 	if (other_certs) sk_X509_pop_free(other_certs, X509_free);

@@ -23,6 +23,7 @@ static const char *progname = "codesign";
 static const char *usage =
 "Usage: %s [options] [file ...]\n"
 "  -s, --sign IDENTITY                   sign with IDENTITY (use - for ad-hoc)\n"
+"  -i, --identifier IDENT                use IDENT as the signing identifier\n"
 "  -f, --force                           force signing (replace existing)\n"
 "      --verify                          verify signature\n"
 "  -d, --display                         display signature info\n"
@@ -152,6 +153,7 @@ main(int argc, char **argv)
 	int ent_xml_output = 0;
 	int req_to_stdout = 0;
 	const char *identity = NULL;
+	const char *identifier = NULL;
 	const char *entitlements_file = NULL;
 	const char *entitlements_out = NULL;
 	const char *requirements_out = NULL;
@@ -166,6 +168,7 @@ main(int argc, char **argv)
 
 	static struct option opts[] = {
 		{"sign",            required_argument, 0, 's'},
+		{"identifier",      required_argument, 0, 'i'},
 		{"force",           no_argument,       0, 'f'},
 		{"verify",          no_argument,       0,  0},
 		{"display",         no_argument,       0, 'd'},
@@ -193,7 +196,7 @@ main(int argc, char **argv)
 
 	int c;
 	int opt_idx = 0;
-	while ((c = getopt_long(argc, argv, "s:dvfh", opts, &opt_idx)) != -1) {
+	while ((c = getopt_long(argc, argv, "s:i:dvfh", opts, &opt_idx)) != -1) {
 		if (c == 0) {
 			if (handle_long_opt(opts[opt_idx].name, optarg,
 			    &do_sign, &do_verify, &do_display, &do_remove,
@@ -212,6 +215,9 @@ main(int argc, char **argv)
 			case 's':
 				identity = optarg;
 				do_sign = 1;
+				break;
+			case 'i':
+				identifier = optarg;
 				break;
 			case 'd':
 				do_display = 1;
@@ -322,7 +328,7 @@ main(int argc, char **argv)
 		if (do_sign) {
 			if (cs_is_directory(path)) {
 				if (sign_bundle(path, identity, force, adhoc,
-				    NULL, entitlements_file, cd_flags,
+				    identifier, entitlements_file, cd_flags,
 				    14, cert_file, key_file,
 				    p12_file, key_password, req_str) != 0) {
 					if (!continue_on_error)
@@ -331,7 +337,7 @@ main(int argc, char **argv)
 				}
 			} else {
 				if (sign_macho(path, identity, force, adhoc,
-				    NULL, entitlements_file, cd_flags,
+				    identifier, entitlements_file, cd_flags,
 				    14, cert_file, key_file,
 				    p12_file, key_password, req_str) != 0) {
 					if (!continue_on_error)

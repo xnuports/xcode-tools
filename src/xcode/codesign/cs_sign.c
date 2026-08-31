@@ -77,7 +77,7 @@ find_bundle_identifier(const char *bundle_path)
 static int
 sign_arch(struct arch_info *ai,
     const char *identifier, const char *ent_xml, size_t ent_xml_len,
-    int adhoc, const char *cert_cn, const char *team_id,
+    int adhoc, const struct signer_info *si,
     uint32_t cd_flags, uint32_t page_size_log2,
     const char *keychain_id,
     const char *cert_file, const char *key_file,
@@ -104,7 +104,7 @@ sign_arch(struct arch_info *ai,
 
 	/* Requirements blob */
 	uint8_t req_blob[4096];
-	size_t req_len = build_requirements_blob(identifier, cert_cn,
+	size_t req_len = build_requirements_blob(identifier, si,
 	    req_blob, sizeof(req_blob));
 
 	uint8_t empty_sha256[CS_SHA256_LEN];
@@ -189,6 +189,8 @@ sign_arch(struct arch_info *ai,
 	 * computing code page hashes. Page 0 includes the LC,
 	 * so it must be written with estimated values before hashing. */
 	size_t ident_len = strlen(identifier) + 1;
+	const char *team_id = (si != NULL && si->team_id[0] &&
+	    strcmp(si->team_id, "notset") != 0) ? si->team_id : NULL;
 	size_t team_len = team_id ? (strlen(team_id) + 1) : 0;
 
 	/* Initial estimate of signature size (for LC pre-write).
@@ -372,10 +374,6 @@ sign_arch(struct arch_info *ai,
 	} else {
 		uint8_t cd256_hash[CS_SHA256_LEN];
 		sha256_raw(cd256_buf, cd256_len, cd256_hash);
-		char cd256_hex[CS_SHA256_LEN * 2 + 1];
-		for (int i = 0; i < CS_SHA256_LEN; i++)
-			sprintf(cd256_hex + i * 2, "%02x", cd256_hash[i]);
-
 		/*
 		 * Hash agility carries each CodeDirectory hash truncated
 		 * to twenty bytes -- the same value codesign(1) prints as
@@ -410,7 +408,7 @@ sign_arch(struct arch_info *ai,
 		 */
 		sig_blob_len = sizeof(sig_blob_buf);
 		if (build_cms_signature(cd256_buf, cd256_len,
-		    plist_buf, cd256_hex, keychain_id,
+		    plist_buf, keychain_id,
 		    cert_file, key_file, p12_file, key_password,
 		    sig_blob_buf, &sig_blob_len,
 		    NULL, 0, NULL, 0) != 0) {
@@ -471,6 +469,182 @@ sign_arch(struct arch_info *ai,
 
 /* ---- Sign Mach-O file ---- */
 
+
+/*
+ * Fat header fields are big-endian; the byte-swapped variant is read the
+ * other way round.
+ */
+static uint32_t
+fat_read32(const uint8_t *p, int is_le)
+{
+	if (is_le)
+		return (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
+		    ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+	return be_read32(p);
+}
+
+static void
+fat_write32(uint8_t *p, uint32_t v, int is_le)
+{
+	if (is_le) {
+		p[0] = (uint8_t)v;
+		p[1] = (uint8_t)(v >> 8);
+		p[2] = (uint8_t)(v >> 16);
+		p[3] = (uint8_t)(v >> 24);
+		return;
+	}
+	be_write32(p, v);
+}
+
+/*
+ * Sign every slice of a universal file.
+ *
+ * A slice is signed as the thin Mach-O it is: its code limit, the
+ * signature offset in its load command, and the segment sizes are all
+ * relative to the start of the slice, not the file.  So each slice is
+ * signed in a buffer of its own and the file is then laid out again
+ * around the results, since a slice that has grown pushes the ones
+ * after it and the offsets in the fat header no longer hold.
+ */
+static int
+sign_fat(const char *path, uint8_t *file_data, size_t file_sz,
+    struct macho_file *mf, const char *final_id, const char *ent_xml,
+    size_t ent_xml_len, int adhoc, const struct signer_info *si,
+    uint32_t cd_flags, uint32_t page_size_log2, const char *keychain_id,
+    const char *cert_file, const char *key_file, const char *p12_file,
+    const char *key_password, int force)
+{
+	struct slice {
+		uint8_t *buf;
+		size_t len;
+		uint32_t cputype;
+		uint32_t cpusubtype;
+		uint32_t align;
+	} slices[16];
+	int is_le = (be_read32(file_data) == 0xbebafeca);
+	uint8_t *out = NULL;
+	size_t out_len, cursor;
+	int n = mf->n_archs;
+	int result = 0;
+	int i;
+
+	for (i = 0; i < 16; i++)
+		slices[i].buf = NULL;
+
+	for (i = 0; i < n; i++) {
+		size_t hdr = 8 + (size_t)i * 20;
+		uint32_t off = fat_read32(file_data + hdr + 8, is_le);
+		uint32_t sz = fat_read32(file_data + hdr + 12, is_le);
+		struct macho_file thin;
+		struct arch_info *ai;
+		uint8_t sig_buf[65536];
+		size_t sig_len = sizeof(sig_buf);
+		size_t cap;
+
+		slices[i].cputype = fat_read32(file_data + hdr, is_le);
+		slices[i].cpusubtype = fat_read32(file_data + hdr + 4, is_le);
+		slices[i].align = fat_read32(file_data + hdr + 16, is_le);
+
+		/*
+		 * Room for the slice plus the signature that is about to
+		 * be appended to it, since sign_arch writes through the
+		 * buffer it is given.
+		 */
+		cap = (size_t)sz + sizeof(sig_buf) + 4096;
+		if ((slices[i].buf = calloc(1, cap)) == NULL) {
+			result = -1;
+			goto out;
+		}
+		memcpy(slices[i].buf, file_data + off, sz);
+
+		/*
+		 * Parse at the slice's real length: the slack beyond it
+		 * is room to write into, not content, and counting it
+		 * would put the code limit past the end of the code.
+		 */
+		if (macho_parse(slices[i].buf, sz, &thin) != 0) {
+			fprintf(stderr, "codesign: %s: cannot read %s slice\n",
+			    path, macho_arch_name(slices[i].cputype));
+			result = -1;
+			goto out;
+		}
+		ai = &thin.archs[0];
+
+		if (macho_has_codesig(ai) && !force) {
+			fprintf(stderr, "codesign: %s: is already signed\n", path);
+			result = 1;
+			goto out;
+		}
+
+		if (sign_arch(ai, final_id, ent_xml, ent_xml_len, adhoc,
+		    si, cd_flags, page_size_log2, keychain_id,
+		    cert_file, key_file, p12_file, key_password,
+		    sig_buf, &sig_len, sizeof(sig_buf)) != 0) {
+			fprintf(stderr, "codesign: signing failed for %s (%s)\n",
+			    path, macho_arch_name(slices[i].cputype));
+			result = 1;
+			goto out;
+		}
+
+		if ((size_t)ai->dataoff + sig_len > cap) {
+			result = -1;
+			goto out;
+		}
+		memcpy(slices[i].buf + ai->dataoff, sig_buf, sig_len);
+		ai->datasize = (uint32_t)sig_len;
+		macho_update_codesig_lc(ai, ai->dataoff, (uint32_t)sig_len,
+		    slices[i].buf, cap);
+		macho_update_linkedit_seg(ai, ai->dataoff, (uint32_t)sig_len);
+
+		slices[i].len = (size_t)ai->dataoff + sig_len;
+	}
+
+	/* Lay the file out again around the signed slices. */
+	cursor = 8 + (size_t)n * 20;
+	out_len = cursor;
+	for (i = 0; i < n; i++) {
+		size_t a = (size_t)1 << slices[i].align;
+
+		out_len = (out_len + a - 1) & ~(a - 1);
+		out_len += slices[i].len;
+	}
+
+	if ((out = calloc(1, out_len)) == NULL) {
+		result = -1;
+		goto out;
+	}
+
+	memcpy(out, file_data, 8);		/* magic and count */
+	for (i = 0; i < n; i++) {
+		size_t hdr = 8 + (size_t)i * 20;
+		size_t a = (size_t)1 << slices[i].align;
+
+		cursor = (cursor + a - 1) & ~(a - 1);
+
+		fat_write32(out + hdr, slices[i].cputype, is_le);
+		fat_write32(out + hdr + 4, slices[i].cpusubtype, is_le);
+		fat_write32(out + hdr + 8, (uint32_t)cursor, is_le);
+		fat_write32(out + hdr + 12, (uint32_t)slices[i].len, is_le);
+		fat_write32(out + hdr + 16, slices[i].align, is_le);
+
+		memcpy(out + cursor, slices[i].buf, slices[i].len);
+		cursor += slices[i].len;
+	}
+
+	if (cs_write_file(path, out, out_len) != 0) {
+		fprintf(stderr, "codesign: cannot write: %s\n", path);
+		result = -1;
+		goto out;
+	}
+
+out:
+	free(out);
+	for (i = 0; i < 16; i++)
+		free(slices[i].buf);
+	(void)file_sz;
+	return result;
+}
+
 int
 sign_macho(const char *path, const char *identity, int force,
     int adhoc, const char *identifier,
@@ -530,8 +704,9 @@ sign_macho(const char *path, const char *identity, int force,
 	}
 
 	/* Cert CN and team ID */
-	char cert_cn[256] = {0};
-	char team_id[32] = {0};
+	struct signer_info signer;
+
+	memset(&signer, 0, sizeof(signer));
 
 	/*
 	 * With no certificate or key file to read, a non-ad-hoc identity
@@ -544,14 +719,29 @@ sign_macho(const char *path, const char *identity, int force,
 
 	if (!adhoc && (keychain_id || p12_file || (cert_file && key_file))) {
 		if (load_identity_info(keychain_id, cert_file, key_file, p12_file,
-		    key_password, team_id, sizeof(team_id),
-		    cert_cn, sizeof(cert_cn)) != 0) {
+		    key_password, &signer) != 0) {
 			if (!g_continue_on_error) {
 				if (ent_xml) free(ent_xml);
 				free(file_data);
 				return -1;
 			}
 		}
+	}
+
+	/*
+	 * A universal file is laid out again around its signed slices;
+	 * the thin case can sign in place.
+	 */
+	if (mf.is_fat) {
+		int r = sign_fat(path, file_data, file_sz, &mf, final_id,
+		    ent_xml, ent_xml_len, adhoc, &signer, cd_flags, page_size_log2,
+		    keychain_id, cert_file, key_file, p12_file, key_password,
+		    force);
+
+		if (ent_xml)
+			free(ent_xml);
+		free(file_data);
+		return r;
 	}
 
 	/* Save arch base offsets (they don't change, only file may grow) */
@@ -580,8 +770,7 @@ sign_macho(const char *path, const char *identity, int force,
 		size_t sig_len = sizeof(sig_buf);
 
 		if (sign_arch(ai, final_id, ent_xml, ent_xml_len,
-		    adhoc, cert_cn,
-		    team_id[0] ? team_id : NULL,
+		    adhoc, &signer,
 		    cd_flags, page_size_log2,
 		    keychain_id, cert_file, key_file, p12_file, key_password,
 		    sig_buf, &sig_len, sizeof(sig_buf)) != 0) {

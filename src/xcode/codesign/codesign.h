@@ -53,6 +53,7 @@
 
 #define kReqOpTrue                      1
 #define kReqOpIdent                     2
+#define kReqOpAnchorHash                 4
 #define kReqOpAppleGenericAnchor        15
 /* Requirement kinds; an expression is the only one emitted here. */
 #define kReqKindExpression              1
@@ -65,6 +66,7 @@
 #define kSecDesignatedRequirementType   3
 
 #define OID_CDHASHES                    "1.2.840.113635.100.9.1"
+/* Version 2 hash agility; not emitted -- see cs_keychain.c. */
 #define OID_CDHASHES2                   "1.2.840.113635.100.9.2"
 
 #define CSB_MAX_BLOBS 64
@@ -147,10 +149,25 @@ int   sbb_add(struct superblob_builder *b, uint32_t type,
               const uint8_t *data, size_t len);
 int   sbb_emit(struct superblob_builder *b, uint8_t *out, size_t *out_len);
 
+/*
+ * What the signing identity contributes to the CodeDirectory and to the
+ * designated requirement.  An identity anchored at Apple is described by
+ * its subject; any other is pinned by the hash of its leaf certificate,
+ * which is what codesign(1) does and the only form a certificate outside
+ * Apple's chain can satisfy.
+ */
+struct signer_info {
+	char    cert_cn[256];
+	char    team_id[32];
+	uint8_t leaf_hash[CS_SHA1_LEN];
+	int     have_leaf;
+	int     apple_anchored;
+};
+
 size_t build_code_directory(struct code_directory *cd,
                             uint8_t *out, size_t out_len);
 size_t build_requirements_blob(const char *bundle_id,
-                               const char *cert_cn,
+                               const struct signer_info *si,
                                uint8_t *out, size_t out_len);
 size_t build_entitlements_xml(const char *plist_xml,
                               uint8_t *out, size_t out_len);
@@ -159,7 +176,6 @@ size_t build_entitlements_der(const char *plist_xml,
 int    build_cms_signature(const uint8_t *cd_blob,
                            size_t cd_blob_len,
                            const char *cdhashes_plist,
-                           const char *cd_sha256_hex,
                            const char *keychain_id,
                            const char *cert_file, const char *key_file,
                            const char *p12_file, const char *key_password,
@@ -169,17 +185,13 @@ int    build_cms_signature(const uint8_t *cd_blob,
 int    load_identity_info(const char *keychain_id,
                            const char *cert_file, const char *key_file,
                            const char *p12_file, const char *key_password,
-                           char *team_id_out, size_t team_id_len,
-                           char *cert_cn_out, size_t cert_cn_len);
-void   cert_copy_names(X509 *cert, char *team_id_out, size_t team_id_len,
-                           char *cert_cn_out, size_t cert_cn_len);
+                           struct signer_info *si);
+void   cert_fill_signer(X509 *cert, struct signer_info *si);
 int    build_adhoc_wrapper(uint8_t *out, size_t *out_len);
 
 /* cs_keychain.c -- signing with an identity held in the keychain. */
 int    keychain_identity_exists(const char *name);
-int    keychain_identity_info(const char *name,
-                           char *team_id, size_t team_len,
-                           char *cert_cn, size_t cn_len);
+int    keychain_identity_info(const char *name, struct signer_info *si);
 int    keychain_cms_sign(const char *name,
                            const uint8_t *content, size_t content_len,
                            const char *cdhashes_plist,

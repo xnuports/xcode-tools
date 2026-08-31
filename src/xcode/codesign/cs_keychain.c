@@ -61,17 +61,16 @@ cfstr_to_buf(CFStringRef s, char *buf, size_t len)
  * copied out; the private key never leaves the keychain.
  */
 static void
-copy_cert_names(SecCertificateRef cert, char *team_id, size_t team_len,
-    char *cert_cn, size_t cn_len)
+copy_cert_names(SecCertificateRef cert, struct signer_info *si)
 {
 	CFDataRef der;
 	const unsigned char *p;
 	X509 *x = NULL;
 
-	if (team_id != NULL && team_len > 0)
-		snprintf(team_id, team_len, "notset");
-	if (cert_cn != NULL && cn_len > 0)
-		cert_cn[0] = '\0';
+	if (si == NULL)
+		return;
+	memset(si, 0, sizeof(*si));
+	snprintf(si->team_id, sizeof(si->team_id), "notset");
 
 	if ((der = SecCertificateCopyData(cert)) == NULL)
 		return;
@@ -79,7 +78,7 @@ copy_cert_names(SecCertificateRef cert, char *team_id, size_t team_len,
 	p = CFDataGetBytePtr(der);
 	x = d2i_X509(NULL, &p, (long)CFDataGetLength(der));
 	if (x != NULL) {
-		cert_copy_names(x, team_id, team_len, cert_cn, cn_len);
+		cert_fill_signer(x, si);
 		X509_free(x);
 	}
 	CFRelease(der);
@@ -181,13 +180,17 @@ add_supporting_certs(CMSEncoderRef enc, SecCertificateRef leaf)
 			CFIndex n = CFArrayGetCount(chain);
 
 			/*
-			 * The encoder has already embedded the signer and
-			 * the issuer directly above it; adding those again
-			 * leaves a duplicate in the certificate set.  What
-			 * is missing is the rest of the chain up to the
-			 * anchor.
+			 * Everything above the signer, so a verifier can
+			 * reach an anchor from what is embedded.  How much
+			 * of the chain the encoder embeds by itself varies
+			 * -- for an Apple identity it includes the
+			 * intermediate, for a private CA it does not -- so
+			 * the issuers are added here rather than assumed.
+			 * That can leave an intermediate in the set twice,
+			 * which costs a few hundred bytes and nothing else:
+			 * the certificates are a set, not a chain.
 			 */
-			for (CFIndex i = 2; i < n; i++) {
+			for (CFIndex i = 1; i < n; i++) {
 				SecCertificateRef c =
 				    (SecCertificateRef)CFArrayGetValueAtIndex(chain, i);
 
@@ -213,8 +216,7 @@ keychain_identity_exists(const char *name)
 }
 
 int
-keychain_identity_info(const char *name, char *team_id, size_t team_len,
-    char *cert_cn, size_t cn_len)
+keychain_identity_info(const char *name, struct signer_info *si)
 {
 	SecIdentityRef id = find_identity(name);
 	SecCertificateRef cert = NULL;
@@ -227,7 +229,7 @@ keychain_identity_info(const char *name, char *team_id, size_t team_len,
 		return -1;
 	}
 
-	copy_cert_names(cert, team_id, team_len, cert_cn, cn_len);
+	copy_cert_names(cert, si);
 
 	CFRelease(cert);
 	CFRelease(id);
@@ -258,8 +260,15 @@ keychain_cms_sign(const char *name,
 		return -1;
 	}
 
-	if (SecIdentityCopyCertificate(id, &cert) == errSecSuccess)
-		copy_cert_names(cert, team_id, team_len, cert_cn, cn_len);
+	if (SecIdentityCopyCertificate(id, &cert) == errSecSuccess) {
+		struct signer_info si;
+
+		copy_cert_names(cert, &si);
+		if (cert_cn != NULL && cn_len > 0)
+			snprintf(cert_cn, cn_len, "%s", si.cert_cn);
+		if (team_id != NULL && team_len > 0)
+			snprintf(team_id, team_len, "%s", si.team_id);
+	}
 
 	if (CMSEncoderCreate(&enc) != errSecSuccess) {
 		fprintf(stderr, "codesign: could not create CMS encoder\n");
