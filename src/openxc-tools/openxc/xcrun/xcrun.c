@@ -107,18 +107,49 @@ static const char *multicall_tool_names[4] = {
 /* Our program's name as called by the user */
 static char *progname;
 
-/* helper function to strip file extensions */
-static void stripext(char *dst, const char *src)
+/* Longest SDK or toolchain name we keep. */
+#define XCRUN_NAME_MAX 255
+
+/*
+ * Copy a name, dropping a bundle suffix if it carries one, so that both
+ * "MacOSX" and "MacOSX.sdk" name the same SDK.
+ *
+ * Only a known suffix, and only at the end.  A name is full of dots that
+ * carry meaning: cutting at the first one turns "macosx26.5" into
+ * "macosx26", which matches no SDK at all, and "MacOSX.Internal" into
+ * "MacOSX" -- which matches the public SDK, so asking for the internal
+ * one would quietly get the wrong SDK instead of an error.
+ */
+static const char *const sdk_exts[] = { ".sdk", NULL };
+static const char *const toolchain_exts[] = { ".xctoolchain", ".toolchain", NULL };
+
+static void stripext(char *dst, size_t dstlen, const char *src,
+                     const char *const *exts)
 {
-	int len;
-	char *s;
+	size_t len, i;
 
-	if ((s = strchr(src, '.')) != NULL)
-		len = (s - src);
-	else
-		len = strlen(src);
+	if (dst == NULL || dstlen == 0)
+		return;
+	if (src == NULL) {
+		dst[0] = '\0';
+		return;
+	}
 
-	strncpy(dst, src, len);
+	len = strlen(src);
+	for (i = 0; exts[i] != NULL; i++) {
+		size_t elen = strlen(exts[i]);
+
+		if (len > elen && strcasecmp(src + len - elen, exts[i]) == 0) {
+			len -= elen;
+			break;
+		}
+	}
+
+	if (len >= dstlen)
+		len = dstlen - 1;
+
+	memcpy(dst, src, len);
+	dst[len] = '\0';
 }
 
 /* helper function to test for the authenticity of an sdk */
@@ -909,17 +940,18 @@ static int request_command(const char *name, int argc, char *argv[])
 	 * current_toolchain for PATH.
 	 */
 	if (current_sdk == NULL) {
-		current_sdk = (char *)malloc(255);
+		current_sdk = (char *)malloc(XCRUN_NAME_MAX);
 		if ((sdk_env = getenv("SDKROOT")) != NULL)
-			stripext(current_sdk, basename(sdk_env));
+			stripext(current_sdk, XCRUN_NAME_MAX, basename(sdk_env), sdk_exts);
 		else
 			current_sdk = default_sdk_name();
 	}
 
 	if (current_toolchain == NULL) {
-		current_toolchain = (char *)malloc(255);
+		current_toolchain = (char *)malloc(XCRUN_NAME_MAX);
 		if ((toolchain_env = getenv("TOOLCHAINS")) != NULL)
-			stripext(current_toolchain, basename(toolchain_env));
+			stripext(current_toolchain, XCRUN_NAME_MAX, basename(toolchain_env),
+				 toolchain_exts);
 		else
 			current_toolchain = default_toolchain_name();
 	}
@@ -1076,9 +1108,9 @@ static int xcrun_main(int argc, char *argv[])
 									else
 										exit(1);
 								} else {
-									current_sdk = (char *)malloc(255);
+									current_sdk = (char *)malloc(XCRUN_NAME_MAX);
 									explicit_sdk_mode = 1;
-									stripext(current_sdk, sdk);
+									stripext(current_sdk, XCRUN_NAME_MAX, sdk, sdk_exts);
 								}
 							} else {
 								fprintf(stderr, "xcrun: error: sdk flag requires an argument.\n");
@@ -1096,9 +1128,10 @@ static int xcrun_main(int argc, char *argv[])
 									else
 										exit(1);
 								} else {
-									current_toolchain = (char *)malloc(255);
+									current_toolchain = (char *)malloc(XCRUN_NAME_MAX);
 									explicit_toolchain_mode = 1;
-									stripext(current_toolchain, toolchain);
+									stripext(current_toolchain, XCRUN_NAME_MAX, toolchain,
+							    toolchain_exts);
 								}
 							} else {
 								fprintf(stderr, "xcrun: error: toolchain flag requires an argument.\n");
@@ -1156,17 +1189,18 @@ static int xcrun_main(int argc, char *argv[])
 
 	/* If our SDK and/or Toolchain hasn't been specified, fall back to environment or defaults. */
 	if (current_sdk == NULL) {
-		current_sdk = (char *)malloc(255);
+		current_sdk = (char *)malloc(XCRUN_NAME_MAX);
 		if ((sdk_env = getenv("SDKROOT")) != NULL)
-			stripext(current_sdk, basename(sdk_env));
+			stripext(current_sdk, XCRUN_NAME_MAX, basename(sdk_env), sdk_exts);
 		else
 			current_sdk = default_sdk_name();
 	}
 
 	if (current_toolchain == NULL) {
-		current_toolchain = (char *)malloc(255);
+		current_toolchain = (char *)malloc(XCRUN_NAME_MAX);
 		if ((toolchain_env = getenv("TOOLCHAINS")) != NULL)
-			stripext(current_toolchain, basename(toolchain_env));
+			stripext(current_toolchain, XCRUN_NAME_MAX, basename(toolchain_env),
+				 toolchain_exts);
 		else
 			current_toolchain = default_toolchain_name();
 	}

@@ -5,6 +5,7 @@
  * SPDX-License-Identifier: BSD-3-Clause
  */
 
+#include <ctype.h>
 #include <dirent.h>
 #include <limits.h>
 #include <stdio.h>
@@ -38,6 +39,28 @@ build_path(const char *a, const char *b, const char *c, const char *d)
  * name means walking the platforms rather than looking in a single
  * directory.
  */
+/*
+ * Report the path as the filesystem spells it.
+ *
+ * Directory lookups here are literal, and macOS volumes are usually
+ * case-insensitive, so "macosx.sdk" finds MacOSX.sdk and would other-
+ * wise be handed back verbatim -- a path that resolves for the caller
+ * by luck of the volume and names no directory that exists.  Resolving
+ * it means --show-sdk-path prints what is really there, and the same
+ * name works on a case-sensitive volume, where the literal lookup fails
+ * and the canonical-name search below answers instead.
+ */
+static char *
+dup_real_path(const char *path)
+{
+	char resolved[PATH_MAX];
+
+	if (realpath(path, resolved) != NULL)
+		return strdup(resolved);
+
+	return strdup(path);
+}
+
 static char *
 find_sdk_in_platforms(const char *devdir, const char *name)
 {
@@ -60,7 +83,7 @@ find_sdk_in_platforms(const char *devdir, const char *name)
 			 "%s/%s/Developer/SDKs/%s.sdk",
 			 platforms, e->d_name, name);
 		if (is_dir(candidate)) {
-			found = strdup(candidate);
+			found = dup_real_path(candidate);
 			break;
 		}
 	}
@@ -69,9 +92,74 @@ find_sdk_in_platforms(const char *devdir, const char *name)
 	return found;
 }
 
+/*
+ * Match a name against an SDK's canonical name.
+ *
+ * An SDK answers to two things: the bundle's directory name, and the
+ * CanonicalName in its SDKSettings.plist.  "MacOSX.Internal" is the
+ * first, "macosx26.5.internal" the second, and a build system may use
+ * either.  A bare family name -- "macosx" -- selects a versioned SDK of
+ * that family, which is why the remainder after the family has to be a
+ * version and nothing else: otherwise "macosx" would also match
+ * "macosx26.5.internal" and asking for the plain macOS SDK could hand
+ * back the internal one.
+ */
+static int
+canonical_matches(const char *canonical, const char *name, int family_ok)
+{
+	size_t n;
+
+	if (canonical == NULL || name == NULL)
+		return 0;
+
+	if (strcasecmp(canonical, name) == 0)
+		return 1;
+
+	if (!family_ok)
+		return 0;
+
+	n = strlen(name);
+	if (strncasecmp(canonical, name, n) != 0)
+		return 0;
+
+	/* Everything after the family must look like a version. */
+	for (canonical += n; *canonical != '\0'; canonical++)
+		if (!isdigit((unsigned char)*canonical) && *canonical != '.')
+			return 0;
+
+	return 1;
+}
+
+struct canonical_search {
+	const char *name;
+	int family_ok;
+	char *found;
+};
+
+static void
+canonical_probe(const char *platform, const char *sdkpath, void *ctx)
+{
+	struct canonical_search *search = ctx;
+	char *canonical;
+
+	(void)platform;
+
+	if (search->found != NULL)
+		return;
+
+	if ((canonical = xt_sdk_setting(sdkpath, "CanonicalName")) == NULL)
+		return;
+
+	if (canonical_matches(canonical, search->name, search->family_ok))
+		search->found = strdup(sdkpath);
+
+	free(canonical);
+}
+
 char *
 xt_find_sdk(const char *devdir, const char *name)
 {
+	struct canonical_search search;
 	char *path;
 
 	if (devdir == NULL || name == NULL)
@@ -82,11 +170,31 @@ xt_find_sdk(const char *devdir, const char *name)
 
 	/* The flat layout this project used before. */
 	path = build_path(devdir, "/SDKs/", name, ".sdk");
-	if (path != NULL && is_dir(path))
-		return path;
+	if (path != NULL && is_dir(path)) {
+		char *real = dup_real_path(path);
+
+		free(path);
+		return real;
+	}
 	free(path);
 
-	return NULL;
+	/*
+	 * No bundle by that directory name, so ask the SDKs what they
+	 * call themselves.  Exact canonical names first, so an explicit
+	 * "macosx26.5.internal" is never answered by the family match
+	 * below.
+	 */
+	search.name = name;
+	search.found = NULL;
+
+	search.family_ok = 0;
+	xt_foreach_sdk(devdir, canonical_probe, &search);
+	if (search.found != NULL)
+		return search.found;
+
+	search.family_ok = 1;
+	xt_foreach_sdk(devdir, canonical_probe, &search);
+	return search.found;
 }
 
 char *

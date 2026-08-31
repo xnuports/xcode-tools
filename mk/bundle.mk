@@ -30,8 +30,30 @@ XT_PLATFORM?=	MacOSX
 XT_SDK?=	MacOSX
 XT_TOOLCHAIN?=	XcodeDefault
 
+# The internal SDK, which Apple builds the system against and does not
+# ship.  It is the same macOS SDK plus the headers and libraries kept
+# out of the public one, so it is emitted beside it under the same
+# platform and answers to the canonical name with ".internal" on the
+# end -- the name xcodebuild and xcrun already look for.  Only the
+# layout is produced here; filling it in is separate work.
+XT_SDK_INTERNAL?=	MacOSX.Internal
+
 PLATFORM_DIR=	${RELEASE}/Platforms/${XT_PLATFORM}.platform
 SDK_DIR=	${PLATFORM_DIR}/Developer/SDKs/${XT_SDK}.sdk
+INTERNAL_SDK_DIR=	${PLATFORM_DIR}/Developer/SDKs/${XT_SDK_INTERNAL}.sdk
+
+# What distinguishes an internal SDK on disk.  usr/local is the whole
+# point of it: the public SDK has no usr/local at all, and that is where
+# the headers and libraries Apple keeps to itself live.  The rest mirrors
+# the public bundle so the two are interchangeable to anything that
+# walks an SDK.  PrivateFrameworks is listed because the public SDK does
+# carry one -- the stubs are public, the headers behind them are not.
+INTERNAL_SDK_SUBDIRS=	usr/include \
+			usr/lib \
+			usr/local/include \
+			usr/local/lib \
+			System/Library/Frameworks \
+			System/Library/PrivateFrameworks
 TC_DIR=		${RELEASE}/${XCTOOLCHAIN}
 
 # Version and deployment target are taken from the host SDK, so the
@@ -40,6 +62,7 @@ TC_DIR=		${RELEASE}/${XCTOOLCHAIN}
 XT_SDK_VERSION!=	xcrun --show-sdk-version 2>/dev/null || echo 0.0
 XT_DEPLOYMENT_TARGET?=	${XT_SDK_VERSION}
 XT_SDK_CANONICAL?=	macosx${XT_SDK_VERSION}
+XT_SDK_INTERNAL_CANONICAL?=	macosx${XT_SDK_VERSION}.internal
 XT_DEFAULT_ARCH!=	uname -m 2>/dev/null || echo arm64
 
 # The toolchain identifier is Apple's on purpose: it is the name build
@@ -52,12 +75,14 @@ bundles: bundle-dirs bundle-toolchain bundle-platform bundle-sdk bundle-shims bu
 	@${ECHO} "== bundles emitted =="
 	@${ECHO} "   toolchain: ${XCTOOLCHAIN} (${XT_TOOLCHAIN_ID})"
 	@${ECHO} "   sdk:       ${XT_SDK}.sdk ${XT_SDK_VERSION} (${XT_SDK_CANONICAL})"
+	@${ECHO} "   sdk:       ${XT_SDK_INTERNAL}.sdk ${XT_SDK_VERSION} (${XT_SDK_INTERNAL_CANONICAL}), layout only"
 
 bundle-dirs:
 .for d in ${XCTOOLCHAIN}/usr/bin ${XCTOOLCHAIN}/usr/lib ${XCTOOLCHAIN}/usr/libexec \
 	  Platforms/${XT_PLATFORM}.platform/Developer/SDKs/${XT_SDK}.sdk/usr/include \
 	  Platforms/${XT_PLATFORM}.platform/Developer/SDKs/${XT_SDK}.sdk/usr/lib \
 	  Platforms/${XT_PLATFORM}.platform/Developer/SDKs/${XT_SDK}.sdk/System/Library/Frameworks \
+	  ${INTERNAL_SDK_SUBDIRS:S|^|Platforms/${XT_PLATFORM}.platform/Developer/SDKs/${XT_SDK_INTERNAL}.sdk/|} \
 	  Platforms/${XT_PLATFORM}.platform/Developer/Library
 	@mkdir -p ${RELEASE}/${d}
 .endfor
@@ -133,49 +158,24 @@ ${PLATFORM_DIR}/Info.plist:
 
 # --- sdk --------------------------------------------------------------
 
-bundle-sdk: ${SDK_DIR}/SDKSettings.plist
+bundle-sdk: ${SDK_DIR}/SDKSettings.plist ${INTERNAL_SDK_DIR}/SDKSettings.plist
 
-${SDK_DIR}/SDKSettings.plist:
+# Both bundles come out of one emitter so their contents cannot drift
+# apart; what differs is the identity passed to it.
+SDKSETTINGS=	${TOP}/mk/scripts/emit-sdksettings.sh
+
+${SDK_DIR}/SDKSettings.plist: ${SDKSETTINGS}
 	@mkdir -p ${.TARGET:H}
-	@{ \
-	  echo '<?xml version="1.0" encoding="UTF-8"?>'; \
-	  echo '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">'; \
-	  echo '<plist version="1.0">'; \
-	  echo '<dict>'; \
-	  echo '	<key>CanonicalName</key>'; \
-	  echo '	<string>${XT_SDK_CANONICAL}</string>'; \
-	  echo '	<key>DisplayName</key>'; \
-	  echo '	<string>macOS ${XT_SDK_VERSION}</string>'; \
-	  echo '	<key>MinimalDisplayName</key>'; \
-	  echo '	<string>${XT_SDK_VERSION}</string>'; \
-	  echo '	<key>Version</key>'; \
-	  echo '	<string>${XT_SDK_VERSION}</string>'; \
-	  echo '	<key>DefaultDeploymentTarget</key>'; \
-	  echo '	<string>${XT_DEPLOYMENT_TARGET}</string>'; \
-	  echo '	<key>DefaultProperties</key>'; \
-	  echo '	<dict>'; \
-	  echo '		<key>PLATFORM_NAME</key>'; \
-	  echo '		<string>macosx</string>'; \
-	  echo '		<key>DEFAULT_COMPILER</key>'; \
-	  echo '		<string>com.apple.compilers.llvm.clang.1_0</string>'; \
-	  echo '	</dict>'; \
-	  echo '	<key>SupportedTargets</key>'; \
-	  echo '	<dict>'; \
-	  echo '		<key>macosx</key>'; \
-	  echo '		<dict>'; \
-	  echo '			<key>Archs</key>'; \
-	  echo '			<array>'; \
-	  echo '				<string>${XT_DEFAULT_ARCH}</string>'; \
-	  echo '			</array>'; \
-	  echo '			<key>DefaultDeploymentTarget</key>'; \
-	  echo '			<string>${XT_DEPLOYMENT_TARGET}</string>'; \
-	  echo '			<key>PlatformFamilyName</key>'; \
-	  echo '			<string>macOS</string>'; \
-	  echo '		</dict>'; \
-	  echo '	</dict>'; \
-	  echo '</dict>'; \
-	  echo '</plist>'; \
-	} > ${.TARGET}
+	@${SDKSETTINGS} ${XT_SDK_CANONICAL} "macOS ${XT_SDK_VERSION}" \
+	    ${XT_SDK_VERSION} ${XT_DEPLOYMENT_TARGET} ${XT_DEFAULT_ARCH} \
+	    > ${.TARGET}
+
+${INTERNAL_SDK_DIR}/SDKSettings.plist: ${SDKSETTINGS}
+	@mkdir -p ${.TARGET:H}
+	@${SDKSETTINGS} ${XT_SDK_INTERNAL_CANONICAL} \
+	    "macOS ${XT_SDK_VERSION} Internal" \
+	    ${XT_SDK_VERSION} ${XT_DEPLOYMENT_TARGET} ${XT_DEFAULT_ARCH} \
+	    > ${.TARGET}
 
 # --- toolchain shims --------------------------------------------------
 #

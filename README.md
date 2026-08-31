@@ -60,7 +60,7 @@ one.
 | `usr/libexec` | `PlistBuddy` |
 | `usr/local/bin` | `bmake`, `bsdmake` |
 | `Makefiles/` | `CoreOS` and `pb_makefiles` build fragments |
-| `Platforms/`, `Toolchains/` | emitted `.sdk` and `.xctoolchain` bundle metadata |
+| `Platforms/`, `Toolchains/` | emitted `.sdk` (public and internal) and `.xctoolchain` bundle metadata |
 
 `bmake` and `bsdmake` sit in `usr/local/bin` rather than `usr/bin` because
 Xcode ships neither — they are ours, and building them removes the last
@@ -185,8 +185,14 @@ Two clean builds of the default set produce byte-identical binaries.
 
 ## What is missing
 
-- **SDK contents** — headers, libraries, frameworks. The bundle exists; the
-  contents do not.
+- **SDK contents** — headers, libraries, frameworks. Two bundles are emitted,
+  `MacOSX.sdk` and `MacOSX.Internal.sdk`; both are layout only, and the contents
+  do not exist yet. The internal one is the SDK Apple builds the system against
+  and does not ship: same shape as the public bundle plus `usr/local/include`
+  and `usr/local/lib`, which is where the headers and libraries kept out of the
+  public SDK belong. It answers to `macosx<version>.internal`, so
+  `xcrun --sdk macosx.internal` and `xcodebuild -sdk macosx26.5.internal` both
+  select it.
 - **Swift** — the submodule is there, not yet built.
 - **Python, Git** — sources carried (CPython 3.14.6, git 2.50.1, the version Apple's Git-155 wraps), not yet ported to `mk/port.mk`.
 - **The `xc*` family** — `xccov`, `xcresulttool`, `xcstringstool`,
