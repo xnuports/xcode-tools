@@ -480,6 +480,34 @@ xt_sdk_default_property(const char *sdkpath, const char *key)
 	return sdk_string(sdkpath, "DefaultProperties", key);
 }
 
+/*
+ * A top-level string from a platform bundle's Info.plist.
+ *
+ * Apple's platform carries the same version under three keys; "Version"
+ * is the one that says what it means, so callers ask for that first and
+ * fall back themselves.
+ */
+char *
+xt_platform_setting(const char *platformpath, const char *key)
+{
+	char path[PATH_MAX];
+	plist_node *root, *node;
+	char *value = NULL;
+
+	if (platformpath == NULL || key == NULL)
+		return NULL;
+
+	snprintf(path, sizeof(path), "%s/Info.plist", platformpath);
+	if ((root = read_plist(path)) == NULL)
+		return NULL;
+
+	if ((node = plist_dict_get(root, key)) != NULL && node->string != NULL)
+		value = strdup(node->string);
+
+	plist_free(root);
+	return value;
+}
+
 char *
 xt_toolchain_identifier(const char *tcpath)
 {

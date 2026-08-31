@@ -142,6 +142,8 @@ ${PLATFORM_DIR}/Info.plist:
 	  echo '	<string>${XT_SDK_VERSION}</string>'; \
 	  echo '	<key>CFBundleVersion</key>'; \
 	  echo '	<string>${XT_SDK_VERSION}</string>'; \
+	  echo '	<key>Version</key>'; \
+	  echo '	<string>${XT_SDK_VERSION}</string>'; \
 	  echo '	<key>Description</key>'; \
 	  echo '	<string>macOS</string>'; \
 	  echo '	<key>FamilyIdentifier</key>'; \

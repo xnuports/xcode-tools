@@ -41,6 +41,14 @@ char *xt_find_sdk(const char *devdir, const char *name);
 char *xt_sdk_platform_path(const char *sdkpath);
 
 /**
+ * @func xt_platform_setting -- read a top-level string from a platform's Info.plist
+ * @arg platformpath - absolute path of the .platform directory
+ * @arg key - key to read, e.g. "Version"
+ * @return: malloc'd value, or NULL when the plist or key is absent
+ */
+char *xt_platform_setting(const char *platformpath, const char *key);
+
+/**
  * @func xt_find_toolchain -- absolute path of a toolchain by name
  * @arg devdir - the Developer directory to search
  * @arg name - toolchain name without suffix, e.g. "XcodeDefault"

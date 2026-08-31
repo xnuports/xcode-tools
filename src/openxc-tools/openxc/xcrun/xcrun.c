@@ -258,6 +258,7 @@ static void usage(void)
 #endif
 		"  --show-sdk-path              show selected SDK install path\n"
 		"  --show-sdk-platform-path     show selected SDK platform path\n"
+		"  --show-sdk-platform-version  show selected SDK platform version\n"
 		"  --show-sdk-version           show selected SDK version\n"
 		"  --show-sdk-target-triple     show selected SDK target triple\n"
 		"  --show-sdk-toolchain-path    show selected SDK toolchain path\n"
@@ -1083,8 +1084,8 @@ static int xcrun_main(int argc, char *argv[])
 	char *sdk_env = NULL;
 	char *toolchain_env = NULL;
 
-	static int help_f, verbose_f, log_f, find_f, run_f, nocache_f, killcache_f, version_f, sdk_f, toolchain_f, ssdkp_f, ssdkv_f, ssdkpp_f, ssdktt_f, ssdkpv_f, ssdkplatp_f;
-	help_f = verbose_f = log_f = find_f = run_f = nocache_f = killcache_f = version_f = sdk_f = toolchain_f = ssdkp_f = ssdkv_f = ssdkpp_f = ssdktt_f = ssdkpv_f = ssdkplatp_f = 0;
+	static int help_f, verbose_f, log_f, find_f, run_f, nocache_f, killcache_f, version_f, sdk_f, toolchain_f, ssdkp_f, ssdkv_f, ssdkpp_f, ssdktt_f, ssdkpv_f, ssdkplatp_f, ssdkplatv_f;
+	help_f = verbose_f = log_f = find_f = run_f = nocache_f = killcache_f = version_f = sdk_f = toolchain_f = ssdkp_f = ssdkv_f = ssdkpp_f = ssdktt_f = ssdkpv_f = ssdkplatp_f = ssdkplatv_f = 0;
 
 	/* Supported options */
 	static struct option options[] = {
@@ -1104,6 +1105,7 @@ static int xcrun_main(int argc, char *argv[])
 		{ "show-sdk-toolchain-path", no_argument, &ssdkpp_f, 1 },
 		{ "show-sdk-toolchain-version", no_argument, &ssdkpv_f, 1 },
 		{ "show-sdk-platform-path", no_argument, &ssdkplatp_f, 1 },
+		{ "show-sdk-platform-version", no_argument, &ssdkplatv_f, 1 },
 		{ NULL, 0, 0, 0 }
 	};
 
@@ -1272,6 +1274,33 @@ static int xcrun_main(int argc, char *argv[])
 		}
 
 		printf("%s\n", platform);
+		exit(0);
+	}
+
+	/* Show SDK platform version? */
+	if (ssdkplatv_f == 1) {
+		char *platform = xt_sdk_platform_path(get_sdk_path(current_sdk));
+		char *version = NULL;
+
+		if (platform != NULL) {
+			/*
+			 * Apple's platform records the same version under
+			 * "Version" and CFBundleShortVersionString; take
+			 * the one that names itself, and accept the bundle
+			 * key from a platform that carries only that.
+			 */
+			if ((version = xt_platform_setting(platform, "Version")) == NULL)
+				version = xt_platform_setting(platform,
+				    "CFBundleShortVersionString");
+		}
+
+		if (version == NULL) {
+			fprintf(stderr, "xcrun: error: no platform version for SDK \'%s\'.\n",
+				current_sdk);
+			exit(1);
+		}
+
+		printf("%s\n", version);
 		exit(0);
 	}
 

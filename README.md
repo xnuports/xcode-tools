@@ -47,8 +47,8 @@ need nothing beyond the tree.
 `xcrun` and `xcodebuild` read Apple's layout directly: they find SDKs inside
 platform bundles, parse `SDKSettings.plist` in binary, XML or NextSTEP form, and
 work against a stock Xcode with no configuration at all. `xcrun --show-sdk-path`,
-`--show-sdk-version`, `--show-sdk-platform-path` and `--find` match Apple's
-output exactly when pointed at one.
+`--show-sdk-version`, `--show-sdk-platform-path`, `--show-sdk-platform-version`
+and `--find` match Apple's output exactly when pointed at one.
 
 **48 programs** build: 42 compiled directly, 6 through their own build systems.
 
