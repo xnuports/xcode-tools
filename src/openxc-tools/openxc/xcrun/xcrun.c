@@ -257,6 +257,7 @@ static void usage(void)
 		"  -k, --kill-cache             invalidate all existing cache entries (not implemented yet - does nothing)\n"
 #endif
 		"  --show-sdk-path              show selected SDK install path\n"
+		"  --show-sdk-platform-path     show selected SDK platform path\n"
 		"  --show-sdk-version           show selected SDK version\n"
 		"  --show-sdk-target-triple     show selected SDK target triple\n"
 		"  --show-sdk-toolchain-path    show selected SDK toolchain path\n"
@@ -1082,8 +1083,8 @@ static int xcrun_main(int argc, char *argv[])
 	char *sdk_env = NULL;
 	char *toolchain_env = NULL;
 
-	static int help_f, verbose_f, log_f, find_f, run_f, nocache_f, killcache_f, version_f, sdk_f, toolchain_f, ssdkp_f, ssdkv_f, ssdkpp_f, ssdktt_f, ssdkpv_f;
-	help_f = verbose_f = log_f = find_f = run_f = nocache_f = killcache_f = version_f = sdk_f = toolchain_f = ssdkp_f = ssdkv_f = ssdkpp_f = ssdktt_f = ssdkpv_f = 0;
+	static int help_f, verbose_f, log_f, find_f, run_f, nocache_f, killcache_f, version_f, sdk_f, toolchain_f, ssdkp_f, ssdkv_f, ssdkpp_f, ssdktt_f, ssdkpv_f, ssdkplatp_f;
+	help_f = verbose_f = log_f = find_f = run_f = nocache_f = killcache_f = version_f = sdk_f = toolchain_f = ssdkp_f = ssdkv_f = ssdkpp_f = ssdktt_f = ssdkpv_f = ssdkplatp_f = 0;
 
 	/* Supported options */
 	static struct option options[] = {
@@ -1102,6 +1103,7 @@ static int xcrun_main(int argc, char *argv[])
 		{ "show-sdk-target-triple", no_argument, &ssdktt_f, 1},
 		{ "show-sdk-toolchain-path", no_argument, &ssdkpp_f, 1 },
 		{ "show-sdk-toolchain-version", no_argument, &ssdkpv_f, 1 },
+		{ "show-sdk-platform-path", no_argument, &ssdkplatp_f, 1 },
 		{ NULL, 0, 0, 0 }
 	};
 
@@ -1255,6 +1257,21 @@ static int xcrun_main(int argc, char *argv[])
 	/* Show SDK path? */
 	if (ssdkp_f == 1) {
 		printf("%s\n", get_sdk_path(current_sdk));
+		exit(0);
+	}
+
+	/* Show SDK platform path? */
+	if (ssdkplatp_f == 1) {
+		char *sdk = get_sdk_path(current_sdk);
+		char *platform = xt_sdk_platform_path(sdk);
+
+		if (platform == NULL) {
+			fprintf(stderr, "xcrun: error: SDK \'%s\' is not inside a platform.\n",
+				current_sdk);
+			exit(1);
+		}
+
+		printf("%s\n", platform);
 		exit(0);
 	}
 

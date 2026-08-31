@@ -197,6 +197,39 @@ xt_find_sdk(const char *devdir, const char *name)
 	return search.found;
 }
 
+/*
+ * The platform bundle an SDK belongs to.
+ *
+ * Apple's layout is <dev>/Platforms/<name>.platform/Developer/SDKs/
+ * <name>.sdk, so the platform is found by walking back up to the first
+ * component that ends in ".platform" rather than by counting directories
+ * -- the depth is not something to rely on, and an SDK in the old flat
+ * layout sits inside no platform at all, which is what NULL reports.
+ */
+char *
+xt_sdk_platform_path(const char *sdkpath)
+{
+	char buf[PATH_MAX];
+	char *slash;
+
+	if (sdkpath == NULL)
+		return NULL;
+
+	if (snprintf(buf, sizeof(buf), "%s", sdkpath) >= (int)sizeof(buf))
+		return NULL;
+
+	while ((slash = strrchr(buf, '/')) != NULL) {
+		size_t len = strlen(slash + 1);
+
+		if (len > 9 && strcmp(slash + 1 + len - 9, ".platform") == 0)
+			return strdup(buf);
+
+		*slash = '\0';
+	}
+
+	return NULL;
+}
+
 char *
 xt_find_toolchain(const char *devdir, const char *name)
 {

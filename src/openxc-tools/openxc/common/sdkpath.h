@@ -33,6 +33,14 @@
 char *xt_find_sdk(const char *devdir, const char *name);
 
 /**
+ * @func xt_sdk_platform_path -- the .platform bundle an SDK sits inside
+ * @arg sdkpath - absolute path of the .sdk directory
+ * @return: malloc'd path to the enclosing <name>.platform directory, or
+ *          NULL when the SDK is not inside one
+ */
+char *xt_sdk_platform_path(const char *sdkpath);
+
+/**
  * @func xt_find_toolchain -- absolute path of a toolchain by name
  * @arg devdir - the Developer directory to search
  * @arg name - toolchain name without suffix, e.g. "XcodeDefault"
