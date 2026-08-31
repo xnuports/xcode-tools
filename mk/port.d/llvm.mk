@@ -8,6 +8,12 @@
 # Scoped deliberately: only the two targets Apple ships for on this
 # hardware, no tests, no docs, no examples, no bindings.  A full LLVM
 # build is otherwise far larger than this tree needs.
+#
+# lld is enabled for ELF.  Apple's linker is Mach-O only -- ld64 rejects
+# an ELF object outright -- while clang here already emits ELF for both
+# targets and llvm-nm and llvm-objdump already read it, so the linker was
+# the only thing missing.  ld64 is left alone and keeps the name `ld`:
+# lld is an addition to the toolchain, not a replacement for it.
 
 TAPI_PATCHES!=	ls ${TOP}/mk/patches/tapi/*.patch 2>/dev/null || true
 
@@ -29,7 +35,7 @@ P_CMAKE_SRC=	llvm
 # property, so the check is answered in the negative rather than the flag
 # being fought.
 P_CONFIGURE_ARGS=	\
-	-DLLVM_ENABLE_PROJECTS=clang \
+	-DLLVM_ENABLE_PROJECTS="clang;lld" \
 	-DLLVM_EXTERNAL_PROJECTS=tapi \
 	-DLLVM_EXTERNAL_TAPI_SOURCE_DIR=${P_WORKDIR}/tapi-src \
 	-DLINKER_SUPPORTS_NO_INITS=FALSE \
@@ -59,9 +65,14 @@ P_NOSTAGE=	yes
 # which carry drift beyond what the scripts and patches cover (clang's
 # DiagnosticOptions is no longer reference-counted, for one).  libtapi
 # itself -- the only part ld64 needs -- builds clean.
+#
+# The ELF set: lld links, llvm-ar archives, llvm-objcopy and llvm-readobj
+# edit and inspect.  Each also builds the aliases beside it (ld.lld,
+# llvm-ranlib, llvm-strip, llvm-readelf), which bundle-aliases links.
 P_MAKE_ARGS=	clang llvm-nm llvm-otool llvm-objdump llvm-size \
 		llvm-strings dsymutil llvm-dwarfdump llvm-cov \
-		llvm-profdata libtapi
+		llvm-profdata libtapi \
+		lld llvm-ar llvm-objcopy llvm-readobj
 
 # clang's resource directory -- its own stdarg.h, stddef.h and the rest.
 # Without it clang finds no builtin headers and anything past trivial C
@@ -74,7 +85,15 @@ P_TREES=	lib/clang/${CLANG_RESOURCE_VER}
 # staged into the toolchain's usr/lib rather than usr/bin.
 P_LIBS=		lib/libtapi.dylib
 
+#
+# Only the real binaries are listed.  The alias names beside them in the
+# build directory are symlinks, and copying a symlink here would copy the
+# binary again -- lld is not small.  bundle-aliases links them instead.
 P_PROGS=	bin/clang \
+		bin/lld \
+		bin/llvm-ar \
+		bin/llvm-objcopy \
+		bin/llvm-readobj \
 		bin/llvm-nm \
 		bin/llvm-otool \
 		bin/llvm-objdump \

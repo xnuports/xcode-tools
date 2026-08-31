@@ -240,8 +240,15 @@ bundle-makefiles: bundle-dirs
 # once the llvm port has supplied the targets; without it the names are
 # simply absent rather than wrong.
 
+# Alias names, as <alias> <target> pairs.  ld.lld is how a driver asks
+# for the ELF linker (clang's -fuse-ld=lld looks for exactly that name),
+# and the llvm-* aliases are the ones those tools answer to when they are
+# used as their binutils counterparts.  `ld` is not among them: that is
+# ld64, the Mach-O linker, and it stays.
 bundle-aliases: bundle-dirs
-.for a t in nm llvm-nm otool llvm-otool
+.for a t in nm llvm-nm otool llvm-otool ld.lld lld \
+	    llvm-readelf llvm-readobj llvm-strip llvm-objcopy \
+	    llvm-ranlib llvm-ar
 	@if [ -e ${TC_DIR}/usr/bin/${t} ] && [ ! -e ${TC_DIR}/usr/bin/${a} ]; then \
 		ln -sfn ${t} ${TC_DIR}/usr/bin/${a}; \
 		${ECHO} "alias: ${a} -> ${t}"; \

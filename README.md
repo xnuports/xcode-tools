@@ -23,6 +23,26 @@ ld -o hello hello.o -lSystem -syslibroot $SDK -arch arm64 \
 — our clang, our ld64, our libtapi reading the SDK's `.tbd` stubs, and the
 result inspectable with our own `otool-classic`, `nm-classic` and `size-classic`.
 
+### ELF, as well as Mach-O
+
+Apple's linker is Mach-O only: hand `ld` an ELF object and it declines, and
+nothing Apple ships will link one. clang here already emits ELF for both
+targets, so the toolchain also carries `lld` — reachable as `ld.lld`, which is
+the name `clang -fuse-ld=lld` looks for — together with `llvm-ar`, `llvm-ranlib`,
+`llvm-objcopy`, `llvm-strip` and `llvm-readelf`. `llvm-nm` and `llvm-objdump`
+already read ELF.
+
+```sh
+clang --target=aarch64-unknown-linux-gnu -ffreestanding -nostdlib \
+      -fuse-ld=lld -o hello hello.c
+llvm-readelf -h hello
+```
+
+`ld` remains ld64 and remains the Mach-O linker: lld is an addition to the
+toolchain, not a replacement. Cross-linking a *hosted* Linux binary still needs
+a sysroot with that system's libc; freestanding and static links need nothing
+beyond the tree.
+
 `xcrun` and `xcodebuild` read Apple's layout directly: they find SDKs inside
 platform bundles, parse `SDKSettings.plist` in binary, XML or NextSTEP form, and
 work against a stock Xcode with no configuration at all. `xcrun --show-sdk-path`,
@@ -34,7 +54,7 @@ one.
 | Where | What |
 |---|---|
 | `usr/bin` | our 10 reimplementations, plus headerdoc, pngcrush, `xml2man`, `resolveLinks`, `make`/`gnumake`, `bsdmake`, `bmake` |
-| `Toolchains/XcodeDefault.xctoolchain/usr/bin` | `clang`/`clang++`/`cc`/`c++`/`cpp`, `ld`, the cctools set, the llvm-* tools, `dsymutil`, developer_cmds, `flex`, `gperf` |
+| `Toolchains/XcodeDefault.xctoolchain/usr/bin` | `clang`/`clang++`/`cc`/`c++`/`cpp`, `ld` (Mach-O) and `ld.lld` (ELF), the cctools set, the llvm-* tools, `dsymutil`, developer_cmds, `flex`, `gperf` |
 | `Toolchains/XcodeDefault.xctoolchain/usr/lib` | `libtapi.dylib`, clang's resource directory |
 | `usr/libexec` | `PlistBuddy` |
 | `usr/local/bin` | `bmake`, `bsdmake` |
