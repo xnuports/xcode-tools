@@ -7,7 +7,7 @@
 # Defines mirror the port's Makefile: MAKE_VERSION and DEFSHELLNAME are
 # both compiled in there rather than discovered, and __FBSDID maps to
 # the NetBSD spelling the sources actually have.
-T_CFLAGS+=	-I${TOP}/src/bsdmake
+T_CFLAGS+=	-I${TOP}/src/extras/bsdmake
 T_CFLAGS+=	-DMAKE_VERSION=\"5200408120\"
 T_CFLAGS+=	-D__FBSDID=__RCSID
 T_CFLAGS+=	-DDEFSHELLNAME=\"sh\"

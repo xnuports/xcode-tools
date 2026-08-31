@@ -12,13 +12,13 @@ TOP?=		${.CURDIR}/..
 .include "${TOP}/mk/xcodetools.sys.mk"
 
 OBJBASE=	${TOP}/build/lib
-CCTOOLS=	${TOP}/src/distribution-Developer_Tools/cctools
+CCTOOLS=	${TOP}/src/apple-oss-distributions/distribution-Developer_Tools/cctools
 
 # Same flags Apple's libstuff.xcconfig and cctools.xcconfig set; see
 # mk/with-cctools.mk for the reasoning behind each one.
 CCTOOLS_VERSION?=	cctools-1030.6.3
 CCTOOLS_CFLAGS=	-I${CCTOOLS}/include -I${CCTOOLS}/include/stuff \
-		-I${TOP}/src/llvm-project/llvm/include \
+		-I${TOP}/src/swiftlang-llvm/llvm-project/llvm/include \
 		-include ${TOP}/mk/cctools-compat.h \
 		-Wno-ambiguous-macro -DLTO_SUPPORT \
 		-DCURRENT_PROJECT_VERSION=\"${CCTOOLS_VERSION}\"

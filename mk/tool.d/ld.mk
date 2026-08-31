@@ -5,12 +5,12 @@
 # in ld64.xcodeproj.
 .include "${TOP}/mk/with-ld64.mk"
 
-T_SRCS!=	cd ${TOP} && ls src/distribution-Developer_Tools/ld64/src/ld/*.cpp \
-		    src/distribution-Developer_Tools/ld64/src/ld/parsers/*.cpp \
-		    src/distribution-Developer_Tools/ld64/src/ld/passes/*.cpp \
-		    src/distribution-Developer_Tools/ld64/src/ld/passes/stubs/*.cpp \
-		    src/distribution-Developer_Tools/ld64/src/mach_o/*.cpp \
-		    src/distribution-Developer_Tools/ld64/src/ld/*.c 2>/dev/null
+T_SRCS!=	cd ${TOP} && ls src/apple-oss-distributions/distribution-Developer_Tools/ld64/src/ld/*.cpp \
+		    src/apple-oss-distributions/distribution-Developer_Tools/ld64/src/ld/parsers/*.cpp \
+		    src/apple-oss-distributions/distribution-Developer_Tools/ld64/src/ld/passes/*.cpp \
+		    src/apple-oss-distributions/distribution-Developer_Tools/ld64/src/ld/passes/stubs/*.cpp \
+		    src/apple-oss-distributions/distribution-Developer_Tools/ld64/src/mach_o/*.cpp \
+		    src/apple-oss-distributions/distribution-Developer_Tools/ld64/src/ld/*.c 2>/dev/null
 T_SRCS+=	build/gen/ld64/version.c
 
 # --- generated headers ------------------------------------------------
@@ -81,7 +81,7 @@ ${LD64_GEN}/version.c:
 # Version.inc.in; ld64 reaches it through tapi/Version.h.  The version is
 # read out of tapi's own CMakeLists so it tracks the submodule.
 TAPI_FULL_VERSION!=	sed -n 's/^set(TAPI_FULL_VERSION "\([^"]*\)".*/\1/p' \
-			${TOP}/src/distribution-Developer_Tools/tapi/CMakeLists.txt 2>/dev/null || echo 2.0.0
+			${TOP}/src/apple-oss-distributions/distribution-Developer_Tools/tapi/CMakeLists.txt 2>/dev/null || echo 2.0.0
 
 ${LD64_GEN}/tapi/Version.inc:
 	@mkdir -p ${LD64_GEN}/tapi

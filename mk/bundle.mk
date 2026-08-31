@@ -198,7 +198,7 @@ ${SDK_DIR}/SDKSettings.plist:
 #
 # (bmake uses MAKESYSPATH for the same purpose; the two differ.)
 
-DEVTOOLS=	${TOP}/src/distribution-Developer_Tools
+DEVTOOLS=	${TOP}/src/apple-oss-distributions/distribution-Developer_Tools
 UNIFDEF=	${TC_DIR}/usr/bin/unifdef
 
 bundle-makefiles: bundle-dirs
@@ -225,10 +225,10 @@ bundle-makefiles: bundle-dirs
 		${DEVTOOLS}/pb_makefiles/ ${RELEASE}/Makefiles/pb_makefiles/
 	@${ECHO} "makefiles: pb_makefiles"
 .endif
-.if exists(${TOP}/src/bsdmake/mk)
+.if exists(${TOP}/src/extras/bsdmake/mk)
 	@mkdir -p ${RELEASE}/usr/local/share/bsdmake
 	@rsync -a --delete --exclude '.git' \
-		${TOP}/src/bsdmake/mk/ ${RELEASE}/usr/local/share/bsdmake/mk/
+		${TOP}/src/extras/bsdmake/mk/ ${RELEASE}/usr/local/share/bsdmake/mk/
 	@${ECHO} "makefiles: bsdmake system rules"
 .endif
 

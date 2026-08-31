@@ -1,33 +1,33 @@
 [submodule "llvm-project"]
-	path = src/llvm-project
+	path = src/swiftlang-llvm/llvm-project
 	url = https://github.com/swiftlang/llvm-project.git
 	branch = swift/release/6.3
-[submodule "PlistBuddy"]
-	path = src/PlistBuddy
+[submodule "openxc-tools/PlistBuddy"]
+	path = src/openxc-tools/PlistBuddy
 	url = https://github.com/xnuports/PlistBuddy
-[submodule "distribution-Developer_Tools"]
-	path = src/distribution-Developer_Tools
+[submodule "apple-oss-distributions/distribution-Developer_Tools"]
+	path = src/apple-oss-distributions/distribution-Developer_Tools
 	url = https://github.com/apple-oss-distributions/distribution-Developer_Tools.git
 	branch = rel/Developer_Tools-26
-[submodule "swift"]
-	path = src/swift
+[submodule "swiftlang-llvm/swift"]
+	path = src/swiftlang-llvm/swift
 	url = https://github.com/swiftlang/swift.git
-[submodule "src/objc4"]
-	path = src/objc4
+[submodule "apple-oss-distributions/objc4"]
+	path = src/apple-oss-distributions/objc4
 	url = https://github.com/apple-oss-distributions/objc4.git
 	branch = rel/objc4-951
-[submodule "src/Python"]
-	path = src/python-apple-support
+[submodule "python/python-apple-support"]
+	path = src/python/python-apple-support
 	url = https://github.com/xnuports/Python-Apple-support/
 [submodule "include/ld-internals"]
 	path = include/ld-internals
 	url = https://github.com/xnuports/ld-internals.git
-[submodule "src/cpython"]
-	path = src/cpython
+[submodule "python/cpython"]
+	path = src/python/cpython
 	url = https://github.com/python/cpython.git
 	branch = 3.14
-[submodule "src/pngcrush"]
-	path = src/pngcrush
+[submodule "openxc-tools/pngcrush"]
+	path = src/openxc-tools/pngcrush
 	url = https://github.com/xnuports/pngcrush.git
 [submodule "lib/libplatform"]
 	path = lib/libplatform
@@ -48,15 +48,15 @@
 [submodule "lib/apple_internal_sdk"]
 	path = lib/apple_internal_sdk
 	url = https://github.com/xnuports/apple_internal_sdk.git
-[submodule "src/bsdmake"]
-	path = src/bsdmake
+[submodule "extras/bsdmake"]
+	path = src/extras/bsdmake
 	url = https://github.com/apple-oss-distributions/bsdmake
-[submodule "src/bmake"]
-	path = src/bmake
+[submodule "extras/bmake"]
+	path = src/extras/bmake
 	url = https://github.com/xnuports/bmake.git
 [submodule "src/git"]
 	path = src/git
 	url = https://github.com/git/git.git
-[submodule "src/vmmap"]
-	path = src/vmmap
+[submodule "openxc-tools/vmmap"]
+	path = src/openxc-tools/vmmap
 	url = https://github.com/xnuports/vmmap.git

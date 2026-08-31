@@ -35,7 +35,7 @@
  * from LLVM, which we carry as a submodule and which is the same
  * definition the linker and the assembler agree on:
  *
- *	src/llvm-project/llvm/include/llvm/BinaryFormat/MachO.h
+ *	src/swiftlang-llvm/llvm-project/llvm/include/llvm/BinaryFormat/MachO.h
  *		CPU_TYPE_RISCV = 24
  *		CPU_SUBTYPE_RISCV_ALL = 0
  *
