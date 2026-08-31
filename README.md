@@ -39,9 +39,10 @@ llvm-readelf -h hello
 ```
 
 `ld` remains ld64 and remains the Mach-O linker: lld is an addition to the
-toolchain, not a replacement. Cross-linking a *hosted* Linux binary still needs
-a sysroot with that system's libc; freestanding and static links need nothing
-beyond the tree.
+toolchain, not a replacement. lld comes from the LLVM port, so it needs
+`MK_PORTS=yes` like the rest of that tier. Cross-linking a *hosted* Linux binary
+still needs a sysroot with that system's libc; freestanding and static links
+need nothing beyond the tree.
 
 `xcrun` and `xcodebuild` read Apple's layout directly: they find SDKs inside
 platform bundles, parse `SDKSettings.plist` in binary, XML or NextSTEP form, and
@@ -139,7 +140,9 @@ bmake MK_PORTS=yes      # also build components with their own build system
 
 `MK_PORTS` is off by default because it includes LLVM: most of an hour on ten
 cores, and 2.7 GB of build directory. It is what supplies `clang`, the `llvm-*`
-tools, and `libtapi` — and therefore `ld`, which links against it. Note that
+tools, `lld`, and `libtapi` — and therefore both `ld`, which links against it,
+and the ELF support above. With the tier off, the ports directory says so
+rather than quietly building nothing. Note that
 `clean` deliberately spares `build/ports`, so an ordinary rebuild does not
 throw that away.
 
