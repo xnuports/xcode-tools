@@ -37,6 +37,7 @@ COMMONCRYPTO=	${TOP}/lib/commoncrypto
 COPYFILE=	${TOP}/src/apple-oss-distributions/copyfile
 REMOVEFILE=	${TOP}/src/apple-oss-distributions/removefile
 LIBDISPATCH=	${TOP}/lib/libdispatch
+LLVM_BUILD=	${TOP}/build/ports/llvm/build
 
 sdk-headers:
 	@${ECHO} "sdk: installing headers into MacOSX.sdk/usr/include"
@@ -118,6 +119,22 @@ sdk-headers:
 	    ${SDK_INC}/sys/_posix_availability.h > /dev/null 2>&1 || true
 	@sh ${XNU}/bsd/sys/make_symbol_aliasing.sh "${SDK_ROOT}" \
 	    ${SDK_INC}/sys/_symbol_aliasing.h > /dev/null 2>&1 || true
+
+	# Libc's headers carry sections meant for building Libc itself,
+	# which an SDK does not ship -- see mk/scripts/strip-libc-private.sh.
+	@${TOP}/mk/scripts/strip-libc-private.sh ${SDK_INC} || true
+
+	# The C++ standard library's headers, which an SDK carries at
+	# usr/include/c++/v1 -- that is where Apple's are, not in the
+	# toolchain.  Built by the llvm port as a runtime; without them
+	# nothing including <string> compiles, however good the stub is.
+	@if [ -d ${LLVM_BUILD}/include/c++/v1 ]; then \
+		mkdir -p ${SDK_INC}/c++; \
+		cp -Rf ${LLVM_BUILD}/include/c++/v1 ${SDK_INC}/c++/; \
+		${ECHO} "sdk: libc++ headers installed"; \
+	 else \
+		${ECHO} "sdk: no libc++ headers (build the llvm port first)"; \
+	 fi
 
 	@${ECHO} "sdk: `find ${SDK_INC} -name '*.h' | wc -l | tr -d ' '` headers installed"
 

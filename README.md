@@ -221,12 +221,19 @@ Two clean builds of the default set produce byte-identical binaries.
   re-exports some thirty libraries under `/usr/lib/system`; their symbols are
   gathered into one stub (8992 of them), alongside `libc++` and `libobjc`.
 
-  Not finished. Some headers still fail on availability macros whose supporting
-  definitions exist only in Apple's shipped SDK — Apple's headers are processed
-  copies, not the originals. C++ does not compile: the `libc++` stub is there
-  but its headers are not, which needs `libcxx` added to the LLVM runtimes. And
-  the frameworks have no open-source release at all, so an SDK built here will
-  do C and POSIX and stop there.
+  libc++ is built as an LLVM runtime and its headers are installed at
+  `usr/include/c++/v1`, where an SDK carries them. Libc's headers are also
+  filtered on the way in: they contain `//Begin-Libc` sections meant for
+  building Libc itself, which reference headers no SDK ships, and Apple's
+  install strips them — so does ours.
+
+  Not finished, and one of these is a hard limit. **C++ still does not
+  compile**: libc++'s `math.h` wraps the C library's, and there is no `math.h`
+  to wrap — Apple publishes no Libm, and it is absent from the macOS 26.5
+  manifest, so it cannot be built from open source at all. Some C headers
+  (`unistd.h`, `pthread.h`) still fail on availability macros whose definitions
+  exist only in Apple's shipped SDK. And the frameworks have no open-source
+  release either. An SDK built here does C and POSIX and stops there.
 
   `MacOSX.Internal.sdk` remains layout only. The internal one is the SDK Apple builds the system against
   and does not ship: same shape as the public bundle plus `usr/local/include`

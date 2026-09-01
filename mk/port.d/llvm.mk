@@ -9,6 +9,20 @@
 # hardware, no tests, no docs, no examples, no bindings.  A full LLVM
 # build is otherwise far larger than this tree needs.
 #
+# The unwinder is the system's.  libcxxabi defaults to LLVM's own and
+# then refuses to configure unless libunwind is built too; on Darwin the
+# unwinder lives in libSystem and is what Apple's libc++ uses, so the
+# default is turned off rather than a third runtime added to satisfy it.
+#
+# It goes through RUNTIMES_CMAKE_ARGS because the runtimes are a separate
+# CMake invocation that forwards only the variables it knows about -- set
+# directly, the option is accepted here and never reaches libcxxabi.
+#
+# libcxx and libcxxabi are built for the C++ standard library: its
+# headers are what an SDK carries at usr/include/c++/v1, and without them
+# nothing including <string> compiles even though the libc++ stub is
+# there to link against.
+#
 # compiler-rt is enabled for its builtins.  Without them a toolchain
 # cannot link anything that tests an OS version: the @available check
 # lowers to ___isPlatformVersionAtLeast, which lives in
@@ -44,7 +58,8 @@ P_CMAKE_SRC=	llvm
 # being fought.
 P_CONFIGURE_ARGS=	\
 	-DLLVM_ENABLE_PROJECTS="clang;lld" \
-	-DLLVM_ENABLE_RUNTIMES="compiler-rt" \
+	-DLLVM_ENABLE_RUNTIMES="compiler-rt;libcxx;libcxxabi" \
+	-DRUNTIMES_CMAKE_ARGS="-DLIBCXXABI_USE_LLVM_UNWINDER=OFF" \
 	-DCOMPILER_RT_BUILD_SANITIZERS=OFF \
 	-DCOMPILER_RT_BUILD_XRAY=OFF \
 	-DCOMPILER_RT_BUILD_LIBFUZZER=OFF \
@@ -96,7 +111,7 @@ P_MAKE_ARGS=	clang llvm-nm llvm-otool llvm-objdump llvm-size \
 		llvm-profdata libtapi \
 		lld llvm-ar llvm-objcopy llvm-readobj \
 		llvm-libraries clang-libraries \
-		builtins
+		runtimes
 
 # clang's resource directory -- its own stdarg.h, stddef.h and the rest.
 # Without it clang finds no builtin headers and anything past trivial C
