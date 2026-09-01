@@ -145,4 +145,3 @@ PROGS+=	openxc-tools/PlistBuddy PlistBuddy usr/libexec
 # The mk/ files it ships are copied into usr/share/mk/ by the
 # tool fragment (mk/tool.d/bsdmake.mk).
 # ------------------------------------------------------------------
-PROGS+=	extras/bsdmake bsdmake usr/bin

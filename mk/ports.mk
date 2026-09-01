@@ -31,14 +31,13 @@ PORTS+=	apple-oss-distributions/distribution-Developer_Tools/gnumake gnumake usr
 PORTS+=	swiftlang-llvm/llvm-project llvm ${XCTOOLCHAIN}/usr/bin
 
 # ------------------------------------------------------------------
-# bmake -- the build system itself.  Ships as usr/bin/bmake with
-# its mk files in usr/share/bmake/mk/.  Autoconf build.
+# swift -- the Swift compiler, built against the LLVM above rather than
+# the one build-script would produce for itself.  See mk/port.d/swift.mk
+# for why, and for the three sibling checkouts it needs.
 #
-# Note: bmake is what drives this project's own build, so the
-# *system* bmake builds our bmake port.  The staged binary ends
-# up in the release tree alongside bsdmake and gnumake.
+# Not cheap: this is the largest thing in the tree after LLVM.
 # ------------------------------------------------------------------
-PORTS+=	extras/bmake bmake usr/bin
+PORTS+=	swiftlang-llvm/swift swift ${XCTOOLCHAIN}/usr/bin
 
 # ------------------------------------------------------------------
 # bsdmake -- Apple's BSD make, carried as a submodule at src/extras/bsdmake/.

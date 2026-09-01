@@ -9,6 +9,14 @@
 # hardware, no tests, no docs, no examples, no bindings.  A full LLVM
 # build is otherwise far larger than this tree needs.
 #
+# compiler-rt is enabled for its builtins.  Without them a toolchain
+# cannot link anything that tests an OS version: the @available check
+# lowers to ___isPlatformVersionAtLeast, which lives in
+# libclang_rt.osx.a and nowhere else, and Swift's own standard library
+# will not link without it.  Only the builtins are wanted here -- the
+# sanitizers, fuzzer and profiling runtimes are much larger and nothing
+# in this tree asks for them yet.
+#
 # lld is enabled for ELF.  Apple's linker is Mach-O only -- ld64 rejects
 # an ELF object outright -- while clang here already emits ELF for both
 # targets and llvm-nm and llvm-objdump already read it, so the linker was
@@ -36,6 +44,13 @@ P_CMAKE_SRC=	llvm
 # being fought.
 P_CONFIGURE_ARGS=	\
 	-DLLVM_ENABLE_PROJECTS="clang;lld" \
+	-DLLVM_ENABLE_RUNTIMES="compiler-rt" \
+	-DCOMPILER_RT_BUILD_SANITIZERS=OFF \
+	-DCOMPILER_RT_BUILD_XRAY=OFF \
+	-DCOMPILER_RT_BUILD_LIBFUZZER=OFF \
+	-DCOMPILER_RT_BUILD_MEMPROF=OFF \
+	-DCOMPILER_RT_BUILD_ORC=OFF \
+	-DCOMPILER_RT_BUILD_CTX_PROFILE=OFF \
 	-DLLVM_EXTERNAL_PROJECTS=tapi \
 	-DLLVM_EXTERNAL_TAPI_SOURCE_DIR=${P_WORKDIR}/tapi-src \
 	-DLINKER_SUPPORTS_NO_INITS=FALSE \
@@ -69,10 +84,19 @@ P_NOSTAGE=	yes
 # The ELF set: lld links, llvm-ar archives, llvm-objcopy and llvm-readobj
 # edit and inspect.  Each also builds the aliases beside it (ld.lld,
 # llvm-ranlib, llvm-strip, llvm-readelf), which bundle-aliases links.
+#
+# llvm-libraries and clang-libraries are the whole static library sets,
+# not just the ones the tools above happen to pull in.  Swift links both
+# directly and needs more of them than we ship binaries for -- MCJIT and
+# the rest of the execution engine, clangTooling and its neighbours --
+# and discovering those one missing archive at a time is not a way to
+# build anything.
 P_MAKE_ARGS=	clang llvm-nm llvm-otool llvm-objdump llvm-size \
 		llvm-strings dsymutil llvm-dwarfdump llvm-cov \
 		llvm-profdata libtapi \
-		lld llvm-ar llvm-objcopy llvm-readobj
+		lld llvm-ar llvm-objcopy llvm-readobj \
+		llvm-libraries clang-libraries \
+		builtins
 
 # clang's resource directory -- its own stdarg.h, stddef.h and the rest.
 # Without it clang finds no builtin headers and anything past trivial C

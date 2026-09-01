@@ -210,7 +210,12 @@ Two clean builds of the default set produce byte-identical binaries.
   public SDK belong. It answers to `macosx<version>.internal`, so
   `xcrun --sdk macosx.internal` and `xcodebuild -sdk macosx26.5.internal` both
   select it.
-- **Swift** — the submodule is there, not yet built.
+- **Swift** — builds. `swiftc` compiles and links a program that runs, against
+  a standard library built here. It needs three sibling checkouts (`swift-cmark`,
+  `swift-syntax`, `swift-experimental-string-processing`, all at
+  `swift-6.3.3-RELEASE`) and is built against this tree's own LLVM rather than
+  the second copy `build-script` would make. No swift-driver yet, so the legacy
+  driver is used; SwiftPM, Foundation and the rest of the toolchain are not built.
 - **Python, Git** — sources carried (CPython 3.14.6, git 2.50.1, the version Apple's Git-155 wraps), not yet ported to `mk/port.mk`.
 - **The `xc*` family** — `xccov`, `xcresulttool`, `xcsigningtool`, `xctest`,
   `xcdevice`, `xcdiagnose`. `xcstringstool` does `print` and `compile`, in both

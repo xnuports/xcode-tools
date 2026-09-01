@@ -24,7 +24,7 @@ CCTOOLS_CFLAGS=	-I${CCTOOLS}/include -I${CCTOOLS}/include/stuff \
 		-DCURRENT_PROJECT_VERSION=\"${CCTOOLS_VERSION}\"
 
 RELEASE=	${TOP}/build/release
-XCSELECT=	${TOP}/src/openxc-tools/libxcselect
+XCSELECT=	${TOP}/src/openxc-tools/openxc/libxcselect
 
 all: ${OBJBASE}/libstuff.a ${OBJBASE}/libmacho.a \
      ${RELEASE}/usr/lib/libxcselect.dylib

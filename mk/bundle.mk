@@ -249,6 +249,7 @@ bundle-makefiles: bundle-dirs
 # ld64, the Mach-O linker, and it stays.
 bundle-aliases: bundle-dirs
 .for a t in nm llvm-nm otool llvm-otool ld.lld lld \
+	    swift swift-frontend swiftc swift-frontend \
 	    llvm-readelf llvm-readobj llvm-strip llvm-objcopy \
 	    llvm-ranlib llvm-ar
 	@if [ -e ${TC_DIR}/usr/bin/${t} ] && [ ! -e ${TC_DIR}/usr/bin/${a} ]; then \
