@@ -96,3 +96,6 @@
 [submodule "src/swiftlang-llvm/swift-crypto"]
 	path = src/swiftlang-llvm/swift-crypto
 	url = https://github.com/apple/swift-crypto
+[submodule "src/xnu"]
+	path = src/apple-oss-distributions/xnu
+	url = https://github.com/apple-oss-distributions/xnu
