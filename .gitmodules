@@ -63,3 +63,6 @@
 [submodule "swiftlang-llvm/swift-cmark"]
 	path = src/swiftlang-llvm/swift-cmark
 	url = https://github.com/swiftlang/swift-cmark
+[submodule "src/src/swiftlang-llvm/swift-syntax"]
+	path = src/swiftlang-llvm/swift-syntax
+	url = https://github.com/swiftlang/swift-syntax
