@@ -66,3 +66,6 @@
 [submodule "src/src/swiftlang-llvm/swift-syntax"]
 	path = src/swiftlang-llvm/swift-syntax
 	url = https://github.com/swiftlang/swift-syntax
+[submodule "src/swiftlang-llvm/swift-experimental-string-processing"]
+	path = src/swiftlang-llvm/swift-experimental-string-processing
+	url = https://github.com/swiftlang/swift-experimental-string-processing
