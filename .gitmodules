@@ -69,3 +69,6 @@
 [submodule "src/swiftlang-llvm/swift-experimental-string-processing"]
 	path = src/swiftlang-llvm/swift-experimental-string-processing
 	url = https://github.com/swiftlang/swift-experimental-string-processing
+[submodule "lib/libc"]
+	path = lib/libc
+	url = https://github.com/apple-oss-distributions/Libc
