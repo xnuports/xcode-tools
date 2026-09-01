@@ -44,6 +44,7 @@
 
 #include <CoreFoundation/CoreFoundation.h>
 
+#include "sdkpath.h"
 #include "xcodebuild.h"
 #include "ini.h"
 #include "plist.h"
@@ -353,9 +354,41 @@ int settings_load_defaults(settings_table *t, const char *devpath,
 	if (devpath == NULL || sdkname == NULL)
 		return -1;
 
-	snprintf(sdk_path, sizeof(sdk_path), "%s/SDKs/%s.sdk", devpath, sdkname);
-	snprintf(tc_path, sizeof(tc_path), "%s/Toolchains/%s.toolchain", devpath,
-	          toolchain ? toolchain : sdkname);
+	/*
+	 * Resolved through sdkpath.c, which knows both layouts.  Built
+	 * here as <devpath>/SDKs/<name>.sdk, SDKROOT named a directory
+	 * that does not exist in a Developer directory of the shape Apple
+	 * ships -- the SDKs live inside their platform bundle -- so every
+	 * compile got a sysroot pointing at nothing.
+	 */
+	/*
+	 * An absolute -sdk (or SDKROOT) names the SDK directly, which is
+	 * how a build is pointed at one outside the developer directory.
+	 */
+	if (sdkname[0] == '/') {
+		snprintf(sdk_path, sizeof(sdk_path), "%s", sdkname);
+	} else {
+		char *found = xt_find_sdk(devpath, sdkname);
+
+		if (found != NULL) {
+			snprintf(sdk_path, sizeof(sdk_path), "%s", found);
+			free(found);
+		} else {
+			snprintf(sdk_path, sizeof(sdk_path), "%s/SDKs/%s.sdk",
+			    devpath, sdkname);
+		}
+	}
+	{
+		char *found = xt_find_toolchain(devpath, toolchain);
+
+		if (found != NULL) {
+			snprintf(tc_path, sizeof(tc_path), "%s", found);
+			free(found);
+		} else {
+			snprintf(tc_path, sizeof(tc_path),
+			    "%s/Toolchains/%s.xctoolchain", devpath, toolchain);
+		}
+	}
 
 	read_sdk_info(sdk_path, &sdk);
 	read_toolchain_info(tc_path, &tc);

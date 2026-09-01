@@ -318,12 +318,14 @@ const char *xbuild_resolve_sdk_name(const xcodebuild_opts *opts, const char *dev
 	static char sdk[PATH_MAX];
 
 	if (opts != NULL && opts->sdk != NULL) {
+		/*
+		 * An absolute -sdk is kept whole.  Reducing it to a base
+		 * name sent the lookup back into the developer directory,
+		 * so pointing a build at an SDK anywhere else quietly got
+		 * the local one of the same name instead.
+		 */
 		if (opts->sdk[0] == '/') {
-			const char *base = strrchr(opts->sdk, '/');
-			const char *start = base ? base + 1 : opts->sdk;
-			snprintf(sdk, sizeof(sdk), "%s", start);
-			char *dot = strstr(sdk, ".sdk");
-			if (dot) *dot = '\0';
+			snprintf(sdk, sizeof(sdk), "%s", opts->sdk);
 			return sdk;
 		}
 		snprintf(sdk, sizeof(sdk), "%s", opts->sdk);
@@ -333,11 +335,7 @@ const char *xbuild_resolve_sdk_name(const xcodebuild_opts *opts, const char *dev
 	const char *env = getenv("SDKROOT");
 	if (env != NULL && *env) {
 		if (env[0] == '/') {
-			const char *base = strrchr(env, '/');
-			const char *start = base ? base + 1 : env;
-			snprintf(sdk, sizeof(sdk), "%s", start);
-			char *dot = strstr(sdk, ".sdk");
-			if (dot) *dot = '\0';
+			snprintf(sdk, sizeof(sdk), "%s", env);
 			return sdk;
 		}
 		snprintf(sdk, sizeof(sdk), "%s", env);
@@ -1014,7 +1012,22 @@ int main(int argc, char **argv)
 	}
 	const char *sdkname = xbuild_resolve_sdk_name(opts, devpath);
 	const char *tcname = xbuild_resolve_toolchain_name(opts, devpath, sdkname);
-	int r = exec_build_action(opts, devpath, sdkname, tcname, t, action);
+	int r;
+
+	/*
+	 * build compiles the target here.  Everything else still goes to
+	 * the delegated driver, which is honest about not existing --
+	 * "build" went there too and was looked up as though it were a
+	 * tool of that name, so nothing was ever built.
+	 */
+	if (strcmp(action, "build") == 0) {
+		char *project = detect_project(opts, opts->project_dir);
+
+		r = build_run(project, t, opts, devpath);
+		free(project);
+	} else {
+		r = exec_build_action(opts, devpath, sdkname, tcname, t, action);
+	}
 	settings_destroy(t);
 	free(devpath);
 	xbuild_opts_free(opts);

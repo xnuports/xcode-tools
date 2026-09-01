@@ -161,4 +161,8 @@ char *xbuild_get_developer_path(void);
 const char *xbuild_resolve_sdk_name(const xcodebuild_opts *opts, const char *devpath);
 const char *xbuild_resolve_toolchain_name(const xcodebuild_opts *opts, const char *devpath, const char *sdkname);
 
+/* build.c -- compile and link a target's sources. */
+int build_run(const char *project, settings_table *t,
+              const xcodebuild_opts *opts, const char *devpath);
+
 #endif /* __XCODEBUILD_H__ */

@@ -1,0 +1,505 @@
+/*
+ * build - compile and link a target's sources.
+ *
+ * Enough of a build to turn a native target's sources into its product.
+ * What used to stand here handed the action to xcrun as though "build"
+ * were a tool to run, which failed looking for a program of that name,
+ * so nothing this tool was pointed at was ever built.
+ *
+ * Apple drives builds through XCBBuildService, which schedules every
+ * phase of an arbitrary project.  This does the part that matters for a
+ * tool or a static library: find the sources, compile each one, link
+ * the result.  Anything it cannot do it says so and stops, rather than
+ * reporting a success it did not achieve.
+ *
+ * Copyright (c) 2026 Sunneva N. Mariu <sunnevanattsol@gmail.com>
+ * SPDX-License-Identifier: BSD-3-Clause
+ */
+
+#include <CoreFoundation/CoreFoundation.h>
+
+#include <errno.h>
+#include <limits.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/stat.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
+#include "xcodebuild.h"
+#include "project.h"
+
+/* ------------------------------------------------------------------ */
+/* property list access, as in project.c                                */
+/* ------------------------------------------------------------------ */
+
+static CFTypeRef
+bget(CFTypeRef dict, const char *key)
+{
+	CFStringRef k;
+	CFTypeRef v;
+
+	if (dict == NULL || CFGetTypeID(dict) != CFDictionaryGetTypeID())
+		return NULL;
+	if ((k = CFStringCreateWithCString(NULL, key, kCFStringEncodingUTF8)) == NULL)
+		return NULL;
+
+	v = CFDictionaryGetValue((CFDictionaryRef)dict, k);
+	CFRelease(k);
+	return v;
+}
+
+static CFIndex
+bcount(CFTypeRef array)
+{
+	if (array == NULL || CFGetTypeID(array) != CFArrayGetTypeID())
+		return 0;
+	return CFArrayGetCount((CFArrayRef)array);
+}
+
+static CFTypeRef
+bat(CFTypeRef array, CFIndex i)
+{
+	if (i < 0 || i >= bcount(array))
+		return NULL;
+	return CFArrayGetValueAtIndex((CFArrayRef)array, i);
+}
+
+static const char *
+bstr(CFTypeRef v, char *buf, size_t len)
+{
+	if (v == NULL || CFGetTypeID(v) != CFStringGetTypeID())
+		return NULL;
+	if (!CFStringGetCString((CFStringRef)v, buf, (CFIndex)len,
+	    kCFStringEncodingUTF8))
+		return NULL;
+	return buf;
+}
+
+static CFTypeRef
+bderef(CFTypeRef objects, CFTypeRef id_value)
+{
+	char id[512];
+
+	if (bstr(id_value, id, sizeof(id)) == NULL)
+		return NULL;
+	return bget(objects, id);
+}
+
+/* ------------------------------------------------------------------ */
+/* source resolution                                                    */
+/* ------------------------------------------------------------------ */
+
+struct pathmap {
+	char **ids;
+	char **paths;
+	size_t count;
+	size_t cap;
+};
+
+static void
+pathmap_add(struct pathmap *m, const char *id, const char *path)
+{
+	if (m->count == m->cap) {
+		size_t cap = (m->cap == 0) ? 64 : m->cap * 2;
+		char **ids = realloc(m->ids, cap * sizeof(*ids));
+		char **paths = realloc(m->paths, cap * sizeof(*paths));
+
+		if (ids != NULL)
+			m->ids = ids;
+		if (paths != NULL)
+			m->paths = paths;
+		if (ids == NULL || paths == NULL)
+			return;
+		m->cap = cap;
+	}
+
+	if ((m->ids[m->count] = strdup(id)) == NULL)
+		return;
+	if ((m->paths[m->count] = strdup(path)) == NULL) {
+		free(m->ids[m->count]);
+		return;
+	}
+	m->count++;
+}
+
+static const char *
+pathmap_get(const struct pathmap *m, const char *id)
+{
+	size_t i;
+
+	for (i = 0; i < m->count; i++)
+		if (strcmp(m->ids[i], id) == 0)
+			return m->paths[i];
+	return NULL;
+}
+
+static void
+pathmap_free(struct pathmap *m)
+{
+	size_t i;
+
+	for (i = 0; i < m->count; i++) {
+		free(m->ids[i]);
+		free(m->paths[i]);
+	}
+	free(m->ids);
+	free(m->paths);
+}
+
+/*
+ * Walk the group tree, recording where every file reference lives.
+ *
+ * A file's path is relative to the group holding it, and a group
+ * contributes to that path only when it has one of its own -- a group
+ * with just a name is a folder in the navigator and nothing on disk.
+ * sourceTree says what the path is relative to; SOURCE_ROOT and an
+ * absolute path escape the enclosing group, which is why the prefix is
+ * not simply accumulated.
+ */
+static void
+walk_group(CFTypeRef objects, CFTypeRef group, const char *prefix,
+    const char *source_root, struct pathmap *map)
+{
+	CFTypeRef children = bget(group, "children");
+	CFIndex i;
+
+	for (i = 0; i < bcount(children); i++) {
+		CFTypeRef child_id = bat(children, i);
+		CFTypeRef child = bderef(objects, child_id);
+		char idbuf[512], pathbuf[512], treebuf[64], isabuf[64];
+		const char *path, *tree, *isa, *id;
+		char full[PATH_MAX];
+
+		if (child == NULL)
+			continue;
+
+		id = bstr(child_id, idbuf, sizeof(idbuf));
+		isa = bstr(bget(child, "isa"), isabuf, sizeof(isabuf));
+		path = bstr(bget(child, "path"), pathbuf, sizeof(pathbuf));
+		tree = bstr(bget(child, "sourceTree"), treebuf, sizeof(treebuf));
+
+		if (path == NULL) {
+			/* A named group with no path of its own. */
+			if (isa != NULL && strstr(isa, "Group") != NULL)
+				walk_group(objects, child, prefix, source_root, map);
+			continue;
+		}
+
+		if (path[0] == '/')
+			snprintf(full, sizeof(full), "%s", path);
+		else if (tree != NULL && strcmp(tree, "SOURCE_ROOT") == 0)
+			snprintf(full, sizeof(full), "%s/%s", source_root, path);
+		else
+			snprintf(full, sizeof(full), "%s/%s", prefix, path);
+
+		if (isa != NULL && strstr(isa, "Group") != NULL)
+			walk_group(objects, child, full, source_root, map);
+		else if (id != NULL)
+			pathmap_add(map, id, full);
+	}
+}
+
+/* ------------------------------------------------------------------ */
+/* running a command                                                    */
+/* ------------------------------------------------------------------ */
+
+static int
+run(char *const argv[], int echo)
+{
+	pid_t pid;
+	int status = 0;
+
+	if (echo) {
+		int i;
+
+		for (i = 0; argv[i] != NULL; i++)
+			printf("%s%s", (i > 0) ? " " : "", argv[i]);
+		printf("\n");
+	}
+
+	if ((pid = fork()) == 0) {
+		execv(argv[0], argv);
+		_exit(127);
+	}
+	if (pid < 0)
+		return -1;
+
+	waitpid(pid, &status, 0);
+	return (WIFEXITED(status) && WEXITSTATUS(status) == 0) ? 0 : -1;
+}
+
+static int
+mkdirs(const char *path)
+{
+	char buf[PATH_MAX];
+	size_t i;
+
+	if (snprintf(buf, sizeof(buf), "%s", path) >= (int)sizeof(buf))
+		return -1;
+
+	for (i = 1; buf[i] != '\0'; i++) {
+		if (buf[i] != '/')
+			continue;
+		buf[i] = '\0';
+		if (mkdir(buf, 0777) != 0 && errno != EEXIST)
+			return -1;
+		buf[i] = '/';
+	}
+
+	return (mkdir(buf, 0777) == 0 || errno == EEXIST) ? 0 : -1;
+}
+
+static int
+is_compilable(const char *path)
+{
+	const char *dot = strrchr(path, '.');
+
+	if (dot == NULL)
+		return 0;
+
+	return strcmp(dot, ".c") == 0 || strcmp(dot, ".m") == 0 ||
+	    strcmp(dot, ".cc") == 0 || strcmp(dot, ".cpp") == 0 ||
+	    strcmp(dot, ".cxx") == 0 || strcmp(dot, ".mm") == 0 ||
+	    strcmp(dot, ".s") == 0 || strcmp(dot, ".S") == 0;
+}
+
+/* ------------------------------------------------------------------ */
+
+int build_run(const char *project, settings_table *t,
+    const xcodebuild_opts *opts, const char *devpath)
+{
+	CFTypeRef root, objects = NULL, root_id = NULL, project_obj, targets;
+	CFTypeRef chosen = NULL, main_group;
+	struct pathmap map;
+	char source_root[PATH_MAX], clang[PATH_MAX];
+	char build_dir[PATH_MAX], obj_dir[PATH_MAX], product[PATH_MAX];
+	const char *slash, *product_name, *configuration, *sdkroot;
+	char name_buf[512];
+	CFIndex i;
+	int rc = 0, nsources = 0;
+
+	if (project == NULL) {
+		fprintf(stderr, "xcodebuild: error: no project to build\n");
+		return 1;
+	}
+
+	if ((root = project_load_pbxproj(project)) == NULL) {
+		fprintf(stderr, "xcodebuild: error: could not read project '%s'\n",
+		    project);
+		return 1;
+	}
+
+	memset(&map, 0, sizeof(map));
+
+	/* Paths in a project are relative to the directory holding it. */
+	snprintf(source_root, sizeof(source_root), "%s", project);
+	if ((slash = strrchr(source_root, '/')) != NULL)
+		*(char *)slash = '\0';
+
+	objects = bget(root, "objects");
+	root_id = bget(root, "rootObject");
+	project_obj = bderef(objects, root_id);
+	targets = bget(project_obj, "targets");
+
+	/* The named target, or the first one, as everywhere else. */
+	for (i = 0; i < bcount(targets); i++) {
+		CFTypeRef tobj = bderef(objects, bat(targets, i));
+		const char *name = bstr(bget(tobj, "name"), name_buf,
+		    sizeof(name_buf));
+
+		if (opts->target != NULL && name != NULL &&
+		    strcmp(name, opts->target) == 0) {
+			chosen = tobj;
+			break;
+		}
+		if (opts->target == NULL && chosen == NULL)
+			chosen = tobj;
+	}
+
+	if (chosen == NULL) {
+		fprintf(stderr, "xcodebuild: error: target '%s' not found\n",
+		    (opts->target != NULL) ? opts->target : "(default)");
+		CFRelease(root);
+		return 1;
+	}
+
+	main_group = bderef(objects, bget(project_obj, "mainGroup"));
+	walk_group(objects, main_group, source_root, source_root, &map);
+
+	configuration = settings_get(t, "CONFIGURATION");
+	if (configuration == NULL || *configuration == '\0')
+		configuration = "Release";
+	product_name = settings_get(t, "PRODUCT_NAME");
+	if (product_name == NULL || *product_name == '\0')
+		product_name = "product";
+
+	snprintf(build_dir, sizeof(build_dir), "%s/build/%s", source_root,
+	    configuration);
+	snprintf(obj_dir, sizeof(obj_dir), "%s/build/%s.build", source_root,
+	    configuration);
+	snprintf(product, sizeof(product), "%s/%s", build_dir, product_name);
+
+	if (mkdirs(build_dir) != 0 || mkdirs(obj_dir) != 0) {
+		fprintf(stderr, "xcodebuild: error: cannot create %s\n", build_dir);
+		rc = 1;
+		goto out;
+	}
+
+	snprintf(clang, sizeof(clang),
+	    "%s/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang", devpath);
+	if (access(clang, X_OK) != 0) {
+		fprintf(stderr, "xcodebuild: error: no clang at %s\n", clang);
+		rc = 1;
+		goto out;
+	}
+
+	/*
+	 * SDKROOT may be a path or a name -- a project commonly sets it to
+	 * "auto", meaning "whichever SDK the platform provides" -- so a
+	 * value that is not a path is resolved, and SDK_DIR, which is
+	 * always the resolved default, is the fallback.
+	 */
+	sdkroot = settings_get(t, "SDKROOT");
+	if (sdkroot == NULL || sdkroot[0] != '/')
+		sdkroot = settings_get(t, "SDK_DIR");
+	if (sdkroot != NULL && sdkroot[0] != '/')
+		sdkroot = NULL;
+
+	/*
+	 * The SDK bundles this tree emits carry no headers yet, and a
+	 * sysroot without them fails on the first #include with an error
+	 * about stdlib.h that says nothing about why.  Name the actual
+	 * problem instead.
+	 */
+	if (sdkroot != NULL && *sdkroot != '\0') {
+		char inc[PATH_MAX];
+		struct stat st;
+
+		/*
+		 * Tested by a header that must be there, not by the
+		 * directory: the bundles this tree emits contain an empty
+		 * usr/include, so its presence proves nothing.
+		 */
+		snprintf(inc, sizeof(inc), "%s/usr/include/stdlib.h", sdkroot);
+		if (stat(inc, &st) != 0) {
+			fprintf(stderr, "xcodebuild: error: the SDK at %s has"
+			    " no headers.\n", sdkroot);
+			fprintf(stderr, "xcodebuild: error: this tree emits SDK"
+			    " bundles without contents; point SDKROOT or\n"
+			    "xcodebuild: error: DEVELOPER_DIR at an SDK that"
+			    " has them.\n");
+			rc = 1;
+			goto out;
+		}
+	}
+
+	/* Compile every source in the target's sources phase. */
+	{
+		CFTypeRef phases = bget(chosen, "buildPhases");
+		char *objs[256];
+		int nobjs = 0;
+		CFIndex p;
+
+		for (p = 0; p < bcount(phases) && rc == 0; p++) {
+			CFTypeRef phase = bderef(objects, bat(phases, p));
+			char isabuf[64];
+			const char *isa = bstr(bget(phase, "isa"), isabuf,
+			    sizeof(isabuf));
+			CFTypeRef files;
+			CFIndex f;
+
+			if (isa == NULL ||
+			    strcmp(isa, "PBXSourcesBuildPhase") != 0)
+				continue;
+
+			files = bget(phase, "files");
+			for (f = 0; f < bcount(files) && rc == 0; f++) {
+				CFTypeRef bf = bderef(objects, bat(files, f));
+				char refbuf[512];
+				const char *ref = bstr(bget(bf, "fileRef"),
+				    refbuf, sizeof(refbuf));
+				const char *src;
+				char obj[PATH_MAX], *argv[16];
+				const char *base;
+				int a = 0;
+
+				if (ref == NULL)
+					continue;
+				if ((src = pathmap_get(&map, ref)) == NULL)
+					continue;
+				if (!is_compilable(src))
+					continue;
+
+				base = strrchr(src, '/');
+				base = (base != NULL) ? base + 1 : src;
+				snprintf(obj, sizeof(obj), "%s/%s.o", obj_dir, base);
+
+				argv[a++] = clang;
+				argv[a++] = (char *)"-c";
+				if (sdkroot != NULL && *sdkroot != '\0') {
+					argv[a++] = (char *)"-isysroot";
+					argv[a++] = (char *)sdkroot;
+				}
+				argv[a++] = (char *)"-o";
+				argv[a++] = obj;
+				argv[a++] = (char *)src;
+				argv[a] = NULL;
+
+				printf("CompileC %s\n", src);
+				if (run(argv, opts->verbose) != 0) {
+					fprintf(stderr, "xcodebuild: error:"
+					    " failed to compile %s\n", src);
+					rc = 1;
+					break;
+				}
+
+				if (nobjs < (int)(sizeof(objs) / sizeof(objs[0])))
+					objs[nobjs++] = strdup(obj);
+				nsources++;
+			}
+		}
+
+		if (rc == 0 && nobjs > 0) {
+			char *argv[264];
+			int a = 0, j;
+
+			argv[a++] = clang;
+			if (sdkroot != NULL && *sdkroot != '\0') {
+				argv[a++] = (char *)"-isysroot";
+				argv[a++] = (char *)sdkroot;
+			}
+			argv[a++] = (char *)"-o";
+			argv[a++] = product;
+			for (j = 0; j < nobjs; j++)
+				argv[a++] = objs[j];
+			argv[a] = NULL;
+
+			printf("Ld %s\n", product);
+			if (run(argv, opts->verbose) != 0) {
+				fprintf(stderr, "xcodebuild: error: link failed\n");
+				rc = 1;
+			}
+		}
+
+		for (i = 0; i < nobjs; i++)
+			free(objs[i]);
+	}
+
+	if (rc == 0 && nsources == 0) {
+		fprintf(stderr, "xcodebuild: error: target has no sources this"
+		    " tool can compile\n");
+		rc = 1;
+	}
+
+	if (rc == 0)
+		printf("\n** BUILD SUCCEEDED **\n\n");
+	else
+		printf("\n** BUILD FAILED **\n\n");
+
+out:
+	pathmap_free(&map);
+	CFRelease(root);
+	return rc;
+}
