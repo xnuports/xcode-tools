@@ -681,7 +681,13 @@ int settings_emit(settings_table *t, int as_json, int pretty)
 			json_escape(stdout, t->entries[i].key);
 			fputs(", ", stdout);
 			fputs(pretty ? "\n\t\t\"value\": " : "    \"value\": ", stdout);
-			json_escape(stdout, t->entries[i].value);
+			{
+				char *v = settings_expand(t, t->entries[i].value);
+
+				json_escape(stdout,
+				    (v != NULL) ? v : t->entries[i].value);
+				free(v);
+			}
 			fputs(pretty ? "\n\t}" : "  }", stdout);
 			if (i + 1 < t->count)
 				fputs(",", stdout);
@@ -690,7 +696,17 @@ int settings_emit(settings_table *t, int as_json, int pretty)
 		return 0;
 	}
 
-	for (size_t i = 0; i < t->count; i++)
-		fprintf(stdout, "    %s = %s\n", t->entries[i].key, t->entries[i].value);
+	/*
+	 * Expanded on the way out.  A default is stored as written --
+	 * PRODUCT_NAME is "$(TARGET_NAME)" -- and xcodebuild reports what
+	 * the setting resolves to, not the reference.
+	 */
+	for (size_t i = 0; i < t->count; i++) {
+		char *v = settings_expand(t, t->entries[i].value);
+
+		fprintf(stdout, "    %s = %s\n", t->entries[i].key,
+		    (v != NULL) ? v : t->entries[i].value);
+		free(v);
+	}
 	return 0;
 }

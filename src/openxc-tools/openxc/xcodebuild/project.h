@@ -52,7 +52,11 @@ CFTypeRef project_load_pbxproj(const char *project);
 
 /* Resolve a target/config's buildSettings node (borrowed from `root`). */
 CFTypeRef project_find_buildsettings(CFTypeRef root, const char *target,
-                                       const char *configuration);
+                                     const char *configuration,
+                                     char *chosen_name, size_t chosen_len);
+
+/* A project's display name: its bundle's, minus the extension. */
+void project_display_name(const char *path, char *buf, size_t len);
 
 /* Return the root PBXProject object node for a parsed project (the object
  * referenced by rootObject). Returns NULL if absent. Borrowed from `root`. */

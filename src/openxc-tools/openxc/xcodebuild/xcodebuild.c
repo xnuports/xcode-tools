@@ -488,19 +488,26 @@ static settings_table *resolve_settings(xcodebuild_opts *opts, const char *devpa
 	if (project != NULL) {
 		CFTypeRef root = project_load_pbxproj(project);
 		if (root != NULL) {
-			CFTypeRef pobj = project_get_project_object(root);
-			if (pobj != NULL) {
-				CFTypeRef pname = CFDictionaryGetValue(
-				    (CFDictionaryRef)pobj, CFSTR("name"));
-				char buf[512];
+			char chosen[512], pname[512];
 
-				if (pname != NULL &&
-				    CFGetTypeID(pname) == CFStringGetTypeID() &&
-				    CFStringGetCString((CFStringRef)pname, buf,
-					sizeof(buf), kCFStringEncodingUTF8))
-					settings_set(t, "PROJECT_NAME", buf);
-			}
-			CFTypeRef bs = project_find_buildsettings(root, opts->target, configuration);
+			/*
+			 * The project's own name, and the name of the
+			 * target the settings come from.  Both are set
+			 * before the merge: the values being merged are
+			 * written in terms of them -- PRODUCT_NAME is
+			 * $(TARGET_NAME) in almost every project -- and
+			 * expand to nothing if they are not there yet.
+			 */
+			project_display_name(project, pname, sizeof(pname));
+			if (pname[0] != '\0')
+				settings_set(t, "PROJECT_NAME", pname);
+
+			CFTypeRef bs = project_find_buildsettings(root,
+			    opts->target, configuration, chosen, sizeof(chosen));
+
+			if (opts->target == NULL && chosen[0] != '\0')
+				settings_set(t, "TARGET_NAME", chosen);
+
 			if (bs != NULL)
 				settings_merge_plist_dict(t, bs);
 			CFRelease(root);

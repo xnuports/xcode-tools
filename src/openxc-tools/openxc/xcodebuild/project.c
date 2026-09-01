@@ -269,7 +269,8 @@ CFTypeRef project_get_project_object(CFTypeRef root)
 }
 
 CFTypeRef project_find_buildsettings(CFTypeRef root, const char *target,
-                                     const char *configuration)
+                                     const char *configuration,
+                                     char *chosen_name, size_t chosen_len)
 {
 	CFTypeRef root_id = NULL;
 	CFTypeRef objects = get_objects_dict(root, &root_id);
@@ -284,6 +285,9 @@ CFTypeRef project_find_buildsettings(CFTypeRef root, const char *target,
 
 	CFTypeRef targets = pget(project_obj, "targets");
 	CFTypeRef chosen = NULL;
+
+	if (chosen_name != NULL && chosen_len > 0)
+		chosen_name[0] = '\0';
 
 	for (CFIndex i = 0; i < pcount(targets); i++) {
 		CFTypeRef tobj = pderef(objects, pat(targets, i));
@@ -304,6 +308,20 @@ CFTypeRef project_find_buildsettings(CFTypeRef root, const char *target,
 	}
 	if (chosen == NULL)
 		return NULL;
+
+	/*
+	 * Report which target the settings came from.  With no -target
+	 * xcodebuild takes the first, and TARGET_NAME has to say so --
+	 * PRODUCT_NAME and the rest are written as $(TARGET_NAME) and
+	 * expand to nothing without it.
+	 */
+	if (chosen_name != NULL && chosen_len > 0) {
+		const char *n = pstr(pget(chosen, "name"), name_buf,
+		    sizeof(name_buf));
+
+		if (n != NULL)
+			snprintf(chosen_name, chosen_len, "%s", n);
+	}
 
 	CFTypeRef clist = pderef(objects, pget(chosen, "buildConfigurationList"));
 	if (!pis_dict(clist))
@@ -485,6 +503,28 @@ collect_subproject_targets(CFTypeRef objects, CFTypeRef project_obj,
 	}
 }
 
+/*
+ * A project's name is its bundle's, minus the extension: PBXProject
+ * carries no "name" of its own.
+ */
+void project_display_name(const char *path, char *buf, size_t len)
+{
+	const char *slash;
+	char *dot;
+
+	if (buf == NULL || len == 0)
+		return;
+
+	buf[0] = '\0';
+	if (path == NULL)
+		return;
+
+	slash = strrchr(path, '/');
+	snprintf(buf, len, "%s", (slash != NULL) ? slash + 1 : path);
+	if ((dot = strrchr(buf, '.')) != NULL && dot != buf)
+		*dot = '\0';
+}
+
 int project_list(const char *project, const char *workspace, const xcodebuild_opts *opts)
 {
 	(void)opts;
@@ -520,19 +560,10 @@ int project_list(const char *project, const char *workspace, const xcodebuild_op
 	    sizeof(name_buf));
 
 	if (proj_name == NULL) {
-		const char *src = project ? project : workspace;
-
-		if (src != NULL) {
-			const char *slash = strrchr(src, '/');
-			char *dot;
-
-			snprintf(name_buf, sizeof(name_buf), "%s",
-			    (slash != NULL) ? slash + 1 : src);
-			if ((dot = strrchr(name_buf, '.')) != NULL &&
-			    dot != name_buf)
-				*dot = '\0';
+		project_display_name(project ? project : workspace, name_buf,
+		    sizeof(name_buf));
+		if (name_buf[0] != '\0')
 			proj_name = name_buf;
-		}
 	}
 
 	printf("Information about project \"%s\":\n",
