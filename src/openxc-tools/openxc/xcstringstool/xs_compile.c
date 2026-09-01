@@ -21,10 +21,76 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "plistw.h"
+#include <CoreFoundation/CoreFoundation.h>
+
 #include "xcstringstool.h"
 
 static const char *program_name = "xcstringstool";
+
+/*
+ * Property lists are built and written with CoreFoundation, which is
+ * what Apple's own xcstringstool links.  Serializing them any other way
+ * means reproducing how CFPropertyList orders a dictionary's keys --
+ * hash order in the binary form, which is stable but is not the source
+ * order and not sorted -- and the output stops being byte-for-byte what
+ * Apple writes.  Through CF it is exactly that, in both formats.
+ */
+static CFStringRef
+cfstr(const char *s)
+{
+	return CFStringCreateWithCString(kCFAllocatorDefault,
+	    (s != NULL) ? s : "", kCFStringEncodingUTF8);
+}
+
+/* Set one string value on a dictionary. */
+static void
+dict_set_string(CFMutableDictionaryRef dict, const char *key, const char *value)
+{
+	CFStringRef k = cfstr(key);
+	CFStringRef v = cfstr(value);
+
+	if (k != NULL && v != NULL)
+		CFDictionarySetValue(dict, k, v);
+	if (k != NULL)
+		CFRelease(k);
+	if (v != NULL)
+		CFRelease(v);
+}
+
+static CFMutableDictionaryRef
+dict_new(void)
+{
+	return CFDictionaryCreateMutable(kCFAllocatorDefault, 0,
+	    &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+}
+
+/* Write a property list out in the requested serialization. */
+static int
+write_plist(const char *path, CFDictionaryRef dict, int binary)
+{
+	CFPropertyListFormat fmt = binary ?
+	    kCFPropertyListBinaryFormat_v1_0 : kCFPropertyListXMLFormat_v1_0;
+	CFDataRef data;
+	FILE *fp;
+	size_t len, n;
+
+	if ((data = CFPropertyListCreateData(kCFAllocatorDefault, dict, fmt, 0,
+	    NULL)) == NULL)
+		return -1;
+
+	len = (size_t)CFDataGetLength(data);
+
+	if ((fp = fopen(path, "wb")) == NULL) {
+		CFRelease(data);
+		return -1;
+	}
+
+	n = fwrite(CFDataGetBytePtr(data), 1, len, fp);
+	fclose(fp);
+	CFRelease(data);
+
+	return (n == len) ? 0 : -1;
+}
 
 /* ------------------------------------------------------------------ */
 /* format specifiers                                                    */
@@ -290,7 +356,7 @@ collect_keys(const json_node *strings, const char **out, size_t max)
  * variant.  Every offender is reported, so one run names all the work.
  */
 static long
-build_entries(pw_node *out, const json_node *strings, const char **keys,
+build_entries(CFMutableDictionaryRef out, const json_node *strings, const char **keys,
     size_t nkeys, const char *lang, const char *input,
     int want_plain, int want_plural, int *errors)
 {
@@ -305,7 +371,7 @@ build_entries(pw_node *out, const json_node *strings, const char **keys,
 		struct spec specs[32];
 		size_t nspecs, numeric_index = 0, c;
 		const char *sample = NULL;
-		pw_node *pd, *vd;
+		CFMutableDictionaryRef pd, vd;
 		char fmtkey[32];
 
 		if (loc == NULL)
@@ -322,8 +388,7 @@ build_entries(pw_node *out, const json_node *strings, const char **keys,
 			if ((value = translated_value(loc)) == NULL)
 				continue;
 
-			if (pw_dict_set(out, keys[i], pw_string(value)) != 0)
-				return -1;
+			dict_set_string(out, keys[i], value);
 			added++;
 			continue;
 		}
@@ -366,7 +431,7 @@ build_entries(pw_node *out, const json_node *strings, const char **keys,
 			continue;
 		}
 
-		if ((pd = pw_dict()) == NULL || (vd = pw_dict()) == NULL)
+		if ((pd = dict_new()) == NULL || (vd = dict_new()) == NULL)
 			return -1;
 
 		if (nspecs > 1)
@@ -375,11 +440,11 @@ build_entries(pw_node *out, const json_node *strings, const char **keys,
 		else
 			snprintf(fmtkey, sizeof(fmtkey), "%%#@value@");
 
-		pw_dict_set(pd, "NSStringLocalizedFormatKey", pw_string(fmtkey));
-		pw_dict_set(vd, "NSStringFormatSpecTypeKey",
-		    pw_string("NSStringPluralRuleType"));
-		pw_dict_set(vd, "NSStringFormatValueTypeKey",
-		    pw_string(specs[numeric_index - 1].type));
+		dict_set_string(pd, "NSStringLocalizedFormatKey", fmtkey);
+		dict_set_string(vd, "NSStringFormatSpecTypeKey",
+		    "NSStringPluralRuleType");
+		dict_set_string(vd, "NSStringFormatValueTypeKey",
+		    specs[numeric_index - 1].type);
 
 		for (c = 0; c < json_count(plural); c++) {
 			const char *category = plural->items[c]->key;
@@ -396,14 +461,22 @@ build_entries(pw_node *out, const json_node *strings, const char **keys,
 				rewritten = positionalize(v, vs, vn);
 			}
 
-			pw_dict_set(vd, category,
-			    pw_string((rewritten != NULL) ? rewritten : v));
+			dict_set_string(vd, category,
+			    (rewritten != NULL) ? rewritten : v);
 			free(rewritten);
 		}
 
-		pw_dict_set(pd, "value", vd);
-		if (pw_dict_set(out, keys[i], pd) != 0)
-			return -1;
+		{
+			CFStringRef vk = cfstr("value");
+			CFStringRef ek = cfstr(keys[i]);
+
+			CFDictionarySetValue(pd, vk, vd);
+			CFDictionarySetValue(out, ek, pd);
+			CFRelease(vk);
+			CFRelease(ek);
+			CFRelease(vd);
+			CFRelease(pd);
+		}
 		added++;
 	}
 
@@ -460,7 +533,6 @@ xs_compile(const struct xs_compile_opts *opts)
 		char dir[1024], path[1200];
 		long n_strings, n_dict;
 		int errors = 0;
-		FILE *fp;
 
 		if (!wanted_language(opts, lang))
 			continue;
@@ -470,12 +542,12 @@ xs_compile(const struct xs_compile_opts *opts)
 		 * plain values join the plurals in the .stringsdict.
 		 */
 		int dict_takes_plain = (opts->format == XS_STRINGSDICT_ONLY);
-		pw_node *sd = NULL, *dd = NULL;
+		CFMutableDictionaryRef sd = NULL, dd = NULL;
 
 		snprintf(dir, sizeof(dir), "%s/%s.lproj", opts->output_dir, lang);
 
 		if (!dict_takes_plain) {
-			if ((sd = pw_dict()) == NULL) {
+			if ((sd = dict_new()) == NULL) {
 				rc = 1;
 				break;
 			}
@@ -485,8 +557,9 @@ xs_compile(const struct xs_compile_opts *opts)
 			n_strings = 0;
 		}
 
-		if ((dd = pw_dict()) == NULL) {
-			pw_free(sd);
+		if ((dd = dict_new()) == NULL) {
+			if (sd != NULL)
+				CFRelease(sd);
 			rc = 1;
 			break;
 		}
@@ -494,8 +567,9 @@ xs_compile(const struct xs_compile_opts *opts)
 		    opts->input, dict_takes_plain, 1, &errors);
 
 		if (errors > 0 || n_strings < 0 || n_dict < 0) {
-			pw_free(sd);
-			pw_free(dd);
+			if (sd != NULL)
+				CFRelease(sd);
+			CFRelease(dd);
 			rc = 1;
 			continue;	/* still report the other languages */
 		}
@@ -506,18 +580,10 @@ xs_compile(const struct xs_compile_opts *opts)
 			if (opts->dry_run) {
 				printf("%s\n", path);
 			} else if (mkdirs(dir) != 0 ||
-			    (fp = fopen(path, "wb")) == NULL) {
+			    write_plist(path, sd, opts->binary) != 0) {
 				fprintf(stderr, "%s: cannot write %s\n",
 				    program_name, path);
 				rc = 1;
-			} else {
-				if ((opts->binary ? pw_write_binary(fp, sd) :
-				    pw_write_xml(fp, sd)) != 0) {
-					fprintf(stderr, "%s: cannot serialize %s\n",
-					    program_name, path);
-					rc = 1;
-				}
-				fclose(fp);
 			}
 		}
 
@@ -526,23 +592,16 @@ xs_compile(const struct xs_compile_opts *opts)
 			if (opts->dry_run) {
 				printf("%s\n", path);
 			} else if (mkdirs(dir) != 0 ||
-			    (fp = fopen(path, "wb")) == NULL) {
+			    write_plist(path, dd, opts->binary) != 0) {
 				fprintf(stderr, "%s: cannot write %s\n",
 				    program_name, path);
 				rc = 1;
-			} else {
-				if ((opts->binary ? pw_write_binary(fp, dd) :
-				    pw_write_xml(fp, dd)) != 0) {
-					fprintf(stderr, "%s: cannot serialize %s\n",
-					    program_name, path);
-					rc = 1;
-				}
-				fclose(fp);
 			}
 		}
 
-		pw_free(sd);
-		pw_free(dd);
+		if (sd != NULL)
+			CFRelease(sd);
+		CFRelease(dd);
 	}
 
 	json_free(root);
