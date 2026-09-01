@@ -61,6 +61,7 @@ and `--find` match Apple's output exactly when pointed at one.
 | `usr/local/bin` | `bmake`, `bsdmake` |
 | `Makefiles/` | `CoreOS` and `pb_makefiles` build fragments |
 | `Platforms/`, `Toolchains/` | emitted `.sdk` (public and internal) and `.xctoolchain` bundle metadata |
+| `usr/lib/libxcselect.dylib` | our libxcselect — where the active developer directory is decided |
 
 `bmake` and `bsdmake` sit in `usr/local/bin` rather than `usr/bin` because
 Xcode ships neither — they are ours, and building them removes the last

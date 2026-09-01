@@ -39,6 +39,7 @@
 #include <sys/types.h>
 
 #include "devpath.h"
+#include "xcselect.h"
 
 #define TOOL_VERSION "1.0.0"
 #define SDK_CFG ".xcdev.dat"
@@ -135,23 +136,23 @@ static char *get_developer_path(void)
 		free(cfg_path);
 
 		/*
-		 * No per-user selection yet.  Prefer the Developer directory
-		 * this binary lives in, so a relocated or freshly built
-		 * release tree works with no configuration, and only then the
-		 * compiled-in system default.
+		 * No per-user selection.  libxcselect answers the rest --
+		 * the link xcode-select -s writes, this binary's own
+		 * Developer directory, then the system defaults -- which is
+		 * the library Apple's xcode-select asks the same question
+		 * of, so xcrun and this tool cannot disagree.
 		 */
-		{
-			const char *self = xt_default_developer_dir();
+		static char devdir[PATH_MAX];
+		bool cltools = false, missing = false, invalid = false;
 
-			if (self != NULL)
-				return (char *)self;
-		}
+		(void)st;
 
-		if (stat(XCRUN_DEFAULT_DEVELOPER_DIR, &st) == 0 && S_ISDIR(st.st_mode)) {
-			return XCRUN_DEFAULT_DEVELOPER_DIR;
-		}
+		if (xcselect_get_developer_dir_path(devdir, sizeof(devdir),
+		    &cltools, &missing, &invalid))
+			return devdir;
 
-		fprintf(stderr, "xcode-select: error: unable to read configuration file. (errno=%s)\n", strerror(errno));
+		fprintf(stderr, "xcode-select: error: unable to determine the"
+		    " developer directory.\n");
 		return NULL;
 	}
 

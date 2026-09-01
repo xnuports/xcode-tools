@@ -23,7 +23,27 @@ CCTOOLS_CFLAGS=	-I${CCTOOLS}/include -I${CCTOOLS}/include/stuff \
 		-Wno-ambiguous-macro -DLTO_SUPPORT \
 		-DCURRENT_PROJECT_VERSION=\"${CCTOOLS_VERSION}\"
 
-all: ${OBJBASE}/libstuff.a ${OBJBASE}/libmacho.a
+RELEASE=	${TOP}/build/release
+XCSELECT=	${TOP}/src/openxc-tools/libxcselect
+
+all: ${OBJBASE}/libstuff.a ${OBJBASE}/libmacho.a \
+     ${RELEASE}/usr/lib/libxcselect.dylib
+
+# --- libxcselect ---------------------------------------------------
+#
+# The library Apple's xcrun and xcode-select link to agree on where the
+# active developer directory is.  Ours is a shared library for the same
+# reason theirs is: one copy of the answer, linked by both tools.
+#
+# The install name is @rpath-relative and the tools carry an rpath of
+# @executable_path/../lib, so the release tree stays relocatable -- it
+# is meant to be moved and still work, which an absolute /usr/lib name
+# would break.
+${RELEASE}/usr/lib/libxcselect.dylib: ${XCSELECT}/libxcselect.c ${XCSELECT}/xcselect.h
+	@mkdir -p ${.TARGET:H}
+	${CC} -dynamiclib -install_name @rpath/libxcselect.dylib \
+	    ${CFLAGS} -I${XCSELECT} -o ${.TARGET} ${XCSELECT}/libxcselect.c
+	@${ECHO} "built: usr/lib/libxcselect.dylib"
 
 # --- libstuff -----------------------------------------------------
 #
