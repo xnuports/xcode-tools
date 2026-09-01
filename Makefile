@@ -24,7 +24,7 @@ TOP?=		${.CURDIR}
 
 RELEASE=	${TOP}/build/release
 
-all: dirs lib ports progs bundles
+all: dirs lib ports progs bundles sdk-headers
 	@${ECHO} "== xcode-tools build complete =="
 	@${ECHO} "   release tree: ${RELEASE}"
 
@@ -44,6 +44,11 @@ ports:
 
 bundles:
 	${MAKE} -f ${TOP}/mk/bundle.mk TOP=${TOP} bundles
+
+# The SDK's headers, from the open-source releases in lib/ and src/.
+# Runs after bundles, which creates the bundle the headers go into.
+sdk-headers:
+	${MAKE} -f ${TOP}/mk/sdk-headers.mk TOP=${TOP} sdk-headers
 
 check:
 	${MAKE} -C ${TOP}/src TOP=${TOP} check-progs

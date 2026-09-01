@@ -205,9 +205,25 @@ Two clean builds of the default set produce byte-identical binaries.
 
 ## What is missing
 
-- **SDK contents** — headers, libraries, frameworks. Two bundles are emitted,
-  `MacOSX.sdk` and `MacOSX.Internal.sdk`; both are layout only, and the contents
-  do not exist yet. The internal one is the SDK Apple builds the system against
+- **SDK contents** — partly there. `bmake` now installs about a thousand headers
+  into `MacOSX.sdk/usr/include` from the open-source releases the tree carries
+  (Libc, xnu, libpthread, libmalloc, libclosure, libutil, CommonCrypto, copyfile,
+  removefile, libdispatch), all at the macOS 26.5 manifest versions, and
+  generates the two headers xnu produces by script rather than ships. Common C
+  and POSIX headers compile against it — `stdio.h`, `stdlib.h`, `string.h`,
+  `fcntl.h`, `time.h`, `math.h`, `errno.h`, `sys/stat.h` among them.
+
+  Not finished. Some headers still fail on availability macros whose supporting
+  definitions exist only in Apple's shipped SDK, not in the sources — Apple's
+  headers are processed copies, not the originals. There are no `.tbd` stubs
+  yet, so nothing links against this SDK: modern macOS keeps its libraries only
+  in the dyld shared cache, and the on-disk `.dylib` files are truncated
+  placeholders, so the stubs have to be generated from the cache with
+  `dsc_extractor` (source in `lib/dyld/other-tools/`) and `llvm-readtapi
+  -stubify`. And the frameworks have no open-source release at all, so an SDK
+  built here will compile C and POSIX and stop there.
+
+  `MacOSX.Internal.sdk` remains layout only. The internal one is the SDK Apple builds the system against
   and does not ship: same shape as the public bundle plus `usr/local/include`
   and `usr/local/lib`, which is where the headers and libraries kept out of the
   public SDK belong. It answers to `macosx<version>.internal`, so
