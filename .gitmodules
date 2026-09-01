@@ -60,3 +60,6 @@
 [submodule "openxc-tools/vmmap"]
 	path = src/openxc-tools/vmmap
 	url = https://github.com/xnuports/vmmap.git
+[submodule "swiftlang-llvm/swift-cmark"]
+	path = src/swiftlang-llvm/swift-cmark
+	url = https://github.com/swiftlang/swift-cmark
