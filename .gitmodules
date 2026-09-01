@@ -87,3 +87,6 @@
 [submodule "src/apple-oss-distributions/copyfile"]
 	path = src/apple-oss-distributions/copyfile
 	url = https://github.com/apple-oss-distributions/copyfile
+[submodule "src/apple-oss-distributions/removefile"]
+	path = src/apple-oss-distributions/removefile
+	url = https://github.com/apple-oss-distributions/removefile
