@@ -523,6 +523,24 @@ static settings_table *settings_for(const xcodebuild_opts *opts,
 				settings_set(t, "SRCROOT", sr);
 				settings_set(t, "SOURCE_ROOT", sr);
 				settings_set(t, "PROJECT_DIR", sr);
+
+				/*
+				 * Where the products go.  A project says
+				 * $(BUILT_PRODUCTS_DIR) to find what it has
+				 * just built -- a framework it links against
+				 * above all -- and the settings it merges
+				 * are expanded as they are merged, so this
+				 * has to be known before that happens.
+				 */
+				{
+					char bd[PATH_MAX];
+
+					snprintf(bd, sizeof(bd), "%s/build/%s",
+					         sr, configuration);
+					settings_set(t, "BUILT_PRODUCTS_DIR", bd);
+					settings_set(t, "CONFIGURATION_BUILD_DIR", bd);
+					settings_set(t, "TARGET_BUILD_DIR", bd);
+				}
 			}
 
 			/* Project settings first; a target's inherit them. */

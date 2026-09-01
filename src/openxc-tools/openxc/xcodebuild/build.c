@@ -355,11 +355,13 @@ target_id_for_product(CFTypeRef objects, CFTypeRef targets, const char *ref,
 /*
  * The targets a target depends on.
  *
- * A project states this twice over.  The explicit form is a
- * PBXTargetDependency naming another target; the implicit form is a
- * target linking another target's product, which is what Xcode means
- * by finding implicit dependencies.  Both are followed, because a
- * project that builds in Xcode may have written only one of them.
+ * A project states this two ways.  The explicit form is a
+ * PBXTargetDependency naming another target, and is always followed.
+ * The implicit form is a target linking another target's product;
+ * xcodebuild finds those only when it builds a scheme, which is where
+ * the option to look for them lives, and building -target A against a
+ * project whose B it links but does not depend on fails the same way
+ * Apple's does.
  *
  * A dependency on a target in another project is recognised and
  * reported rather than followed: building it means building that
@@ -367,7 +369,7 @@ target_id_for_product(CFTypeRef objects, CFTypeRef targets, const char *ref,
  */
 static void
 collect_deps(CFTypeRef objects, CFTypeRef project_obj, CFTypeRef target,
-    struct idlist *out, int *foreign)
+    struct idlist *out, int *foreign, int follow_implicit)
 {
 	CFTypeRef targets = bget(project_obj, "targets");
 	CFTypeRef deps = bget(target, "dependencies");
@@ -409,6 +411,9 @@ collect_deps(CFTypeRef objects, CFTypeRef project_obj, CFTypeRef target,
 			idlist_add(out, id);
 	}
 
+	if (!follow_implicit)
+		return;
+
 	/* Linking another target's product is a dependency on it. */
 	for (i = 0; i < bcount(phases); i++) {
 		CFTypeRef phase = bderef(objects, bat(phases, i));
@@ -449,7 +454,8 @@ collect_deps(CFTypeRef objects, CFTypeRef project_obj, CFTypeRef target,
  */
 static int
 order_targets(CFTypeRef objects, CFTypeRef project_obj, const char *id,
-    struct idlist *order, struct idlist *stack, int *foreign)
+    struct idlist *order, struct idlist *stack, int *foreign,
+    int follow_implicit)
 {
 	CFTypeRef target = bget(objects, id);
 	struct idlist deps;
@@ -472,11 +478,12 @@ order_targets(CFTypeRef objects, CFTypeRef project_obj, const char *id,
 	idlist_add(stack, id);
 
 	memset(&deps, 0, sizeof(deps));
-	collect_deps(objects, project_obj, target, &deps, foreign);
+	collect_deps(objects, project_obj, target, &deps, foreign,
+	    follow_implicit);
 
 	for (i = 0; i < deps.count && rc == 0; i++)
 		rc = order_targets(objects, project_obj, deps.ids[i], order,
-		    stack, foreign);
+		    stack, foreign, follow_implicit);
 
 	idlist_free(&deps);
 	idlist_drop_last(stack);
@@ -491,9 +498,12 @@ order_targets(CFTypeRef objects, CFTypeRef project_obj, const char *id,
 /* link inputs                                                          */
 /* ------------------------------------------------------------------ */
 
-/* A build file marked Weak in the phase that holds it. */
+/*
+ * An attribute on a build file, set by the phase that holds it: Weak
+ * on something linked, Public or Private on a header.
+ */
 static int
-build_file_is_weak(CFTypeRef bf)
+build_file_has_attr(CFTypeRef bf, const char *want)
 {
 	CFTypeRef attrs = bget(bget(bf, "settings"), "ATTRIBUTES");
 	CFIndex i;
@@ -502,11 +512,17 @@ build_file_is_weak(CFTypeRef bf)
 		char buf[64];
 		const char *a = bstr(bat(attrs, i), buf, sizeof(buf));
 
-		if (a != NULL && strcasecmp(a, "Weak") == 0)
+		if (a != NULL && strcasecmp(a, want) == 0)
 			return 1;
 	}
 
 	return 0;
+}
+
+static int
+build_file_is_weak(CFTypeRef bf)
+{
+	return build_file_has_attr(bf, "Weak");
 }
 
 static int
@@ -661,6 +677,22 @@ classify_product(const char *product_type, struct product *out)
 }
 
 /*
+ * A default, where a value that is present but empty does not count as
+ * set.  The settings table starts with some keys already there and
+ * empty -- EXECUTABLE_NAME is one -- and settings_defaults_set would
+ * leave those empty for ever.
+ */
+static void
+settings_default_if_empty(settings_table *t, const char *key,
+    const char *value)
+{
+	const char *cur = settings_get(t, key);
+
+	if (cur == NULL || *cur == '\0')
+		settings_set(t, key, value);
+}
+
+/*
  * Record what a target produces.  Called while settings are resolved,
  * so -showBuildSettings reports the same names a build writes -- the
  * classification is a property of the target, not of building it.
@@ -692,6 +724,73 @@ build_apply_product_settings(settings_table *t, const char *product_type)
 		    prod.suffix);
 
 	settings_set(t, "FULL_PRODUCT_NAME", full);
+
+	/*
+	 * Where the product installs, where its binary sits inside it,
+	 * and -- for a dylib -- the name it records for whoever links it.
+	 *
+	 * Defaults, so a project that says otherwise keeps what it said.
+	 * Read back from Apple's -showBuildSettings: a tool installs to
+	 * /usr/local/bin and a library to /usr/local/lib, a framework to
+	 * /Library/Frameworks with an executable path of
+	 * Foo.framework/Versions/A/Foo, and DYLIB_INSTALL_NAME_BASE is
+	 * the install path -- not @rpath, which is what a project sets
+	 * when it wants one that can be found anywhere.
+	 */
+	{
+		const char *ver = settings_get(t, "FRAMEWORK_VERSION");
+		char exe[PATH_MAX], epath[PATH_MAX];
+		int framework;
+
+		if (ver == NULL || *ver == '\0')
+			ver = "A";
+
+		framework = (prod.kind == PRODUCT_BUNDLE &&
+		    prod.wrapper != NULL &&
+		    strcmp(prod.wrapper, "framework") == 0);
+
+		snprintf(exe, sizeof(exe), "%s%s%s", prod.prefix, pn,
+		    prod.suffix);
+		snprintf(epath, sizeof(epath), "%s", exe);
+
+		/* Reported for every target, framework or not, as Apple does. */
+		settings_default_if_empty(t, "FRAMEWORK_VERSION", ver);
+
+		if (framework) {
+			settings_default_if_empty(t, "INSTALL_PATH",
+			    "/Library/Frameworks");
+			snprintf(epath, sizeof(epath), "%s/Versions/%s/%s",
+			    full, ver, exe);
+		} else if (prod.kind == PRODUCT_BUNDLE) {
+			settings_default_if_empty(t, "INSTALL_PATH", "/Applications");
+			snprintf(epath, sizeof(epath), "%s/Contents/MacOS/%s",
+			    full, exe);
+		} else if (prod.kind == PRODUCT_TOOL) {
+			settings_default_if_empty(t, "INSTALL_PATH", "/usr/local/bin");
+		} else {
+			settings_default_if_empty(t, "INSTALL_PATH", "/usr/local/lib");
+		}
+
+		settings_default_if_empty(t, "EXECUTABLE_NAME", exe);
+		settings_default_if_empty(t, "EXECUTABLE_PATH", epath);
+
+		if (framework || prod.kind == PRODUCT_DYNAMIC_LIB) {
+			const char *base = settings_get(t, "INSTALL_PATH");
+			char iname[PATH_MAX];
+
+			if (base != NULL)
+				settings_default_if_empty(t,
+				    "DYLIB_INSTALL_NAME_BASE", base);
+
+			base = settings_get(t, "DYLIB_INSTALL_NAME_BASE");
+			if (base != NULL) {
+				snprintf(iname, sizeof(iname), "%s/%s", base,
+				    epath);
+				settings_default_if_empty(t,
+				    "LD_DYLIB_INSTALL_NAME", iname);
+			}
+		}
+	}
 }
 
 /*
@@ -797,26 +896,22 @@ is_compilable(const char *path)
 }
 
 /*
- * The minimum an application bundle needs to be one: the name of its
- * executable and an identifier.  Written with CoreFoundation, as every
- * property list this tree emits now is.
+ * The minimum a bundle needs to be one: the name of its executable and
+ * an identifier.  Written with CoreFoundation, as every property list
+ * this tree emits now is.
  */
 static int
-write_app_infoplist(const char *build_dir, const char *full_name,
-    const char *exe_name, settings_table *t)
+write_bundle_infoplist(const char *path, const char *exe_name,
+    const char *package_type, settings_table *t)
 {
 	CFMutableDictionaryRef info;
-	char path[PATH_MAX];
 	const char *bundle_id;
 	CFDataRef data;
 	FILE *fp;
 	int rc = 0;
 
-	if (full_name == NULL || exe_name == NULL)
+	if (path == NULL || exe_name == NULL)
 		return 1;
-
-	snprintf(path, sizeof(path), "%s/%s/Contents/Info.plist", build_dir,
-	    full_name);
 
 	info = CFDictionaryCreateMutable(NULL, 0, &kCFTypeDictionaryKeyCallBacks,
 	    &kCFTypeDictionaryValueCallBacks);
@@ -842,8 +937,11 @@ write_app_infoplist(const char *build_dir, const char *full_name,
 		v = CFStringCreateWithCString(NULL, exe_name, kCFStringEncodingUTF8);
 		if (v != NULL) { CFDictionarySetValue(info, k, v); CFRelease(v); }
 
-		CFDictionarySetValue(info, CFSTR("CFBundlePackageType"),
-		    CFSTR("APPL"));
+		k = CFSTR("CFBundlePackageType");
+		v = CFStringCreateWithCString(NULL, package_type,
+		    kCFStringEncodingUTF8);
+		if (v != NULL) { CFDictionarySetValue(info, k, v); CFRelease(v); }
+
 		CFDictionarySetValue(info, CFSTR("CFBundleInfoDictionaryVersion"),
 		    CFSTR("6.0"));
 	}
@@ -866,6 +964,203 @@ write_app_infoplist(const char *build_dir, const char *full_name,
 	return rc;
 }
 
+/* ------------------------------------------------------------------ */
+/* frameworks                                                           */
+/* ------------------------------------------------------------------ */
+
+static int
+copy_file(const char *src, const char *dst)
+{
+	char buf[65536];
+	FILE *in, *out;
+	size_t n;
+	int rc = 0;
+
+	if ((in = fopen(src, "rb")) == NULL)
+		return -1;
+	if ((out = fopen(dst, "wb")) == NULL) {
+		fclose(in);
+		return -1;
+	}
+
+	while ((n = fread(buf, 1, sizeof(buf), in)) > 0) {
+		if (fwrite(buf, 1, n, out) != n) {
+			rc = -1;
+			break;
+		}
+	}
+	if (ferror(in))
+		rc = -1;
+
+	fclose(in);
+	fclose(out);
+	return rc;
+}
+
+/* A symlink inside a bundle, replaced if one is already there. */
+static int
+relink(const char *dir, const char *name, const char *target)
+{
+	char path[PATH_MAX];
+
+	snprintf(path, sizeof(path), "%s/%s", dir, name);
+	unlink(path);
+
+	return symlink(target, path);
+}
+
+/*
+ * The headers a framework publishes.
+ *
+ * A header in the headers phase carries an attribute saying how it is
+ * exposed: Public goes in Headers, Private in PrivateHeaders, and one
+ * with neither is the target's own business and is not installed.
+ */
+static int
+install_framework_headers(CFTypeRef objects, CFTypeRef target,
+    const struct pathmap *map, const char *build_dir, const char *sdkroot,
+    const char *devpath, const char *version_dir, int *npublic, int *nprivate)
+{
+	CFTypeRef phases = bget(target, "buildPhases");
+	CFIndex p;
+	int rc = 0;
+
+	*npublic = 0;
+	*nprivate = 0;
+
+	for (p = 0; p < bcount(phases) && rc == 0; p++) {
+		CFTypeRef phase = bderef(objects, bat(phases, p));
+		char isabuf[64];
+		const char *isa = bstr(bget(phase, "isa"), isabuf,
+		    sizeof(isabuf));
+		CFTypeRef files;
+		CFIndex f;
+
+		if (isa == NULL || strcmp(isa, "PBXHeadersBuildPhase") != 0)
+			continue;
+
+		files = bget(phase, "files");
+		for (f = 0; f < bcount(files) && rc == 0; f++) {
+			CFTypeRef bf = bderef(objects, bat(files, f));
+			char refbuf[512], resbuf[PATH_MAX];
+			char dir[PATH_MAX], dst[PATH_MAX];
+			const char *ref = bstr(bget(bf, "fileRef"), refbuf,
+			    sizeof(refbuf));
+			const char *src, *base, *sub;
+
+			if (ref == NULL)
+				continue;
+
+			if (build_file_has_attr(bf, "Public"))
+				sub = "Headers";
+			else if (build_file_has_attr(bf, "Private"))
+				sub = "PrivateHeaders";
+			else
+				continue;
+
+			src = pathmap_resolve(map, ref, build_dir, sdkroot,
+			    devpath, resbuf, sizeof(resbuf));
+			if (src == NULL)
+				continue;
+
+			snprintf(dir, sizeof(dir), "%s/%s", version_dir, sub);
+			if (mkdirs(dir) != 0) {
+				rc = -1;
+				break;
+			}
+
+			base = strrchr(src, '/');
+			base = (base != NULL) ? base + 1 : src;
+			snprintf(dst, sizeof(dst), "%s/%s", dir, base);
+
+			if (copy_file(src, dst) != 0) {
+				fprintf(stderr, "xcodebuild: error: cannot"
+				    " install the header %s\n", src);
+				rc = -1;
+				break;
+			}
+
+			if (strcmp(sub, "Headers") == 0)
+				(*npublic)++;
+			else
+				(*nprivate)++;
+		}
+	}
+
+	return rc;
+}
+
+/*
+ * Turn a version directory into a framework.
+ *
+ * A macOS framework is versioned: the binary, its headers and its
+ * resources live under Versions/A, and the top of the bundle is
+ * symlinks naming whichever version is current.  Without them the
+ * directory holds everything a framework has and still cannot be
+ * linked against, because -framework looks for the binary at the top.
+ */
+static int
+framework_finalize(const char *bundle, const char *version,
+    const char *exe_name, int have_headers, int have_private)
+{
+	char versions[PATH_MAX], target[PATH_MAX];
+
+	snprintf(versions, sizeof(versions), "%s/Versions", bundle);
+
+	if (relink(versions, "Current", version) != 0)
+		return -1;
+
+	snprintf(target, sizeof(target), "Versions/Current/%s", exe_name);
+	if (relink(bundle, exe_name, target) != 0)
+		return -1;
+
+	if (relink(bundle, "Resources", "Versions/Current/Resources") != 0)
+		return -1;
+
+	if (have_headers &&
+	    relink(bundle, "Headers", "Versions/Current/Headers") != 0)
+		return -1;
+
+	if (have_private &&
+	    relink(bundle, "PrivateHeaders",
+	    "Versions/Current/PrivateHeaders") != 0)
+		return -1;
+
+	return 0;
+}
+
+/*
+ * The bundle's Info.plist.
+ *
+ * A project that supplies one means it: it carries the identifier, the
+ * version and everything else the bundle is meant to say about itself,
+ * none of which a synthesised one knows.  Only when there is no such
+ * file is one written from the settings.
+ */
+static int
+install_infoplist(const char *dst, const char *exe_name,
+    const char *package_type, settings_table *t, const char *srcroot)
+{
+	char ibuf[PATH_MAX], src[PATH_MAX];
+	const char *given = setting(t, "INFOPLIST_FILE", ibuf, sizeof(ibuf));
+
+	if (given == NULL)
+		return write_bundle_infoplist(dst, exe_name, package_type, t);
+
+	if (given[0] == '/')
+		snprintf(src, sizeof(src), "%s", given);
+	else
+		snprintf(src, sizeof(src), "%s/%s", srcroot, given);
+
+	if (copy_file(src, dst) != 0) {
+		fprintf(stderr, "xcodebuild: error: cannot read the Info.plist"
+		    " at %s\n", src);
+		return 1;
+	}
+
+	return 0;
+}
+
 /*
  * Split a build setting into arguments, each prefixed with a flag.
  *
@@ -874,39 +1169,55 @@ write_app_infoplist(const char *build_dir, const char *full_name,
  * space.  A relative path is relative to the project, which is what a
  * project means when it writes DCE/include.
  */
+/*
+ * The next whitespace-separated word of a setting, honouring the quotes
+ * around a value that contains a space.  Returns 0 when none are left.
+ */
+static int
+next_word(const char **pp, char *word, size_t len)
+{
+	const char *p = *pp;
+	size_t n = 0;
+	char quote = '\0';
+
+	while (*p == ' ' || *p == '\t')
+		p++;
+
+	if (*p == '\0') {
+		*pp = p;
+		return 0;
+	}
+
+	if (*p == '"' || *p == '\'')
+		quote = *p++;
+
+	while (*p != '\0' && n + 1 < len) {
+		if (quote != '\0' && *p == quote) {
+			p++;
+			break;
+		}
+		if (quote == '\0' && (*p == ' ' || *p == '\t'))
+			break;
+		word[n++] = *p++;
+	}
+
+	word[n] = '\0';
+	*pp = p;
+	return 1;
+}
+
 static int
 add_setting_args(char *argv[], int a, int max, const char *value,
     const char *flag, const char *srcroot)
 {
 	const char *p = value;
+	char word[PATH_MAX];
 
 	if (value == NULL || *value == '\0')
 		return a;
 
-	while (*p != '\0' && a + 2 < max) {
-		char word[PATH_MAX];
-		size_t n = 0;
-		char quote = '\0';
-
-		while (*p == ' ' || *p == '\t')
-			p++;
-		if (*p == '\0')
-			break;
-
-		if (*p == '"' || *p == '\'')
-			quote = *p++;
-
-		while (*p != '\0' && n + 1 < sizeof(word)) {
-			if (quote != '\0' && *p == quote) {
-				p++;
-				break;
-			}
-			if (quote == '\0' && (*p == ' ' || *p == '\t'))
-				break;
-			word[n++] = *p++;
-		}
-		word[n] = '\0';
-		if (n == 0)
+	while (a + 2 < max && next_word(&p, word, sizeof(word))) {
+		if (word[0] == '\0')
 			continue;
 
 		argv[a++] = strdup(flag);
@@ -918,6 +1229,51 @@ add_setting_args(char *argv[], int a, int max, const char *value,
 			snprintf(full, sizeof(full), "%s/%s", srcroot, word);
 			argv[a++] = strdup(full);
 		}
+	}
+
+	return a;
+}
+
+/*
+ * A flag meant for the linker itself.
+ *
+ * clang takes several of these directly, but swiftc -- which links a
+ * target that has Swift in it -- takes none of them and stops on the
+ * first.  -Xlinker is understood by both, so everything aimed at the
+ * linker goes through it whichever one is doing the linking.
+ */
+static int
+add_linker_arg(char *argv[], int a, int max, const char *flag,
+    const char *value)
+{
+	if (a + 4 >= max)
+		return a;
+
+	argv[a++] = strdup("-Xlinker");
+	argv[a++] = strdup(flag);
+
+	if (value != NULL) {
+		argv[a++] = strdup("-Xlinker");
+		argv[a++] = strdup(value);
+	}
+
+	return a;
+}
+
+/* Where the binary looks for the dylibs it links, one -rpath each. */
+static int
+add_rpath_args(char *argv[], int a, int max, const char *value)
+{
+	const char *p = value;
+	char word[PATH_MAX];
+
+	if (value == NULL || *value == '\0')
+		return a;
+
+	while (a + 4 < max && next_word(&p, word, sizeof(word))) {
+		if (word[0] == '\0')
+			continue;
+		a = add_linker_arg(argv, a, max, "-rpath", word);
 	}
 
 	return a;
@@ -935,10 +1291,13 @@ build_one_target(CFTypeRef objects, CFTypeRef chosen, const char *source_root,
 {
 	char clang[PATH_MAX];
 	char build_dir[PATH_MAX], obj_dir[PATH_MAX], product[PATH_MAX];
-	const char *product_name, *configuration, *sdkroot, *srcroot;
+	const char *product_name, *configuration, *sdkroot, *srcroot, *full;
+	const char *fw_version;
 	struct product prod;
 	char cfgbuf[128], pnbuf[256], sdkbuf[PATH_MAX];
-	char srbuf[PATH_MAX], fullbuf[PATH_MAX];
+	char srbuf[PATH_MAX], fullbuf[PATH_MAX], fwbuf[64], rpbuf[PATH_MAX];
+	char instname[PATH_MAX];
+	int is_framework, dylib;
 	CFIndex i;
 	int rc = 0, nsources = 0;
 
@@ -957,30 +1316,55 @@ build_one_target(CFTypeRef objects, CFTypeRef chosen, const char *source_root,
 	if (product_name == NULL)
 		product_name = "product";
 
-	snprintf(build_dir, sizeof(build_dir), "%s/build/%s", source_root,
-	    configuration);
+	/*
+	 * One place decides where the products go, so that what a project
+	 * reads back from $(BUILT_PRODUCTS_DIR) is where they actually
+	 * land -- and a project that redirects the build is followed.
+	 */
+	if (setting(t, "CONFIGURATION_BUILD_DIR", build_dir,
+	    sizeof(build_dir)) == NULL)
+		snprintf(build_dir, sizeof(build_dir), "%s/build/%s",
+		    source_root, configuration);
 	snprintf(obj_dir, sizeof(obj_dir), "%s/build/%s.build", source_root,
 	    configuration);
-	{
-		const char *full = setting(t, "FULL_PRODUCT_NAME", fullbuf,
-		    sizeof(fullbuf));
+	is_framework = (prod.kind == PRODUCT_BUNDLE && prod.wrapper != NULL &&
+	    strcmp(prod.wrapper, "framework") == 0);
 
-		if (full == NULL)
-			full = product_name;
+	/* A framework is a dylib inside a bundle, and links as one. */
+	dylib = (prod.kind == PRODUCT_DYNAMIC_LIB) || is_framework;
 
-		/*
-		 * A bundle's binary lives inside it.  On macOS that is
-		 * Contents/MacOS for an application and Versions/A for a
-		 * framework; only the application form is assembled here.
-		 */
-		if (prod.kind == PRODUCT_BUNDLE)
-			snprintf(product, sizeof(product),
-			    "%s/%s/Contents/MacOS/%s", build_dir, full,
-			    product_name);
-		else
-			snprintf(product, sizeof(product), "%s/%s", build_dir,
-			    full);
-	}
+	if ((fw_version = setting(t, "FRAMEWORK_VERSION", fwbuf,
+	    sizeof(fwbuf))) == NULL)
+		fw_version = "A";
+
+	if ((full = setting(t, "FULL_PRODUCT_NAME", fullbuf,
+	    sizeof(fullbuf))) == NULL)
+		full = product_name;
+
+	/*
+	 * A bundle's binary lives inside it.  On macOS that is
+	 * Contents/MacOS for an application, and Versions/<version> for a
+	 * framework, which keeps every version it has ever had beside
+	 * each other under one name.
+	 */
+	if (is_framework)
+		snprintf(product, sizeof(product), "%s/%s/Versions/%s/%s",
+		    build_dir, full, fw_version, product_name);
+	else if (prod.kind == PRODUCT_BUNDLE)
+		snprintf(product, sizeof(product), "%s/%s/Contents/MacOS/%s",
+		    build_dir, full, product_name);
+	else
+		snprintf(product, sizeof(product), "%s/%s", build_dir, full);
+
+	/*
+	 * What a dylib records as its own name, which is what whoever
+	 * links it looks for at run time.  Settled with the rest of the
+	 * product's settings, so what a build writes and what
+	 * -showBuildSettings reports are the same name.
+	 */
+	instname[0] = '\0';
+	if (dylib)
+		setting(t, "LD_DYLIB_INSTALL_NAME", instname, sizeof(instname));
 
 	if (mkdirs(build_dir) != 0 || mkdirs(obj_dir) != 0) {
 		fprintf(stderr, "xcodebuild: error: cannot create %s\n", build_dir);
@@ -1249,7 +1633,7 @@ build_one_target(CFTypeRef objects, CFTypeRef chosen, const char *source_root,
 					    ".xctoolchain/usr/bin/swiftc",
 					    devpath);
 					argv[a++] = swiftc;
-					if (prod.kind == PRODUCT_DYNAMIC_LIB)
+					if (dylib)
 						argv[a++] = (char *)"-emit-library";
 					if (sdkroot != NULL && *sdkroot != '\0') {
 						argv[a++] = (char *)"-sdk";
@@ -1259,7 +1643,7 @@ build_one_target(CFTypeRef objects, CFTypeRef chosen, const char *source_root,
 				}
 
 				argv[a++] = clang;
-				if (prod.kind == PRODUCT_DYNAMIC_LIB)
+				if (dylib)
 					argv[a++] = (char *)"-dynamiclib";
 				if (sdkroot != NULL && *sdkroot != '\0') {
 					argv[a++] = (char *)"-isysroot";
@@ -1281,6 +1665,23 @@ have_linker:
 				    (int)(sizeof(argv) / sizeof(argv[0])) - 1,
 				    objects, chosen, map, build_dir, sdkroot,
 				    devpath, NULL);
+
+				if (dylib && instname[0] != '\0')
+					a = add_linker_arg(argv, a,
+					    (int)(sizeof(argv) /
+					    sizeof(argv[0])) - 1,
+					    "-install_name", instname);
+
+				/*
+				 * Where this binary looks for the dylibs it
+				 * links.  An install name beginning @rpath
+				 * means nothing without one.
+				 */
+				a = add_rpath_args(argv, a,
+				    (int)(sizeof(argv) / sizeof(argv[0])) - 1,
+				    setting(t, "LD_RUNPATH_SEARCH_PATHS", rpbuf,
+				    sizeof(rpbuf)));
+
 				argv[a] = NULL;
 
 				printf("Ld %s\n", product);
@@ -1292,16 +1693,65 @@ have_linker:
 			}
 
 			/*
-			 * An application is a bundle: without an Info.plist
-			 * naming its executable, the binary is there but
-			 * nothing will launch it.
+			 * A bundle is a directory with a shape.  Without an
+			 * Info.plist naming its executable the binary is
+			 * there and nothing will load it, and a framework
+			 * needs the links at the top of it besides.
 			 */
 			if (rc == 0 && prod.kind == PRODUCT_BUNDLE &&
-			    prod.wrapper != NULL &&
-			    strcmp(prod.wrapper, "app") == 0)
-				rc = write_app_infoplist(build_dir,
-				    settings_get(t, "FULL_PRODUCT_NAME"),
-				    product_name, t);
+			    prod.wrapper != NULL) {
+				char bundle[PATH_MAX], plist[PATH_MAX];
+
+				snprintf(bundle, sizeof(bundle), "%s/%s",
+				    build_dir, full);
+
+				if (is_framework) {
+					char vdir[PATH_MAX], res[PATH_MAX];
+					int npub = 0, npriv = 0;
+
+					snprintf(vdir, sizeof(vdir),
+					    "%s/Versions/%s", bundle,
+					    fw_version);
+					snprintf(res, sizeof(res),
+					    "%s/Resources", vdir);
+
+					if (mkdirs(res) != 0) {
+						fprintf(stderr, "xcodebuild:"
+						    " error: cannot create"
+						    " %s\n", res);
+						rc = 1;
+					}
+
+					if (rc == 0) {
+						snprintf(plist, sizeof(plist),
+						    "%s/Info.plist", res);
+						rc = install_infoplist(plist,
+						    product_name, "FMWK", t,
+						    srcroot);
+					}
+
+					if (rc == 0 &&
+					    install_framework_headers(objects,
+					    chosen, map, build_dir, sdkroot,
+					    devpath, vdir, &npub,
+					    &npriv) != 0)
+						rc = 1;
+
+					if (rc == 0 && framework_finalize(
+					    bundle, fw_version, product_name,
+					    npub > 0, npriv > 0) != 0) {
+						fprintf(stderr, "xcodebuild:"
+						    " error: cannot assemble"
+						    " %s\n", bundle);
+						rc = 1;
+					}
+				} else if (strcmp(prod.wrapper, "app") == 0) {
+					snprintf(plist, sizeof(plist),
+					    "%s/Contents/Info.plist", bundle);
+					rc = install_infoplist(plist,
+					    product_name, "APPL", t, srcroot);
+				}
+			}
 		}
 
 		for (i = 0; i < nobjs; i++)
@@ -1396,8 +1846,13 @@ int build_run(const char *project, settings_table *t,
 	walk_group(objects, bderef(objects, bget(project_obj, "mainGroup")),
 	    source_root, source_root, &map);
 
+	/*
+	 * Implicit dependencies belong to a scheme: the option to look
+	 * for them is a scheme's, and xcodebuild does not apply it to a
+	 * target built by name.
+	 */
 	rc = order_targets(objects, project_obj, chosen_id, &order, &stack,
-	    &foreign);
+	    &foreign, opts->scheme != NULL);
 
 	if (rc == 0 && foreign > 0)
 		fprintf(stderr, "xcodebuild: warning: %d dependenc%s on a"
