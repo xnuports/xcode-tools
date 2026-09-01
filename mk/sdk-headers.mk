@@ -121,4 +121,34 @@ sdk-headers:
 
 	@${ECHO} "sdk: `find ${SDK_INC} -name '*.h' | wc -l | tr -d ' '` headers installed"
 
-.PHONY: sdk-headers
+# --- stubs ----------------------------------------------------------
+#
+# The linker needs each library's exported symbols, not the library, and
+# that is what a .tbd carries.  libSystem is the one every program links,
+# and it is generated rather than copied: Apple's own stubs are part of
+# their SDK and not redistributable, while the symbols themselves are
+# read from the running system.
+#
+# See mk/scripts/make-tbd.sh for why they cannot simply be stubified out
+# of /usr/lib with llvm-readtapi.
+
+SDK_LIB=	${SDK_ROOT}/usr/lib
+
+sdk-stubs:
+	@${ECHO} "sdk: generating library stubs"
+	@mkdir -p ${SDK_LIB}
+	@${TOP}/mk/scripts/make-tbd.sh /usr/lib/libSystem.B.dylib \
+	    ${SDK_LIB}/libSystem.B.tbd || true
+	@ln -sfn libSystem.B.tbd ${SDK_LIB}/libSystem.tbd
+	@${TOP}/mk/scripts/make-tbd.sh /usr/lib/libc++.1.dylib \
+	    ${SDK_LIB}/libc++.1.tbd 2>/dev/null || true
+	@[ -f ${SDK_LIB}/libc++.1.tbd ] && \
+	    ln -sfn libc++.1.tbd ${SDK_LIB}/libc++.tbd || true
+	@${TOP}/mk/scripts/make-tbd.sh /usr/lib/libobjc.A.dylib \
+	    ${SDK_LIB}/libobjc.A.tbd 2>/dev/null || true
+	@[ -f ${SDK_LIB}/libobjc.A.tbd ] && \
+	    ln -sfn libobjc.A.tbd ${SDK_LIB}/libobjc.tbd || true
+
+sdk: sdk-headers sdk-stubs
+
+.PHONY: sdk sdk-headers sdk-stubs

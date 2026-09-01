@@ -213,15 +213,20 @@ Two clean builds of the default set produce byte-identical binaries.
   and POSIX headers compile against it — `stdio.h`, `stdlib.h`, `string.h`,
   `fcntl.h`, `time.h`, `math.h`, `errno.h`, `sys/stat.h` among them.
 
+  Stubs are generated too, so a C program now **compiles and links against our
+  own SDK and runs** — our headers, our `.tbd`, our clang, our ld64. The
+  libraries are not on disk to be stubified: macOS keeps them in the dyld shared
+  cache and the files under `/usr/lib` are truncated placeholders, so the
+  exports are read from the cache instead. libSystem is an umbrella that
+  re-exports some thirty libraries under `/usr/lib/system`; their symbols are
+  gathered into one stub (8992 of them), alongside `libc++` and `libobjc`.
+
   Not finished. Some headers still fail on availability macros whose supporting
-  definitions exist only in Apple's shipped SDK, not in the sources — Apple's
-  headers are processed copies, not the originals. There are no `.tbd` stubs
-  yet, so nothing links against this SDK: modern macOS keeps its libraries only
-  in the dyld shared cache, and the on-disk `.dylib` files are truncated
-  placeholders, so the stubs have to be generated from the cache with
-  `dsc_extractor` (source in `lib/dyld/other-tools/`) and `llvm-readtapi
-  -stubify`. And the frameworks have no open-source release at all, so an SDK
-  built here will compile C and POSIX and stop there.
+  definitions exist only in Apple's shipped SDK — Apple's headers are processed
+  copies, not the originals. C++ does not compile: the `libc++` stub is there
+  but its headers are not, which needs `libcxx` added to the LLVM runtimes. And
+  the frameworks have no open-source release at all, so an SDK built here will
+  do C and POSIX and stop there.
 
   `MacOSX.Internal.sdk` remains layout only. The internal one is the SDK Apple builds the system against
   and does not ship: same shape as the public bundle plus `usr/local/include`
