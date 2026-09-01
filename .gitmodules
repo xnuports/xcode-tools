@@ -17,7 +17,7 @@
 	url = https://github.com/apple-oss-distributions/objc4.git
 	branch = rel/objc4-951
 [submodule "python/python-apple-support"]
-	path = src/python/python-apple-support
+	path = tools/python-apple-support
 	url = https://github.com/xnuports/Python-Apple-support/
 [submodule "include/ld-internals"]
 	path = include/ld-internals
