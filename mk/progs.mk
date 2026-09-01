@@ -27,6 +27,7 @@ PROGS+=	openxc-tools/openxc/simctl simctl usr/bin
 PROGS+=	openxc-tools/openxc/xcode-select xcode-select usr/bin
 PROGS+=	openxc-tools/openxc/xcodebuild xcodebuild usr/bin
 PROGS+=	openxc-tools/openxc/xcrun xcrun usr/bin
+PROGS+=	openxc-tools/openxc/xcstringstool xcstringstool usr/bin
 PROGS+=	openxc-tools/openxc/xctrace xctrace usr/bin
 
 .if ${MK_TOOLCHAIN:tl} == "yes"

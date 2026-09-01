@@ -91,7 +91,8 @@ VM interfaces it uses are the real ones on macOS.
 identity or a `.p12`; Apple's own `codesign --verify` accepts what it produces
 as valid and as satisfying its designated requirement), `xcrun`,
 `xcodebuild`, `xcode-select`, `pkgbuild`, `productbuild`, `simctl`,
-`notarytool`, `devicectl`, `xctrace` (`list` and `export --toc`; recording is
+`notarytool`, `devicectl`, `xcstringstool` (`print` and `compile`), `xctrace`
+(`list` and `export --toc`; recording is
 not implemented and says so — it reads the kernel trace facilities through
 interfaces Apple does not publish, and writes the undocumented `.trace`
 format).
@@ -198,8 +199,12 @@ Two clean builds of the default set produce byte-identical binaries.
   select it.
 - **Swift** — the submodule is there, not yet built.
 - **Python, Git** — sources carried (CPython 3.14.6, git 2.50.1, the version Apple's Git-155 wraps), not yet ported to `mk/port.mk`.
-- **The `xc*` family** — `xccov`, `xcresulttool`, `xcstringstool`,
-  `xcsigningtool`, `xctest`, `xcdevice`, `xcdiagnose`.
+- **The `xc*` family** — `xccov`, `xcresulttool`, `xcsigningtool`, `xctest`,
+  `xcdevice`, `xcdiagnose`. `xcstringstool` does `print` and `compile`, whose
+  output is byte-identical to Apple's for plain strings, plurals, `--language`
+  and both `--format` values; its `sync`, `extract`, `generate-symbols` and
+  `installloc` are not implemented, nor is `--serialization-format binary`,
+  which needs a binary property list writer.
 - **`codesign` omits the Apple hash-agility version 2 attribute.** Its value is
   keyed by an algorithm identifier with no documented mapping, and a wrong key
   yields an attribute that makes the signature unreadable rather than merely
