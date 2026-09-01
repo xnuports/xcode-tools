@@ -747,6 +747,25 @@ int project_list(const char *project, const char *workspace, const xcodebuild_op
 	 * part of the output anything parsing -list has to read.
 	 */
 	strvec configs = {0};
+	char defbuf[128];
+	const char *defcfg = "Release";
+
+	/*
+	 * Which configuration a build without -configuration uses is the
+	 * project's to say: its configuration list names one.  Reading it
+	 * matters for a project that defines only Debug, where saying
+	 * "Release" names a configuration that is not there.
+	 */
+	{
+		CFTypeRef cfglist = pderef(objects,
+		    pget(project_obj, "buildConfigurationList"));
+		const char *d = pstr(pget(cfglist, "defaultConfigurationName"),
+		    defbuf, sizeof(defbuf));
+
+		if (d != NULL && *d != '\0')
+			defcfg = d;
+	}
+
 	collect_all_config_names(objects, tarr, &configs);
 	if (configs.count > 0) {
 		printf("    Build Configurations:\n");
@@ -754,7 +773,7 @@ int project_list(const char *project, const char *workspace, const xcodebuild_op
 			printf("        %s\n", configs.items[i]);
 		printf("\n");
 		printf("    If no build configuration is specified and"
-		    " -scheme is not passed then \"Release\" is used.\n");
+		    " -scheme is not passed then \"%s\" is used.\n", defcfg);
 		printf("\n");
 	}
 	strvec_free(&configs);
