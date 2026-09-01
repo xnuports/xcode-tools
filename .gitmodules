@@ -84,3 +84,6 @@
 [submodule "lib/commoncrypto"]
 	path = lib/commoncrypto
 	url = https://github.com/apple-oss-distributions/CommonCrypto
+[submodule "src/apple-oss-distributions/copyfile"]
+	path = src/apple-oss-distributions/copyfile
+	url = https://github.com/apple-oss-distributions/copyfile
