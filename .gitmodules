@@ -105,3 +105,6 @@
 [submodule "tools/darwin-dyld-build"]
 	path = tools/darwin-dyld-build
 	url = https://github.com/blacktop/darwin-dyld-build
+[submodule "tools/darwin-webkit-build"]
+	path = tools/darwin-webkit-build
+	url = https://github.com/blacktop/darwin-webkit-build
