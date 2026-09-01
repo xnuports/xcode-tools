@@ -91,7 +91,10 @@ VM interfaces it uses are the real ones on macOS.
 identity or a `.p12`; Apple's own `codesign --verify` accepts what it produces
 as valid and as satisfying its designated requirement), `xcrun`,
 `xcodebuild`, `xcode-select`, `pkgbuild`, `productbuild`, `simctl`,
-`notarytool`, `devicectl`, `xctrace` (stub).
+`notarytool`, `devicectl`, `xctrace` (`list` and `export --toc`; recording is
+not implemented and says so — it reads the kernel trace facilities through
+interfaces Apple does not publish, and writes the undocumented `.trace`
+format).
 
 Also `make_obj_file_with_linker_options()`, reimplemented from scratch because
 Apple ships neither the source nor the library (`libcctoolshelper`) that

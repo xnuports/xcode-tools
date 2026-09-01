@@ -1,100 +1,56 @@
 /*
- * xc_record - xctrace record subcommand implementation.
+ * xc_record - xctrace record subcommand.
  *
- * Launches Instruments.app (or falls back to the system xctrace if present)
- * to perform a trace recording with the specified template and target.
+ * Recording is not implemented, and this says so rather than arranging
+ * for it to appear to work.
+ *
+ * What recording takes is a trace of the kernel's own instrumentation --
+ * kdebug and kperf, reached through interfaces Apple does not publish --
+ * written into the .trace bundle, whose format is likewise undocumented.
+ * Neither is reimplemented here, and neither can be honestly faked.
+ *
+ * This file used to fork and exec /usr/bin/xctrace, or fall back to
+ * opening Instruments.app.  That made the command appear to succeed on a
+ * machine with Xcode installed, producing Apple's output from Apple's
+ * binary -- a tool that runs the tool it replaces is not a replacement,
+ * and one that looks like it works is worse than one that admits it does
+ * not.  Options are still parsed, so the diagnostic can be specific and
+ * so a caller's arguments are validated rather than ignored.
+ *
+ * Copyright (c) 2026 Sunneva N. Mariu <sunnevanattsol@gmail.com>
+ * SPDX-License-Identifier: BSD-3-Clause
  */
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <sys/wait.h>
-#include <sys/stat.h>
-#include <time.h>
 
 #include "xctrace.h"
 
 static const char *program_name = "xctrace";
 
-/* Locate the Instruments.app bundle. */
-static int
-find_instruments_app(char *buf, size_t n)
-{
-	const char *candidates[] = {
-		"/Applications/Xcode.app/Contents/Applications/Instruments.app",
-		"/Applications/Xcode-Beta.app/Contents/Applications/Instruments.app",
-		NULL,
-	};
-
-	struct stat st;
-
-	for (int i = 0; candidates[i] != NULL; i++) {
-		if (stat(candidates[i], &st) == 0 && S_ISDIR(st.st_mode)) {
-			snprintf(buf, n, "%s", candidates[i]);
-			return 0;
-		}
-	}
-
-	/* Try deriving from xcode-select. */
-	FILE *fp = popen("xcode-select -p 2>/dev/null", "r");
-	if (fp != NULL) {
-		char xcode_path[1024];
-		if (fgets(xcode_path, sizeof xcode_path, fp) != NULL) {
-			size_t len = strlen(xcode_path);
-			if (len > 0 && xcode_path[len - 1] == '\n')
-				xcode_path[len - 1] = '\0';
-			pclose(fp);
-
-			char *suffix = strstr(xcode_path,
-			    "/Contents/Developer");
-			if (suffix != NULL) {
-				*suffix = '\0';
-				snprintf(buf, n,
-				    "%s/Contents/Applications/"
-				    "Instruments.app", xcode_path);
-				struct stat st2;
-				if (stat(buf, &st2) == 0 && S_ISDIR(st2.st_mode))
-					return 0;
-			}
-		} else {
-			pclose(fp);
-		}
-	}
-
-	/* Fall back to /usr/bin/xctrace. */
-	if (access("/usr/bin/xctrace", X_OK) == 0) {
-		snprintf(buf, n, "/usr/bin/xctrace");
-		return 0;
-	}
-
-	return -1;
-}
-
-/* Build a default output path like Instruments would. */
 static void
-default_output_path(char *buf, size_t n)
+record_usage(FILE *fp)
 {
-	time_t t = time(NULL);
-	struct tm tm;
-	gmtime_r(&t, &tm);
-	char ts[32];
-	strftime(ts, sizeof ts, "%Y-%m-%d_%H-%M-%S", &tm);
-	snprintf(buf, n, "%s.trace", ts);
+	fprintf(fp,
+	    "Usage: xctrace record [options]\n"
+	    "  --output <path>          write the trace to <path>\n"
+	    "  --template <name|path>   trace template to record with\n"
+	    "  --device <name|udid>     device to record on\n"
+	    "  --attach <pid|name>      attach to a running process\n"
+	    "  --all-processes          record every process\n"
+	    "  --time-limit <duration>  stop after <duration>\n"
+	    "  --launch -- <command>    launch and record <command>\n"
+	    "  --no-prompt              do not prompt\n"
+	    "  --quiet                  suppress progress output\n"
+	    "\n"
+	    "Recording is not implemented; see xctrace list and"
+	    " xctrace export.\n");
 }
 
 /*
  * xc_record - handle "xctrace record ..."
- *
- * Options we parse:
- *   --output <path>         Output .trace file
- *   --template <name|path>  Trace template to use
- *   --device <name|UDID>    Target device
- *   --attach <pid|name>     Attach to a process
- *   --all-processes         Record all processes
- *   --time-limit <dur>      Recording duration
- *   --launch -- command     Launch a process
- *   --no-prompt             Skip prompts
  */
 int
 xc_record(int argc, char **argv, int optind, int quiet)
@@ -103,18 +59,25 @@ xc_record(int argc, char **argv, int optind, int quiet)
 	const char *template = NULL;
 	const char *device = NULL;
 	const char *attach = NULL;
-	int all_processes = 0;
 	const char *time_limit = NULL;
 	const char *launch_cmd = NULL;
+	int all_processes = 0;
 	int no_prompt = 0;
+
+	(void)output;
 	(void)device;
 	(void)attach;
 	(void)time_limit;
 	(void)launch_cmd;
+	(void)all_processes;
 	(void)no_prompt;
 
 	for (int i = optind; i < argc; i++) {
-		if (strcmp(argv[i], "--output") == 0 && i + 1 < argc) {
+		if (strcmp(argv[i], "--help") == 0 ||
+		    strcmp(argv[i], "-h") == 0) {
+			record_usage(stdout);
+			return 0;
+		} else if (strcmp(argv[i], "--output") == 0 && i + 1 < argc) {
 			output = argv[++i];
 		} else if (strcmp(argv[i], "--template") == 0 && i + 1 < argc) {
 			template = argv[++i];
@@ -135,93 +98,25 @@ xc_record(int argc, char **argv, int optind, int quiet)
 			no_prompt = 1;
 		} else if (strcmp(argv[i], "--quiet") == 0) {
 			quiet = 1;
-		} else if (argv[i][0] == '-' && argv[i][1] == '-' &&
-		    strcmp(argv[i], "--append-run") != 0 &&
-		    strcmp(argv[i], "--run-name") != 0 &&
-		    strcmp(argv[i], "--instrument") != 0 &&
-		    strcmp(argv[i], "--window") != 0 &&
-		    strcmp(argv[i], "--package") != 0 &&
-		    strcmp(argv[i], "--target-stdin") != 0 &&
-		    strcmp(argv[i], "--target-stdout") != 0 &&
-		    strcmp(argv[i], "--env") != 0 &&
-		    strcmp(argv[i], "--notify-tracing-started") != 0) {
-			if (!quiet)
-				fprintf(stderr, "%s: unknown option %s\n",
-				    program_name, argv[i]);
+		} else if (argv[i][0] == '-') {
+			fprintf(stderr, "%s: unknown option %s\n",
+			    program_name, argv[i]);
+			record_usage(stderr);
+			return 1;
 		}
 	}
 
-	/* If output not specified, generate a default one. */
-	char default_out[256];
-	if (output == NULL) {
-		default_output_path(default_out, sizeof default_out);
-		output = default_out;
-	}
+	fprintf(stderr, "%s: record is not implemented.\n", program_name);
+	fprintf(stderr, "%s: recording reads the kernel trace facilities"
+	    " through interfaces Apple\n", program_name);
+	fprintf(stderr, "%s: does not publish, and writes the undocumented"
+	    " .trace format; neither\n", program_name);
+	fprintf(stderr, "%s: is reimplemented here.  list and export do work.\n",
+	    program_name);
 
-	/* Find Instruments.app. */
-	char instr_path[1024];
-	if (find_instruments_app(instr_path, sizeof instr_path) != 0) {
-		fprintf(stderr, "%s: cannot locate Instruments.app or xctrace\n",
-		    program_name);
-		return 1;
-	}
+	if (template != NULL && !quiet)
+		fprintf(stderr, "%s: (template '%s' was not used)\n",
+		    program_name, template);
 
-	if (!quiet) {
-		fprintf(stderr, "%s: starting recording with template '%s'\n",
-		    program_name, template ? template : "Time Profiler");
-	}
-
-	/* Try to use system xctrace if available. */
-	if (strstr(instr_path, "/xctrace") != NULL) {
-		/* Fall back to system xctrace. */
-		pid_t pid = fork();
-		if (pid == 0) {
-			if (template && all_processes && time_limit) {
-				execl(instr_path, "xctrace", "record",
-				    "--output", output,
-				    "--template", template,
-				    "--all-processes",
-				    "--time-limit", time_limit,
-				    "--no-prompt", (char *)NULL);
-			} else if (template && all_processes) {
-				execl(instr_path, "xctrace", "record",
-				    "--output", output,
-				    "--template", template,
-				    "--all-processes",
-				    (char *)NULL);
-			} else {
-				execl(instr_path, "xctrace", "record",
-				    "--output", output,
-				    "--all-processes",
-				    (char *)NULL);
-			}
-			_exit(127);
-		}
-		int status = 0;
-		waitpid(pid, &status, 0);
-		return (WIFEXITED(status) && WEXITSTATUS(status) == 0) ? 0 : 1;
-	}
-
-	/* Launch Instruments.app with the template. */
-	char tmpl_path[1024];
-	snprintf(tmpl_path, sizeof tmpl_path, "/Applications/Xcode.app/"
-	    "Contents/Applications/Instruments.app/Contents/Resources/"
-	    "templates/%s.tracetemplate", template ? template : "Time Profiler");
-
-	struct stat st;
-	char cmd[2048];
-	if (stat(tmpl_path, &st) == 0) {
-		snprintf(cmd, sizeof cmd,
-		    "open -a Instruments '%s' 2>/dev/null", tmpl_path);
-	} else {
-		snprintf(cmd, sizeof cmd,
-		    "open -a Instruments 2>/dev/null");
-	}
-
-	int rc = system(cmd);
-	if (rc != 0 && !quiet)
-		fprintf(stderr, "%s: failed to launch Instruments.app\n",
-		    program_name);
-
-	return rc;
+	return 1;
 }
