@@ -99,3 +99,6 @@
 [submodule "src/xnu"]
 	path = src/apple-oss-distributions/xnu
 	url = https://github.com/apple-oss-distributions/xnu
+[submodule "tools/darwin-xnu-build"]
+	path = tools/darwin-xnu-build
+	url = https://github.com/blacktop/darwin-xnu-build
