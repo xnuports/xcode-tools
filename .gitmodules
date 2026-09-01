@@ -90,3 +90,6 @@
 [submodule "src/apple-oss-distributions/removefile"]
 	path = src/apple-oss-distributions/removefile
 	url = https://github.com/apple-oss-distributions/removefile
+[submodule "lib/libutil"]
+	path = lib/libutil
+	url = https://github.com/apple-oss-distributions/libutil
