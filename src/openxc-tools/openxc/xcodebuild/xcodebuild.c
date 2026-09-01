@@ -464,7 +464,15 @@ static char *detect_project(const xcodebuild_opts *opts, const char *project_dir
 /* Settings orchestration                                            */
 /* ------------------------------------------------------------------ */
 
-static settings_table *resolve_settings(xcodebuild_opts *opts, const char *devpath)
+/*
+ * The settings a target builds with.
+ *
+ * `target` is the target to resolve for, which is normally the one the
+ * command line asked for -- but a build resolves each dependency in
+ * turn, and what a target produces and what it is called are its own.
+ */
+static settings_table *settings_for(const xcodebuild_opts *opts,
+                                    const char *devpath, const char *target)
 {
 	const char *sdkname = xbuild_resolve_sdk_name(opts, devpath);
 	const char *tcname = xbuild_resolve_toolchain_name(opts, devpath, sdkname);
@@ -480,8 +488,8 @@ static settings_table *resolve_settings(xcodebuild_opts *opts, const char *devpa
 	if (settings_load_defaults(t, devpath, sdkname, tcname, configuration, arch) != 0)
 		fprintf(stderr, "xcodebuild: warning: could not load SDK info for '%s'\n", sdkname);
 
-	if (opts->target != NULL)
-		settings_set(t, "TARGET_NAME", opts->target);
+	if (target != NULL)
+		settings_set(t, "TARGET_NAME", target);
 
 	if (project != NULL) {
 		CFTypeRef root = project_load_pbxproj(project);
@@ -522,9 +530,9 @@ static settings_table *resolve_settings(xcodebuild_opts *opts, const char *devpa
 			    project_find_project_buildsettings(root, configuration));
 
 			CFTypeRef bs = project_find_buildsettings(root,
-			    opts->target, configuration, chosen, sizeof(chosen));
+			    target, configuration, chosen, sizeof(chosen));
 
-			if (opts->target == NULL && chosen[0] != '\0')
+			if (target == NULL && chosen[0] != '\0')
 				settings_set(t, "TARGET_NAME", chosen);
 
 			if (bs != NULL)
@@ -534,7 +542,7 @@ static settings_table *resolve_settings(xcodebuild_opts *opts, const char *devpa
 				char pt[128];
 
 				project_target_product_type(root,
-				    (opts->target != NULL) ? opts->target :
+				    (target != NULL) ? target :
 				    (chosen[0] != '\0' ? chosen : NULL),
 				    pt, sizeof(pt));
 				build_apply_product_settings(t, pt);
@@ -553,18 +561,35 @@ static settings_table *resolve_settings(xcodebuild_opts *opts, const char *devpa
 	}
 
 	for (size_t i = 0; i < opts->n_overrides; i++) {
-		char *eq = strchr(opts->overrides[i], '=');
+		const char *eq = strchr(opts->overrides[i], '=');
 		if (eq != NULL) {
-			*eq = '\0';
-			char *expanded = settings_expand(t, eq + 1);
-			settings_set(t, opts->overrides[i], expanded);
-			*eq = '=';
+			char key[256];
+			char *expanded;
+
+			snprintf(key, sizeof(key), "%.*s",
+			         (int)(eq - opts->overrides[i]),
+			         opts->overrides[i]);
+			expanded = settings_expand(t, eq + 1);
+			settings_set(t, key, expanded);
 			free(expanded);
 		}
 	}
 
 	settings_set(t, "ACTION", opts->action ? opts->action : "build");
 	return t;
+}
+
+static settings_table *resolve_settings(const xcodebuild_opts *opts,
+                                        const char *devpath)
+{
+	return settings_for(opts, devpath, opts->target);
+}
+
+settings_table *xbuild_settings_for_target(const xcodebuild_opts *opts,
+                                           const char *devpath,
+                                           const char *target)
+{
+	return settings_for(opts, devpath, target);
 }
 
 /* ------------------------------------------------------------------ */

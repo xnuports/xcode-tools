@@ -162,6 +162,9 @@ const char *xbuild_resolve_sdk_name(const xcodebuild_opts *opts, const char *dev
 const char *xbuild_resolve_toolchain_name(const xcodebuild_opts *opts, const char *devpath, const char *sdkname);
 
 /* build.c -- compile and link a target's sources. */
+settings_table *xbuild_settings_for_target(const xcodebuild_opts *opts,
+    const char *devpath, const char *target);
+
 int build_run(const char *project, settings_table *t,
               const xcodebuild_opts *opts, const char *devpath);
 void build_apply_product_settings(settings_table *t, const char *product_type);
