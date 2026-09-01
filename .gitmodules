@@ -75,3 +75,6 @@
 [submodule "lib/libpthread"]
 	path = lib/libpthread
 	url = https://github.com/apple-oss-distributions/libpthread
+[submodule "lib/libmalloc"]
+	path = lib/libmalloc
+	url = https://github.com/apple-oss-distributions/libmalloc
