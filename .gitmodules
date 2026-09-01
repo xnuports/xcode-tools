@@ -102,3 +102,6 @@
 [submodule "tools/darwin-xnu-build"]
 	path = tools/darwin-xnu-build
 	url = https://github.com/blacktop/darwin-xnu-build
+[submodule "tools/darwin-dyld-build"]
+	path = tools/darwin-dyld-build
+	url = https://github.com/blacktop/darwin-dyld-build
