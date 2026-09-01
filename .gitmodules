@@ -72,3 +72,6 @@
 [submodule "lib/libc"]
 	path = lib/libc
 	url = https://github.com/apple-oss-distributions/Libc
+[submodule "lib/libpthread"]
+	path = lib/libpthread
+	url = https://github.com/apple-oss-distributions/libpthread
