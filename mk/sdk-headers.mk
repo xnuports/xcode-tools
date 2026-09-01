@@ -64,6 +64,16 @@ sdk-headers:
 	@cp -Rf ${LIBC}/include/${d}/. ${SDK_INC}/${d}/ 2>/dev/null || true
 .endfor
 
+	# architecture/, which the Mach-O headers reach through for byte
+	# order.
+	@mkdir -p ${SDK_INC}/architecture
+	@cp -Rf ${XNU}/EXTERNAL_HEADERS/architecture/. ${SDK_INC}/architecture/ 2>/dev/null || true
+
+	# The Mach-O format headers.  Anything reading or writing a binary
+	# includes these, and nothing else in the tree provides them.
+	@mkdir -p ${SDK_INC}/mach-o
+	@cp -Rf ${XNU}/EXTERNAL_HEADERS/mach-o/. ${SDK_INC}/mach-o/ 2>/dev/null || true
+
 	# The kernel's user-facing interfaces.
 	@cp -f ${XNU}/bsd/sys/*.h ${SDK_INC}/sys/ 2>/dev/null || true
 	# The syscall wrappers' own headers, which unistd.h includes.
@@ -134,6 +144,20 @@ sdk-headers:
 	@mkdir -p ${SDK_INC}/msun
 	@cp -f ${MSUN}/math.h ${SDK_INC}/msun/ 2>/dev/null || true
 	@cp -f ${MSUN}/math-darwin.h ${SDK_INC}/math.h 2>/dev/null || true
+
+	# Select the platform in sys/cdefs.h.
+	#
+	# xnu's copy decides __DARWIN_ONLY_UNIX_CONFORMANCE and its
+	# neighbours from XNU_PLATFORM_*, which xnu's own build defines and
+	# a compiler does not.  With none of them set, arm64 falls to the
+	# conformance-aliasing branch meant for 32-bit Intel, and stdio.h
+	# declares fopen as fopen$UNIX2003 -- a symbol this system stopped
+	# exporting long ago, so anything calling it compiles and then
+	# fails to link.  Apple's SDK carries the already-selected header;
+	# this selects it the same way, for the platform this SDK is.
+	@printf '#define XNU_PLATFORM_MacOSX 1\n' > ${SDK_INC}/sys/cdefs.h.new
+	@cat ${SDK_INC}/sys/cdefs.h >> ${SDK_INC}/sys/cdefs.h.new
+	@mv ${SDK_INC}/sys/cdefs.h.new ${SDK_INC}/sys/cdefs.h
 
 	# Libc's headers carry sections meant for building Libc itself,
 	# which an SDK does not ship -- see mk/scripts/strip-libc-private.sh.
