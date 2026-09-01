@@ -227,13 +227,19 @@ Two clean builds of the default set produce byte-identical binaries.
   building Libc itself, which reference headers no SDK ships, and Apple's
   install strips them — so does ours.
 
-  Not finished, and one of these is a hard limit. **C++ still does not
-  compile**: libc++'s `math.h` wraps the C library's, and there is no `math.h`
-  to wrap — Apple publishes no Libm, and it is absent from the macOS 26.5
-  manifest, so it cannot be built from open source at all. Some C headers
-  (`unistd.h`, `pthread.h`) still fail on availability macros whose definitions
-  exist only in Apple's shipped SDK. And the frameworks have no open-source
-  release either. An SDK built here does C and POSIX and stops there.
+  **C and C++ both compile, link and run against it.** `math.h` is the one
+  header vendored rather than built — Apple publishes no Libm, so it comes from
+  FreeBSD's msun (see `lib/msun/README.md`), with an adapter supplying the
+  visibility macros msun expects and Apple's `cdefs.h` does not define.
+
+  Two of xnu's headers are older than what current Libc and libmalloc headers
+  need, so the SDK build widens them as it installs: the availability macros
+  stop at four platforms where headers now name seven, and they know nothing of
+  visionos, bridgeos or driverkit.
+
+  Not finished: the frameworks. Foundation, AppKit and the rest have no
+  open-source release, so an SDK built here does C, C++ and POSIX and stops
+  there. `MacOSX.Internal.sdk` remains layout only.
 
   `MacOSX.Internal.sdk` remains layout only. The internal one is the SDK Apple builds the system against
   and does not ship: same shape as the public bundle plus `usr/local/include`

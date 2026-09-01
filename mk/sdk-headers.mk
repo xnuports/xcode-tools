@@ -38,6 +38,7 @@ COPYFILE=	${TOP}/src/apple-oss-distributions/copyfile
 REMOVEFILE=	${TOP}/src/apple-oss-distributions/removefile
 LIBDISPATCH=	${TOP}/lib/libdispatch
 LLVM_BUILD=	${TOP}/build/ports/llvm/build
+MSUN=		${TOP}/lib/msun
 
 sdk-headers:
 	@${ECHO} "sdk: installing headers into MacOSX.sdk/usr/include"
@@ -88,9 +89,10 @@ sdk-headers:
 
 	# Threads, allocation, blocks, and the rest.
 	@cp -Rf ${LIBPTHREAD}/include/pthread/. ${SDK_INC}/pthread/ 2>/dev/null || true
-	# pthread.h is inside the pthread/ directory in the source and at
-	# the top level in an SDK; it is installed as both.
+	# pthread.h and sched.h are inside the pthread/ directory in the
+	# source and at the top level in an SDK; they are installed as both.
 	@cp -f ${LIBPTHREAD}/include/pthread/pthread.h ${SDK_INC}/ 2>/dev/null || true
+	@cp -f ${LIBPTHREAD}/include/pthread/sched.h ${SDK_INC}/ 2>/dev/null || true
 	@cp -Rf ${LIBPTHREAD}/include/sys/. ${SDK_INC}/sys/ 2>/dev/null || true
 	@cp -f ${LIBMALLOC}/include/malloc/*.h ${SDK_INC}/malloc/ 2>/dev/null || true
 	@cp -f ${LIBCLOSURE}/Block.h ${LIBCLOSURE}/Block_private.h ${SDK_INC}/ 2>/dev/null || true
@@ -119,6 +121,19 @@ sdk-headers:
 	    ${SDK_INC}/sys/_posix_availability.h > /dev/null 2>&1 || true
 	@sh ${XNU}/bsd/sys/make_symbol_aliasing.sh "${SDK_ROOT}" \
 	    ${SDK_INC}/sys/_symbol_aliasing.h > /dev/null 2>&1 || true
+
+	# xnu's availability macros stop at four platforms and current
+	# headers call them with seven -- see the script.
+	@${TOP}/mk/scripts/extend-availability.sh ${SDK_INC} || true
+
+	# math.h, the one header here that is vendored rather than built.
+	# Apple publishes no Libm, so there is nothing to build it from --
+	# see lib/msun/README.md.  Only the declarations come from here;
+	# the implementations are the system's, reached through the
+	# libSystem stub at link time.
+	@mkdir -p ${SDK_INC}/msun
+	@cp -f ${MSUN}/math.h ${SDK_INC}/msun/ 2>/dev/null || true
+	@cp -f ${MSUN}/math-darwin.h ${SDK_INC}/math.h 2>/dev/null || true
 
 	# Libc's headers carry sections meant for building Libc itself,
 	# which an SDK does not ship -- see mk/scripts/strip-libc-private.sh.
@@ -163,6 +178,10 @@ sdk-stubs:
 	    ln -sfn libc++.1.tbd ${SDK_LIB}/libc++.tbd || true
 	@${TOP}/mk/scripts/make-tbd.sh /usr/lib/libobjc.A.dylib \
 	    ${SDK_LIB}/libobjc.A.tbd 2>/dev/null || true
+	# libc++abi carries the personality routine every C++ program
+	# references for exception unwinding, even one that throws nothing.
+	@${TOP}/mk/scripts/make-tbd.sh /usr/lib/libc++abi.dylib \
+	    ${SDK_LIB}/libc++abi.tbd 2>/dev/null || true
 	@[ -f ${SDK_LIB}/libobjc.A.tbd ] && \
 	    ln -sfn libobjc.A.tbd ${SDK_LIB}/libobjc.tbd || true
 

@@ -44,10 +44,17 @@ reexports=$(dyld_info -dependents "$INSTALL_NAME" 2>/dev/null |
 
 : > "$TMP"
 for lib in $libs; do
-	# The listing is "offset symbol"; take the symbol, and skip the
-	# header lines and anything that is not one.
-	dyld_info -exports "$lib" 2>/dev/null |
-		awk 'NF == 2 && $1 ~ /^0x/ { print $2 }' >> "$TMP" || true
+	# Two shapes appear in the listing.  Most symbols are "offset
+	# symbol"; a symbol the library re-exports from another is
+	# "[re-export] _name (_other from libfoo)" instead.  Taking only
+	# the first shape loses the second, and the second is where the
+	# string and memory routines live -- libsystem_c re-exports
+	# _strlen from libsystem_platform, so a stub built without them
+	# compiles C and then fails to link anything using <string>.
+	dyld_info -exports "$lib" 2>/dev/null | awk '
+		NF == 2 && $1 ~ /^0x/  { print $2 }
+		$1 == "[re-export]"    { print $2 }
+	' >> "$TMP" || true
 done
 
 sort -u "$TMP" -o "$TMP"
