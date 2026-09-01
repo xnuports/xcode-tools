@@ -21,6 +21,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include "plistw.h"
 #include "xcstringstool.h"
 
 static const char *program_name = "xcstringstool";
@@ -157,39 +158,6 @@ positionalize(const char *s, const struct spec *specs, size_t nspecs)
 	return out;
 }
 
-/* ------------------------------------------------------------------ */
-/* plist output                                                         */
-/* ------------------------------------------------------------------ */
-
-static void
-put_xml_escaped(FILE *fp, const char *s)
-{
-	for (; *s != '\0'; s++) {
-		switch (*s) {
-		case '&': fputs("&amp;", fp); break;
-		case '<': fputs("&lt;", fp); break;
-		case '>': fputs("&gt;", fp); break;
-		default:  fputc(*s, fp); break;
-		}
-	}
-}
-
-static void
-plist_header(FILE *fp)
-{
-	fputs("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-	      "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\""
-	      " \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n"
-	      "<plist version=\"1.0\">\n"
-	      "<dict>\n", fp);
-}
-
-static void
-plist_footer(FILE *fp)
-{
-	fputs("</dict>\n</plist>\n", fp);
-}
-
 static int
 mkdirs(const char *path)
 {
@@ -308,26 +276,25 @@ collect_keys(const json_node *strings, const char **out, size_t max)
 }
 
 /*
- * Write one language's entries, in key order.
+ * Build one language's entries into a dictionary.
  *
- * Which kinds are wanted depends on the file being written: a .strings
- * holds the plain values, a .stringsdict the plural ones -- except under
- * --format stringsdictOnly, where no .strings is produced at all and
- * both kinds go into the .stringsdict together, interleaved by key.
+ * Which kinds are wanted depends on the file: a .strings holds the plain
+ * values, a .stringsdict the plural ones -- except under --format
+ * stringsdictOnly, where no .strings is produced at all and both kinds
+ * go into the .stringsdict together.
  *
- * Returns the number written and counts, in *errors, the plurals that do
- * not reference a number: the rule has nothing to count then, and the
- * frameworks cannot select a variant.  Every offender is reported rather
- * than just the first, so one run names all the work.  Passing a NULL fp
- * counts without writing, which is how a language with nothing to say is
- * kept from producing an empty file.
+ * The document is built rather than written, so the XML and binary forms
+ * come from one description.  Returns the number of entries added and
+ * counts, in *errors, the plurals that do not reference a number: the
+ * rule has nothing to count then, and the frameworks cannot select a
+ * variant.  Every offender is reported, so one run names all the work.
  */
 static long
-write_entries(FILE *fp, const json_node *strings, const char **keys,
+build_entries(pw_node *out, const json_node *strings, const char **keys,
     size_t nkeys, const char *lang, const char *input,
     int want_plain, int want_plural, int *errors)
 {
-	long written = 0;
+	long added = 0;
 	size_t i;
 
 	for (i = 0; i < nkeys; i++) {
@@ -338,6 +305,8 @@ write_entries(FILE *fp, const json_node *strings, const char **keys,
 		struct spec specs[32];
 		size_t nspecs, numeric_index = 0, c;
 		const char *sample = NULL;
+		pw_node *pd, *vd;
+		char fmtkey[32];
 
 		if (loc == NULL)
 			continue;
@@ -353,14 +322,9 @@ write_entries(FILE *fp, const json_node *strings, const char **keys,
 			if ((value = translated_value(loc)) == NULL)
 				continue;
 
-			if (fp != NULL) {
-				fputs("\t<key>", fp);
-				put_xml_escaped(fp, keys[i]);
-				fputs("</key>\n\t<string>", fp);
-				put_xml_escaped(fp, value);
-				fputs("</string>\n", fp);
-			}
-			written++;
+			if (pw_dict_set(out, keys[i], pw_string(value)) != 0)
+				return -1;
+			added++;
 			continue;
 		}
 
@@ -402,25 +366,20 @@ write_entries(FILE *fp, const json_node *strings, const char **keys,
 			continue;
 		}
 
-		if (fp == NULL) {
-			written++;
-			continue;
-		}
+		if ((pd = pw_dict()) == NULL || (vd = pw_dict()) == NULL)
+			return -1;
 
-		fputs("\t<key>", fp);
-		put_xml_escaped(fp, keys[i]);
-		fputs("</key>\n\t<dict>\n"
-		      "\t\t<key>NSStringLocalizedFormatKey</key>\n\t\t<string>", fp);
 		if (nspecs > 1)
-			fprintf(fp, "%%%zu$#@value@", numeric_index);
+			snprintf(fmtkey, sizeof(fmtkey), "%%%zu$#@value@",
+			    numeric_index);
 		else
-			fputs("%#@value@", fp);
-		fputs("</string>\n\t\t<key>value</key>\n\t\t<dict>\n"
-		      "\t\t\t<key>NSStringFormatSpecTypeKey</key>\n"
-		      "\t\t\t<string>NSStringPluralRuleType</string>\n"
-		      "\t\t\t<key>NSStringFormatValueTypeKey</key>\n\t\t\t<string>", fp);
-		fputs(specs[numeric_index - 1].type, fp);
-		fputs("</string>\n", fp);
+			snprintf(fmtkey, sizeof(fmtkey), "%%#@value@");
+
+		pw_dict_set(pd, "NSStringLocalizedFormatKey", pw_string(fmtkey));
+		pw_dict_set(vd, "NSStringFormatSpecTypeKey",
+		    pw_string("NSStringPluralRuleType"));
+		pw_dict_set(vd, "NSStringFormatValueTypeKey",
+		    pw_string(specs[numeric_index - 1].type));
 
 		for (c = 0; c < json_count(plural); c++) {
 			const char *category = plural->items[c]->key;
@@ -437,17 +396,18 @@ write_entries(FILE *fp, const json_node *strings, const char **keys,
 				rewritten = positionalize(v, vs, vn);
 			}
 
-			fprintf(fp, "\t\t\t<key>%s</key>\n\t\t\t<string>", category);
-			put_xml_escaped(fp, (rewritten != NULL) ? rewritten : v);
-			fputs("</string>\n", fp);
+			pw_dict_set(vd, category,
+			    pw_string((rewritten != NULL) ? rewritten : v));
 			free(rewritten);
 		}
 
-		fputs("\t\t</dict>\n\t</dict>\n", fp);
-		written++;
+		pw_dict_set(pd, "value", vd);
+		if (pw_dict_set(out, keys[i], pd) != 0)
+			return -1;
+		added++;
 	}
 
-	return written;
+	return added;
 }
 
 /* ------------------------------------------------------------------ */
@@ -465,12 +425,6 @@ xs_compile(const struct xs_compile_opts *opts)
 	char base[256];
 	const char *slash, *dot;
 	int rc = 0;
-
-	if (opts->binary) {
-		fprintf(stderr, "%s: --serialization-format binary is not"
-		    " implemented; text is.\n", program_name);
-		return 1;
-	}
 
 	if ((text = xs_read_file(opts->input, &len)) == NULL) {
 		fprintf(stderr, "%s: cannot read %s\n", program_name, opts->input);
@@ -516,57 +470,79 @@ xs_compile(const struct xs_compile_opts *opts)
 		 * plain values join the plurals in the .stringsdict.
 		 */
 		int dict_takes_plain = (opts->format == XS_STRINGSDICT_ONLY);
+		pw_node *sd = NULL, *dd = NULL;
 
-		/* Count first: a language with nothing to say gets no file. */
-		n_strings = dict_takes_plain ? 0 :
-		    write_entries(NULL, strings, keys, nkeys, lang, opts->input,
-			1, 0, NULL);
-		n_dict = write_entries(NULL, strings, keys, nkeys, lang,
+		snprintf(dir, sizeof(dir), "%s/%s.lproj", opts->output_dir, lang);
+
+		if (!dict_takes_plain) {
+			if ((sd = pw_dict()) == NULL) {
+				rc = 1;
+				break;
+			}
+			n_strings = build_entries(sd, strings, keys, nkeys, lang,
+			    opts->input, 1, 0, NULL);
+		} else {
+			n_strings = 0;
+		}
+
+		if ((dd = pw_dict()) == NULL) {
+			pw_free(sd);
+			rc = 1;
+			break;
+		}
+		n_dict = build_entries(dd, strings, keys, nkeys, lang,
 		    opts->input, dict_takes_plain, 1, &errors);
-		if (errors > 0) {
+
+		if (errors > 0 || n_strings < 0 || n_dict < 0) {
+			pw_free(sd);
+			pw_free(dd);
 			rc = 1;
 			continue;	/* still report the other languages */
 		}
 
-		snprintf(dir, sizeof(dir), "%s/%s.lproj", opts->output_dir, lang);
-
+		/* A language with nothing to say produces no file. */
 		if (n_strings > 0) {
 			snprintf(path, sizeof(path), "%s/%s.strings", dir, base);
 			if (opts->dry_run) {
 				printf("%s\n", path);
 			} else if (mkdirs(dir) != 0 ||
-			    (fp = fopen(path, "w")) == NULL) {
+			    (fp = fopen(path, "wb")) == NULL) {
 				fprintf(stderr, "%s: cannot write %s\n",
 				    program_name, path);
 				rc = 1;
-				break;
 			} else {
-				plist_header(fp);
-				write_entries(fp, strings, keys, nkeys, lang,
-				    opts->input, 1, 0, NULL);
-				plist_footer(fp);
+				if ((opts->binary ? pw_write_binary(fp, sd) :
+				    pw_write_xml(fp, sd)) != 0) {
+					fprintf(stderr, "%s: cannot serialize %s\n",
+					    program_name, path);
+					rc = 1;
+				}
 				fclose(fp);
 			}
 		}
 
-		if (n_dict > 0) {
+		if (n_dict > 0 && rc == 0) {
 			snprintf(path, sizeof(path), "%s/%s.stringsdict", dir, base);
 			if (opts->dry_run) {
 				printf("%s\n", path);
 			} else if (mkdirs(dir) != 0 ||
-			    (fp = fopen(path, "w")) == NULL) {
+			    (fp = fopen(path, "wb")) == NULL) {
 				fprintf(stderr, "%s: cannot write %s\n",
 				    program_name, path);
 				rc = 1;
-				break;
 			} else {
-				plist_header(fp);
-				write_entries(fp, strings, keys, nkeys, lang,
-				    opts->input, dict_takes_plain, 1, NULL);
-				plist_footer(fp);
+				if ((opts->binary ? pw_write_binary(fp, dd) :
+				    pw_write_xml(fp, dd)) != 0) {
+					fprintf(stderr, "%s: cannot serialize %s\n",
+					    program_name, path);
+					rc = 1;
+				}
 				fclose(fp);
 			}
 		}
+
+		pw_free(sd);
+		pw_free(dd);
 	}
 
 	json_free(root);

@@ -200,11 +200,12 @@ Two clean builds of the default set produce byte-identical binaries.
 - **Swift** — the submodule is there, not yet built.
 - **Python, Git** — sources carried (CPython 3.14.6, git 2.50.1, the version Apple's Git-155 wraps), not yet ported to `mk/port.mk`.
 - **The `xc*` family** — `xccov`, `xcresulttool`, `xcsigningtool`, `xctest`,
-  `xcdevice`, `xcdiagnose`. `xcstringstool` does `print` and `compile`, whose
-  output is byte-identical to Apple's for plain strings, plurals, `--language`
-  and both `--format` values; its `sync`, `extract`, `generate-symbols` and
-  `installloc` are not implemented, nor is `--serialization-format binary`,
-  which needs a binary property list writer.
+  `xcdevice`, `xcdiagnose`. `xcstringstool` does `print` and `compile`, in both
+  serialization formats; its `sync`, `extract`, `generate-symbols` and
+  `installloc` are not implemented. Compiled XML is byte-identical to Apple's,
+  and the binary form is equal as a property list — CoreFoundation writes dict
+  keys in hash order, which is stable but reproducible only by reproducing its
+  hash, so ours are sorted.
 - **`codesign` omits the Apple hash-agility version 2 attribute.** Its value is
   keyed by an algorithm identifier with no documented mapping, and a wrong key
   yields an attribute that makes the signature unreadable rather than merely

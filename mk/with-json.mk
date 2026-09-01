@@ -7,3 +7,6 @@
 
 T_CFLAGS+=	-I${TOP}/src/openxc-tools/openxc/common
 T_SRCS+=	src/openxc-tools/openxc/common/json.c
+
+# The writer side of property lists, for tools that emit them.
+T_SRCS+=	src/openxc-tools/openxc/common/plistw.c
