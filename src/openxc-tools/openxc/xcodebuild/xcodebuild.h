@@ -35,6 +35,8 @@
 #ifndef __XCODEBUILD_H__
 #define __XCODEBUILD_H__
 
+#include <CoreFoundation/CoreFoundation.h>
+
 #include <stddef.h>
 #include "plist.h"
 
@@ -86,7 +88,7 @@ int settings_emit(settings_table *t, int as_json, int pretty);
 
 /* Merge string entries of a plist dict (e.g. a pbxproj buildSettings node)
  * into the settings table. Array/dict values are flattened. */
-void settings_merge_plist_dict(settings_table *t, const plist_node *dict);
+void settings_merge_plist_dict(settings_table *t, CFTypeRef dict);
 
 /* ------------------------------------------------------------------ */
 /* Parsed command-line options.                                        */

@@ -40,6 +40,8 @@
 #include <dirent.h>
 #include <limits.h>
 
+#include <CoreFoundation/CoreFoundation.h>
+
 #include "xcodebuild.h"
 #include "devpath.h"
 #include "sdkpath.h"
@@ -484,18 +486,24 @@ static settings_table *resolve_settings(xcodebuild_opts *opts, const char *devpa
 		settings_set(t, "TARGET_NAME", opts->target);
 
 	if (project != NULL) {
-		plist_node *root = project_load_pbxproj(project);
+		CFTypeRef root = project_load_pbxproj(project);
 		if (root != NULL) {
-			plist_node *pobj = project_get_project_object(root);
+			CFTypeRef pobj = project_get_project_object(root);
 			if (pobj != NULL) {
-				plist_node *pname = plist_dict_get(pobj, "name");
-				if (pname != NULL && pname->type == PLIST_STRING)
-					settings_set(t, "PROJECT_NAME", pname->string);
+				CFTypeRef pname = CFDictionaryGetValue(
+				    (CFDictionaryRef)pobj, CFSTR("name"));
+				char buf[512];
+
+				if (pname != NULL &&
+				    CFGetTypeID(pname) == CFStringGetTypeID() &&
+				    CFStringGetCString((CFStringRef)pname, buf,
+					sizeof(buf), kCFStringEncodingUTF8))
+					settings_set(t, "PROJECT_NAME", buf);
 			}
-			plist_node *bs = project_find_buildsettings(root, opts->target, configuration);
+			CFTypeRef bs = project_find_buildsettings(root, opts->target, configuration);
 			if (bs != NULL)
 				settings_merge_plist_dict(t, bs);
-			plist_free(root);
+			CFRelease(root);
 		} else if (opts->verbose) {
 			fprintf(stderr, "xcodebuild: warning: could not parse project '%s'\n", project);
 		}

@@ -37,6 +37,8 @@
 #ifndef __PROJECT_H__
 #define __PROJECT_H__
 
+#include <CoreFoundation/CoreFoundation.h>
+
 #include "xcodebuild.h"
 #include "plist.h"
 
@@ -46,15 +48,15 @@ char *project_pbxproj_path(const char *project);
 
 /* Load and parse a project.pbxproj into a plist tree. Caller releases with
  * plist_free(). Returns NULL on failure. */
-plist_node *project_load_pbxproj(const char *project);
+CFTypeRef project_load_pbxproj(const char *project);
 
 /* Resolve a target/config's buildSettings node (borrowed from `root`). */
-plist_node *project_find_buildsettings(plist_node *root, const char *target,
+CFTypeRef project_find_buildsettings(CFTypeRef root, const char *target,
                                        const char *configuration);
 
 /* Return the root PBXProject object node for a parsed project (the object
  * referenced by rootObject). Returns NULL if absent. Borrowed from `root`. */
-plist_node *project_get_project_object(const plist_node *root);
+CFTypeRef project_get_project_object(CFTypeRef root);
 
 /* Print the "xcodebuild -list" summary for the given project/workspace. */
 int project_list(const char *project, const char *workspace, const xcodebuild_opts *opts);

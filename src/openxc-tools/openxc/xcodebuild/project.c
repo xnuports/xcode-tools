@@ -40,6 +40,8 @@
 #include <limits.h>
 #include <unistd.h>
 
+#include <CoreFoundation/CoreFoundation.h>
+
 #include "xcodebuild.h"
 #include "plist.h"
 #include "project.h"
@@ -118,7 +120,94 @@ char *project_pbxproj_path(const char *project)
 	return NULL;
 }
 
-plist_node *project_load_pbxproj(const char *project)
+
+/* ------------------------------------------------------------------ */
+/* Property list access                                                 */
+/*                                                                      */
+/* A .pbxproj is an OpenStep-format property list, and Apple's          */
+/* xcodebuild reads it with CoreFoundation, which parses that format    */
+/* directly.  This tree used to parse it by hand and would give up on   */
+/* real projects -- a stock Xcode template reported "missing a          */
+/* rootObject" that CF finds without trouble.                           */
+/*                                                                      */
+/* These wrappers keep the walking code reading the way it did: fetch   */
+/* by key, index an array, ask for a string, with the type checked and  */
+/* a NULL container tolerated at every step.                            */
+/* ------------------------------------------------------------------ */
+
+static CFTypeRef
+pget(CFTypeRef dict, const char *key)
+{
+	CFStringRef k;
+	CFTypeRef v;
+
+	if (dict == NULL || CFGetTypeID(dict) != CFDictionaryGetTypeID())
+		return NULL;
+
+	if ((k = CFStringCreateWithCString(NULL, key, kCFStringEncodingUTF8)) == NULL)
+		return NULL;
+
+	v = CFDictionaryGetValue((CFDictionaryRef)dict, k);
+	CFRelease(k);
+	return v;
+}
+
+static CFTypeRef
+pat(CFTypeRef array, CFIndex i)
+{
+	if (array == NULL || CFGetTypeID(array) != CFArrayGetTypeID())
+		return NULL;
+	if (i < 0 || i >= CFArrayGetCount((CFArrayRef)array))
+		return NULL;
+
+	return CFArrayGetValueAtIndex((CFArrayRef)array, i);
+}
+
+static CFIndex
+pcount(CFTypeRef array)
+{
+	if (array == NULL || CFGetTypeID(array) != CFArrayGetTypeID())
+		return 0;
+
+	return CFArrayGetCount((CFArrayRef)array);
+}
+
+static int
+pis_dict(CFTypeRef v)
+{
+	return v != NULL && CFGetTypeID(v) == CFDictionaryGetTypeID();
+}
+
+/*
+ * A property list string as C.  Copies into the caller's buffer, since
+ * a CFString need not hold one -- returns NULL for anything that is not
+ * a string, which is what every caller checks.
+ */
+static const char *
+pstr(CFTypeRef v, char *buf, size_t len)
+{
+	if (v == NULL || CFGetTypeID(v) != CFStringGetTypeID())
+		return NULL;
+	if (!CFStringGetCString((CFStringRef)v, buf, (CFIndex)len,
+	    kCFStringEncodingUTF8))
+		return NULL;
+
+	return buf;
+}
+
+/* Member of objects named by the string at key, when both are present. */
+static CFTypeRef
+pderef(CFTypeRef objects, CFTypeRef id_value)
+{
+	char id[512];
+
+	if (pstr(id_value, id, sizeof(id)) == NULL)
+		return NULL;
+
+	return pget(objects, id);
+}
+
+CFTypeRef project_load_pbxproj(const char *project)
 {
 	char *path = project_pbxproj_path(project);
 	if (path == NULL)
@@ -128,8 +217,21 @@ plist_node *project_load_pbxproj(const char *project)
 	free(path);
 	if (text == NULL)
 		return NULL;
-	plist_node *root = plist_parse(text, len);
+
+	CFDataRef data = CFDataCreate(NULL, (const UInt8 *)text, (CFIndex)len);
 	free(text);
+	if (data == NULL)
+		return NULL;
+
+	CFPropertyListRef root = CFPropertyListCreateWithData(NULL, data,
+	    kCFPropertyListImmutable, NULL, NULL);
+	CFRelease(data);
+
+	if (root != NULL && !pis_dict(root)) {
+		CFRelease(root);
+		return NULL;
+	}
+
 	return root;
 }
 
@@ -137,57 +239,63 @@ plist_node *project_load_pbxproj(const char *project)
 /* Build-settings extraction                                            */
 /* ------------------------------------------------------------------ */
 
-static plist_node *get_objects_dict(plist_node *root, plist_node **out_root_obj_id)
+static CFTypeRef get_objects_dict(CFTypeRef root, CFTypeRef *out_root_obj_id)
 {
 	*out_root_obj_id = NULL;
-	if (root == NULL || root->type != PLIST_DICT)
+	if (!pis_dict(root))
 		return NULL;
-	plist_node *objects = plist_dict_get(root, "objects");
-	if (objects == NULL || objects->type != PLIST_DICT)
+
+	CFTypeRef objects = pget(root, "objects");
+	if (!pis_dict(objects))
 		return NULL;
-	plist_node *root_id = plist_dict_get(root, "rootObject");
+
+	CFTypeRef root_id = pget(root, "rootObject");
 	if (root_id == NULL)
 		return NULL;
+
 	*out_root_obj_id = root_id;
 	return objects;
 }
 
-plist_node *project_get_project_object(const plist_node *root)
+CFTypeRef project_get_project_object(CFTypeRef root)
 {
-	plist_node *root_id = NULL;
-	plist_node *objects = get_objects_dict((plist_node *)root, &root_id);
-	if (objects == NULL || root_id == NULL || root_id->type != PLIST_STRING)
+	CFTypeRef root_id = NULL;
+	CFTypeRef objects = get_objects_dict(root, &root_id);
+
+	if (objects == NULL || root_id == NULL)
 		return NULL;
-	return plist_dict_get(objects, root_id->string);
+
+	return pderef(objects, root_id);
 }
 
-plist_node *project_find_buildsettings(plist_node *root, const char *target,
-                                       const char *configuration)
+CFTypeRef project_find_buildsettings(CFTypeRef root, const char *target,
+                                     const char *configuration)
 {
-	plist_node *root_id = NULL;
-	plist_node *objects = get_objects_dict(root, &root_id);
-	if (objects == NULL || root_id == NULL || root_id->type != PLIST_STRING)
+	CFTypeRef root_id = NULL;
+	CFTypeRef objects = get_objects_dict(root, &root_id);
+	char name_buf[512];
+
+	if (objects == NULL || root_id == NULL)
 		return NULL;
 
-	plist_node *project_obj = plist_dict_get(objects, root_id->string);
-	if (project_obj == NULL || project_obj->type != PLIST_DICT)
+	CFTypeRef project_obj = pderef(objects, root_id);
+	if (!pis_dict(project_obj))
 		return NULL;
 
-	plist_node *targets = plist_dict_get(project_obj, "targets");
-	if (targets == NULL || targets->type != PLIST_ARRAY)
-		return NULL;
+	CFTypeRef targets = pget(project_obj, "targets");
+	CFTypeRef chosen = NULL;
 
-	plist_node *chosen = NULL;
-	for (size_t i = 0; i < targets->count; i++) {
-		plist_node *tid = plist_array_at(targets, i);
-		if (tid == NULL || tid->type != PLIST_STRING)
+	for (CFIndex i = 0; i < pcount(targets); i++) {
+		CFTypeRef tobj = pderef(objects, pat(targets, i));
+
+		if (!pis_dict(tobj))
 			continue;
-		plist_node *tobj = plist_dict_get(objects, tid->string);
-		if (tobj == NULL || tobj->type != PLIST_DICT)
-			continue;
-		plist_node *name = plist_dict_get(tobj, "name");
-		if (target != NULL && name != NULL && name->type == PLIST_STRING &&
-		    strcmp(name->string, target) == 0) {
+
+		const char *name = pstr(pget(tobj, "name"), name_buf,
+		    sizeof(name_buf));
+
+		if (target != NULL && name != NULL &&
+		    strcmp(name, target) == 0) {
 			chosen = tobj;
 			break;
 		}
@@ -197,34 +305,33 @@ plist_node *project_find_buildsettings(plist_node *root, const char *target,
 	if (chosen == NULL)
 		return NULL;
 
-	plist_node *clistid = plist_dict_get(chosen, "buildConfigurationList");
-	if (clistid == NULL || clistid->type != PLIST_STRING)
-		return NULL;
-	plist_node *clist = plist_dict_get(objects, clistid->string);
-	if (clist == NULL || clist->type != PLIST_DICT)
-		return NULL;
-	plist_node *configs = plist_dict_get(clist, "buildConfigurations");
-	if (configs == NULL || configs->type != PLIST_ARRAY)
+	CFTypeRef clist = pderef(objects, pget(chosen, "buildConfigurationList"));
+	if (!pis_dict(clist))
 		return NULL;
 
-	plist_node *first_cfg = NULL;
-	for (size_t i = 0; i < configs->count; i++) {
-		plist_node *cid = plist_array_at(configs, i);
-		if (cid == NULL || cid->type != PLIST_STRING)
+	CFTypeRef configs = pget(clist, "buildConfigurations");
+	CFTypeRef first_cfg = NULL;
+
+	for (CFIndex i = 0; i < pcount(configs); i++) {
+		CFTypeRef cfg = pderef(objects, pat(configs, i));
+
+		if (!pis_dict(cfg))
 			continue;
-		plist_node *cfg = plist_dict_get(objects, cid->string);
-		if (cfg == NULL || cfg->type != PLIST_DICT)
+
+		const char *cname = pstr(pget(cfg, "name"), name_buf,
+		    sizeof(name_buf));
+
+		if (cname == NULL)
 			continue;
-		plist_node *cname = plist_dict_get(cfg, "name");
-		if (cname != NULL && cname->type == PLIST_STRING) {
-			if (first_cfg == NULL)
-				first_cfg = cfg;
-			if (configuration != NULL && strcmp(cname->string, configuration) == 0)
-				return plist_dict_get(cfg, "buildSettings");
-		}
+		if (first_cfg == NULL)
+			first_cfg = cfg;
+		if (configuration != NULL && strcmp(cname, configuration) == 0)
+			return pget(cfg, "buildSettings");
 	}
+
 	if (configuration == NULL && first_cfg != NULL)
-		return plist_dict_get(first_cfg, "buildSettings");
+		return pget(first_cfg, "buildSettings");
+
 	return NULL;
 }
 
@@ -269,6 +376,12 @@ static int strvec_push_unique(strvec *v, const char *s)
 	return strvec_push(v, s);
 }
 
+/* Scheme names sort without regard to case, as xcodebuild prints them. */
+static int scheme_name_cmp(const void *a, const void *b)
+{
+	return strcasecmp(*(const char *const *)a, *(const char *const *)b);
+}
+
 static void strvec_free(strvec *v)
 {
 	for (size_t i = 0; i < v->count; i++)
@@ -282,129 +395,238 @@ static void strvec_free(strvec *v)
 /* Listing                                                             */
 /* ------------------------------------------------------------------ */
 
-static void collect_all_config_names(plist_node *objects, plist_node *target_ids,
+static void collect_all_config_names(CFTypeRef objects, CFTypeRef target_ids,
                                      strvec *out)
 {
+	char name_buf[512];
+
 	if (objects == NULL || target_ids == NULL)
 		return;
 
 	/* Collect from each target's buildConfigurationList. */
-	for (size_t i = 0; i < target_ids->count; i++) {
-		plist_node *tid = plist_array_at(target_ids, i);
-		if (tid == NULL || tid->type != PLIST_STRING)
-			continue;
-		plist_node *tobj = plist_dict_get(objects, tid->string);
-		if (tobj == NULL)
-			continue;
-		plist_node *clistid = plist_dict_get(tobj, "buildConfigurationList");
-		if (clistid == NULL || clistid->type != PLIST_STRING)
-			continue;
-		plist_node *clist = plist_dict_get(objects, clistid->string);
-		if (clist == NULL)
-			continue;
-		plist_node *configs = plist_dict_get(clist, "buildConfigurations");
-		if (configs == NULL || configs->type != PLIST_ARRAY)
-			continue;
-		for (size_t j = 0; j < configs->count; j++) {
-			plist_node *cid = plist_array_at(configs, j);
-			if (cid == NULL || cid->type != PLIST_STRING)
-				continue;
-			plist_node *cfg = plist_dict_get(objects, cid->string);
-			if (cfg == NULL)
-				continue;
-			plist_node *cname = plist_dict_get(cfg, "name");
-			if (cname != NULL && cname->type == PLIST_STRING)
-				strvec_push_unique(out, cname->string);
+	for (CFIndex i = 0; i < pcount(target_ids); i++) {
+		CFTypeRef tobj = pderef(objects, pat(target_ids, i));
+		CFTypeRef clist = pderef(objects,
+		    pget(tobj, "buildConfigurationList"));
+		CFTypeRef configs = pget(clist, "buildConfigurations");
+
+		for (CFIndex j = 0; j < pcount(configs); j++) {
+			CFTypeRef cfg = pderef(objects, pat(configs, j));
+			const char *cname = pstr(pget(cfg, "name"), name_buf,
+			    sizeof(name_buf));
+
+			if (cname != NULL)
+				strvec_push_unique(out, cname);
 		}
+	}
+}
+
+/*
+ * Targets of the projects this one references.
+ *
+ * A project may embed others through projectReferences, and Xcode
+ * creates a scheme for each of their targets too -- so xcodebuild -list
+ * shows them under Schemes while Targets stays the main project's own.
+ * The referenced path is relative to the directory holding the
+ * .xcodeproj, which is what it is resolved against here.
+ */
+static void
+collect_subproject_targets(CFTypeRef objects, CFTypeRef project_obj,
+    const char *project_path, strvec *out)
+{
+	CFTypeRef refs = pget(project_obj, "projectReferences");
+	char dir[PATH_MAX], name_buf[512];
+	const char *slash;
+
+	if (refs == NULL || project_path == NULL)
+		return;
+
+	snprintf(dir, sizeof(dir), "%s", project_path);
+	if ((slash = strrchr(dir, '/')) != NULL)
+		*(char *)slash = '\0';
+	else
+		snprintf(dir, sizeof(dir), ".");
+
+	for (CFIndex i = 0; i < pcount(refs); i++) {
+		CFTypeRef entry = pat(refs, i);
+		CFTypeRef fileref = pderef(objects, pget(entry, "ProjectRef"));
+		const char *rel = pstr(pget(fileref, "path"), name_buf,
+		    sizeof(name_buf));
+		char sub[PATH_MAX];
+		CFTypeRef subroot, subobjects, subproj, subtargets;
+		CFTypeRef subroot_id = NULL;
+
+		if (rel == NULL)
+			continue;
+
+		if (rel[0] == '/')
+			snprintf(sub, sizeof(sub), "%s", rel);
+		else
+			snprintf(sub, sizeof(sub), "%s/%s", dir, rel);
+
+		if ((subroot = project_load_pbxproj(sub)) == NULL)
+			continue;
+
+		subobjects = get_objects_dict(subroot, &subroot_id);
+		subproj = pderef(subobjects, subroot_id);
+		subtargets = pget(subproj, "targets");
+
+		for (CFIndex j = 0; j < pcount(subtargets); j++) {
+			CFTypeRef tobj = pderef(subobjects, pat(subtargets, j));
+			char tbuf[512];
+			const char *tname = pstr(pget(tobj, "name"), tbuf,
+			    sizeof(tbuf));
+
+			if (tname != NULL)
+				strvec_push_unique(out, tname);
+		}
+
+		CFRelease(subroot);
 	}
 }
 
 int project_list(const char *project, const char *workspace, const xcodebuild_opts *opts)
 {
 	(void)opts;
-	plist_node *root = project_load_pbxproj(project ? project : workspace);
+	CFTypeRef root = project_load_pbxproj(project ? project : workspace);
+	char name_buf[512];
+
 	if (root == NULL) {
 		fprintf(stderr, "xcodebuild: error: could not find project at '%s'\n",
 		        project ? project : (workspace ? workspace : "."));
 		return 1;
 	}
 
-	plist_node *root_id = NULL;
-	plist_node *objects = get_objects_dict(root, &root_id);
-	if (objects == NULL || root_id == NULL || root_id->type != PLIST_STRING) {
+	CFTypeRef root_id = NULL;
+	CFTypeRef objects = get_objects_dict(root, &root_id);
+	if (objects == NULL || root_id == NULL) {
 		fprintf(stderr, "xcodebuild: error: project is missing a rootObject\n");
-		plist_free(root);
+		CFRelease(root);
 		return 1;
 	}
 
-	plist_node *project_obj = plist_dict_get(objects, root_id->string);
+	CFTypeRef project_obj = pderef(objects, root_id);
 	if (project_obj == NULL) {
-		plist_free(root);
+		CFRelease(root);
 		return 1;
 	}
 
-	/* Print a banner. */
-	plist_node *name = plist_dict_get(project_obj, "name");
-	const char *proj_name = (name && name->type == PLIST_STRING) ? name->string : "project";
-	printf("Information about project %s:\n", proj_name);
+	/*
+	 * The project's name is its bundle's, not a key in the file: a
+	 * PBXProject carries no "name", so reading one there left every
+	 * real project reported as "project".
+	 */
+	const char *proj_name = pstr(pget(project_obj, "name"), name_buf,
+	    sizeof(name_buf));
+
+	if (proj_name == NULL) {
+		const char *src = project ? project : workspace;
+
+		if (src != NULL) {
+			const char *slash = strrchr(src, '/');
+			char *dot;
+
+			snprintf(name_buf, sizeof(name_buf), "%s",
+			    (slash != NULL) ? slash + 1 : src);
+			if ((dot = strrchr(name_buf, '.')) != NULL &&
+			    dot != name_buf)
+				*dot = '\0';
+			proj_name = name_buf;
+		}
+	}
+
+	printf("Information about project \"%s\":\n",
+	    (proj_name != NULL) ? proj_name : "project");
 
 	/* Targets. */
 	strvec targets = {0};
-	plist_node *tarr = plist_dict_get(project_obj, "targets");
-	if (tarr != NULL && tarr->type == PLIST_ARRAY) {
-		for (size_t i = 0; i < tarr->count; i++) {
-			plist_node *tid = plist_array_at(tarr, i);
-			plist_node *tobj = tid ? plist_dict_get(objects, tid->string) : NULL;
-			plist_node *tname = tobj ? plist_dict_get(tobj, "name") : NULL;
-			if (tname != NULL && tname->type == PLIST_STRING)
-				strvec_push(&targets, tname->string);
-		}
+	CFTypeRef tarr = pget(project_obj, "targets");
+	for (CFIndex i = 0; i < pcount(tarr); i++) {
+		CFTypeRef tobj = pderef(objects, pat(tarr, i));
+		const char *tname = pstr(pget(tobj, "name"), name_buf,
+		    sizeof(name_buf));
+
+		if (tname != NULL)
+			strvec_push(&targets, tname);
 	}
 	if (targets.count > 0) {
 		printf("    Targets:\n");
 		for (size_t i = 0; i < targets.count; i++)
 			printf("        %s\n", targets.items[i]);
+		printf("\n");
 	}
-	strvec_free(&targets);
 
-	/* Configurations. */
+	/*
+	 * Build configurations, with the note xcodebuild prints about
+	 * which one it will pick.  The blank lines and the wording are
+	 * part of the output anything parsing -list has to read.
+	 */
 	strvec configs = {0};
 	collect_all_config_names(objects, tarr, &configs);
 	if (configs.count > 0) {
-		printf("    Configurations:\n");
+		printf("    Build Configurations:\n");
 		for (size_t i = 0; i < configs.count; i++)
 			printf("        %s\n", configs.items[i]);
+		printf("\n");
+		printf("    If no build configuration is specified and"
+		    " -scheme is not passed then \"Release\" is used.\n");
+		printf("\n");
 	}
 	strvec_free(&configs);
 
-	/* Schemes (from the project's shared schemes). */
-	char proj_dir[PATH_MAX];
-	snprintf(proj_dir, sizeof(proj_dir), "%s", project ? project : (workspace ? workspace : "."));
-	char base[PATH_MAX];
-	snprintf(base, sizeof(base), "%s", proj_dir);
-	printf("    Schemes:\n");
-	int printed = 0;
-	char sdir[PATH_MAX];
+	/*
+	 * Schemes.  A project's shared schemes are files on disk, but
+	 * Xcode also creates one per target on demand, and xcodebuild
+	 * lists those too -- a project with a single shared scheme still
+	 * reports one per target.  The two sets are merged, and sorted
+	 * without regard to case, which is the order they are printed in.
+	 */
+	strvec schemes = {0};
+	char base[PATH_MAX], sdir[PATH_MAX];
+	DIR *d;
+
+	snprintf(base, sizeof(base), "%s",
+	    project ? project : (workspace ? workspace : "."));
 	snprintf(sdir, sizeof(sdir), "%s/xcshareddata/xcschemes", base);
-	DIR *d = opendir(sdir);
-	if (d != NULL) {
+
+	if ((d = opendir(sdir)) != NULL) {
 		struct dirent *e;
+
 		while ((e = readdir(d)) != NULL) {
-			if (endswith(e->d_name, ".xcscheme")) {
-				char namebuf[256];
-				snprintf(namebuf, sizeof(namebuf), "%s", e->d_name);
-				char *dot = strstr(namebuf, ".xcscheme");
-				if (dot) *dot = '\0';
-				printf("        %s\n", namebuf);
-				printed = 1;
-			}
+			char namebuf[256];
+			char *dot;
+
+			if (!endswith(e->d_name, ".xcscheme"))
+				continue;
+
+			snprintf(namebuf, sizeof(namebuf), "%s", e->d_name);
+			if ((dot = strstr(namebuf, ".xcscheme")) != NULL)
+				*dot = '\0';
+			strvec_push_unique(&schemes, namebuf);
 		}
 		closedir(d);
 	}
-	if (!printed)
-		printf("        (no schemes found)\n");
 
-	plist_free(root);
+	for (size_t i = 0; i < targets.count; i++)
+		strvec_push_unique(&schemes, targets.items[i]);
+
+	collect_subproject_targets(objects, project_obj, base, &schemes);
+
+	printf("    Schemes:\n");
+	if (schemes.count > 0) {
+		qsort(schemes.items, schemes.count, sizeof(*schemes.items),
+		    scheme_name_cmp);
+		for (size_t i = 0; i < schemes.count; i++)
+			printf("        %s\n", schemes.items[i]);
+		printf("\n");
+	} else {
+		printf("        (no schemes found)\n");
+	}
+
+	strvec_free(&schemes);
+	strvec_free(&targets);
+
+	CFRelease(root);
 	return 0;
 }
 

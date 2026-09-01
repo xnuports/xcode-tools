@@ -42,6 +42,8 @@
 #include <libgen.h>
 #include <unistd.h>
 
+#include <CoreFoundation/CoreFoundation.h>
+
 #include "xcodebuild.h"
 #include "ini.h"
 #include "plist.h"
@@ -458,27 +460,82 @@ int settings_load_defaults(settings_table *t, const char *devpath,
 /* Merge the string members of a plist dict (as produced from a pbxproj
  * XCBuildConfiguration.buildSettings node) into the settings table. Array and
  * dictionary values are flattened into a comma-separated string. */
-void settings_merge_plist_dict(settings_table *t, const plist_node *dict)
+/*
+ * Merge a build-settings dictionary into the table.
+ *
+ * An array value becomes its elements joined by spaces, which is how a
+ * setting like OTHER_CFLAGS is written on a command line; a value that
+ * is neither string nor array is recorded empty rather than dropped, so
+ * the setting is still defined.
+ */
+static void
+join_array(CFArrayRef array, char *buf, size_t len)
 {
-	if (dict == NULL || dict->type != PLIST_DICT)
-		return;
-	for (size_t i = 0; i < dict->count; i++) {
-		plist_node *entry = dict->items[i];
-		if (entry->key == NULL)
+	CFIndex i;
+
+	buf[0] = '\0';
+
+	for (i = 0; i < CFArrayGetCount(array); i++) {
+		CFTypeRef v = CFArrayGetValueAtIndex(array, i);
+		char one[512];
+
+		if (v == NULL || CFGetTypeID(v) != CFStringGetTypeID())
 			continue;
-		char *expanded = NULL;
-		if (entry->type == PLIST_STRING) {
-			expanded = settings_expand(t, entry->string);
-		} else if (entry->type == PLIST_DICT || entry->type == PLIST_ARRAY) {
-			expanded = plist_join_strings(entry, " ");
-		}
-		if (expanded != NULL) {
-			settings_set(t, entry->key, expanded);
-			free(expanded);
-		} else {
-			settings_set(t, entry->key, "");
-		}
+		if (!CFStringGetCString((CFStringRef)v, one, sizeof(one),
+		    kCFStringEncodingUTF8))
+			continue;
+
+		if (buf[0] != '\0')
+			strlcat(buf, " ", len);
+		strlcat(buf, one, len);
 	}
+}
+
+struct merge_ctx {
+	settings_table *table;
+};
+
+static void
+merge_entry(const void *key, const void *value, void *ctx)
+{
+	settings_table *t = ((struct merge_ctx *)ctx)->table;
+	char kbuf[512], vbuf[8192];
+
+	if (key == NULL || CFGetTypeID(key) != CFStringGetTypeID())
+		return;
+	if (!CFStringGetCString((CFStringRef)key, kbuf, sizeof(kbuf),
+	    kCFStringEncodingUTF8))
+		return;
+
+	if (value != NULL && CFGetTypeID(value) == CFStringGetTypeID()) {
+		char raw[8192];
+
+		if (CFStringGetCString((CFStringRef)value, raw, sizeof(raw),
+		    kCFStringEncodingUTF8)) {
+			char *expanded = settings_expand(t, raw);
+
+			settings_set(t, kbuf, (expanded != NULL) ? expanded : "");
+			free(expanded);
+			return;
+		}
+	} else if (value != NULL && CFGetTypeID(value) == CFArrayGetTypeID()) {
+		join_array((CFArrayRef)value, vbuf, sizeof(vbuf));
+		settings_set(t, kbuf, vbuf);
+		return;
+	}
+
+	settings_set(t, kbuf, "");
+}
+
+void settings_merge_plist_dict(settings_table *t, CFTypeRef dict)
+{
+	struct merge_ctx ctx;
+
+	if (dict == NULL || CFGetTypeID(dict) != CFDictionaryGetTypeID())
+		return;
+
+	ctx.table = t;
+	CFDictionaryApplyFunction((CFDictionaryRef)dict, merge_entry, &ctx);
 }
 
 /* ------------------------------------------------------------------ */
