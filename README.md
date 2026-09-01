@@ -57,10 +57,13 @@ settings — `PRODUCT_NAME`, `MACH_O_TYPE`, `FULL_PRODUCT_NAME` — to Apple's
 values. `xcodebuild build` compiles a native target: it resolves the sources,
 passes the project's search paths and defines to clang, and produces the right
 artifact for the target — an executable, a `.dylib`, or a static `.a` built with
-our libtool (Apple's own linker links against the result). It needs an SDK with
+our libtool (Apple's own linker links against the result). Swift targets build
+too: the module's files go to `swiftc` together, as a module rather than one at
+a time, and a target containing Swift is linked by `swiftc` so the runtime comes
+in. Mixed Swift and C in one target works. It needs an SDK with
 headers, which the emitted bundles do not have yet; point `-sdk` at a real one.
-Swift targets, `.app`/framework resource phases, and multi-target dependency
-ordering are not done.
+`.app`/framework resource phases and multi-target dependency ordering are not
+done.
 
 **48 programs** build: 42 compiled directly, 6 through their own build systems.
 

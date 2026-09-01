@@ -293,6 +293,36 @@ build_apply_product_settings(settings_table *t, const char *product_type)
 	settings_set(t, "FULL_PRODUCT_NAME", full);
 }
 
+/*
+ * A build setting, resolved.
+ *
+ * settings_get returns what was stored, and a default is stored as
+ * written -- PRODUCT_MODULE_NAME is "$(TARGET_NAME)" until something
+ * expands it.  Values merged from a project are expanded as they are
+ * merged, so only some settings arrive ready to use; reading them all
+ * through here removes the distinction.  Returns buf, or NULL if the
+ * setting is unset or empty.
+ */
+static const char *
+setting(const settings_table *t, const char *key, char *buf, size_t len)
+{
+	const char *raw = settings_get(t, key);
+	char *expanded;
+
+	if (raw == NULL || *raw == '\0')
+		return NULL;
+
+	if ((expanded = settings_expand(t, raw)) == NULL) {
+		snprintf(buf, len, "%s", raw);
+		return (buf[0] != '\0') ? buf : NULL;
+	}
+
+	snprintf(buf, len, "%s", expanded);
+	free(expanded);
+
+	return (buf[0] != '\0') ? buf : NULL;
+}
+
 /* ------------------------------------------------------------------ */
 /* running a command                                                    */
 /* ------------------------------------------------------------------ */
@@ -341,6 +371,14 @@ mkdirs(const char *path)
 	}
 
 	return (mkdir(buf, 0777) == 0 || errno == EEXIST) ? 0 : -1;
+}
+
+static int
+is_swift(const char *path)
+{
+	const char *dot = strrchr(path, '.');
+
+	return dot != NULL && strcmp(dot, ".swift") == 0;
 }
 
 static int
@@ -496,7 +534,8 @@ int build_run(const char *project, settings_table *t,
 	char build_dir[PATH_MAX], obj_dir[PATH_MAX], product[PATH_MAX];
 	const char *slash, *product_name, *configuration, *sdkroot, *srcroot;
 	struct product prod;
-	char name_buf[512];
+	char name_buf[512], cfgbuf[128], pnbuf[256], sdkbuf[PATH_MAX];
+	char srbuf[PATH_MAX], fullbuf[PATH_MAX];
 	CFIndex i;
 	int rc = 0, nsources = 0;
 
@@ -556,11 +595,11 @@ int build_run(const char *project, settings_table *t,
 		    sizeof(ptbuf)), &prod);
 	}
 
-	configuration = settings_get(t, "CONFIGURATION");
-	if (configuration == NULL || *configuration == '\0')
+	configuration = setting(t, "CONFIGURATION", cfgbuf, sizeof(cfgbuf));
+	if (configuration == NULL)
 		configuration = "Release";
-	product_name = settings_get(t, "PRODUCT_NAME");
-	if (product_name == NULL || *product_name == '\0')
+	product_name = setting(t, "PRODUCT_NAME", pnbuf, sizeof(pnbuf));
+	if (product_name == NULL)
 		product_name = "product";
 
 	snprintf(build_dir, sizeof(build_dir), "%s/build/%s", source_root,
@@ -568,9 +607,10 @@ int build_run(const char *project, settings_table *t,
 	snprintf(obj_dir, sizeof(obj_dir), "%s/build/%s.build", source_root,
 	    configuration);
 	{
-		const char *full = settings_get(t, "FULL_PRODUCT_NAME");
+		const char *full = setting(t, "FULL_PRODUCT_NAME", fullbuf,
+		    sizeof(fullbuf));
 
-		if (full == NULL || *full == '\0')
+		if (full == NULL)
 			full = product_name;
 
 		/*
@@ -607,13 +647,13 @@ int build_run(const char *project, settings_table *t,
 	 * value that is not a path is resolved, and SDK_DIR, which is
 	 * always the resolved default, is the fallback.
 	 */
-	srcroot = settings_get(t, "SRCROOT");
-	if (srcroot == NULL || *srcroot == '\0')
+	srcroot = setting(t, "SRCROOT", srbuf, sizeof(srbuf));
+	if (srcroot == NULL)
 		srcroot = source_root;
 
-	sdkroot = settings_get(t, "SDKROOT");
+	sdkroot = setting(t, "SDKROOT", sdkbuf, sizeof(sdkbuf));
 	if (sdkroot == NULL || sdkroot[0] != '/')
-		sdkroot = settings_get(t, "SDK_DIR");
+		sdkroot = setting(t, "SDK_DIR", sdkbuf, sizeof(sdkbuf));
 	if (sdkroot != NULL && sdkroot[0] != '/')
 		sdkroot = NULL;
 
@@ -649,7 +689,8 @@ int build_run(const char *project, settings_table *t,
 	{
 		CFTypeRef phases = bget(chosen, "buildPhases");
 		char *objs[256];
-		int nobjs = 0;
+		char *swifts[256];
+		int nobjs = 0, nswift = 0;
 		CFIndex p;
 
 		for (p = 0; p < bcount(phases) && rc == 0; p++) {
@@ -679,6 +720,20 @@ int build_run(const char *project, settings_table *t,
 					continue;
 				if ((src = pathmap_get(&map, ref)) == NULL)
 					continue;
+				/*
+				 * Swift is compiled as a module, not a
+				 * file at a time, so its sources are
+				 * gathered and handed to swiftc together
+				 * once the phase has been walked.
+				 */
+				if (is_swift(src)) {
+					if (nswift < (int)(sizeof(swifts) /
+					    sizeof(swifts[0])))
+						swifts[nswift++] = strdup(src);
+					nsources++;
+					continue;
+				}
+
 				if (!is_compilable(src))
 					continue;
 
@@ -726,6 +781,66 @@ int build_run(const char *project, settings_table *t,
 			}
 		}
 
+		/*
+		 * The Swift half of the target, compiled whole.  A Swift
+		 * module is one translation unit however many files it is
+		 * written across -- the files can refer to each other
+		 * without declarations -- so they go to swiftc together
+		 * and come back as a single object.
+		 */
+		if (rc == 0 && nswift > 0) {
+			char swiftc[PATH_MAX], obj[PATH_MAX], modbuf[256];
+			char *argv[280];
+			const char *module;
+			int a = 0, j;
+
+			snprintf(swiftc, sizeof(swiftc),
+			    "%s/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+			    devpath);
+
+			if (access(swiftc, X_OK) != 0) {
+				fprintf(stderr, "xcodebuild: error: this target"
+				    " has Swift sources but there is no swiftc"
+				    " at %s\n", swiftc);
+				rc = 1;
+			} else {
+				module = setting(t, "PRODUCT_MODULE_NAME",
+				    modbuf, sizeof(modbuf));
+				if (module == NULL)
+					module = product_name;
+
+				snprintf(obj, sizeof(obj), "%s/%s.swift.o",
+				    obj_dir, module);
+
+				argv[a++] = swiftc;
+				if (sdkroot != NULL && *sdkroot != '\0') {
+					argv[a++] = (char *)"-sdk";
+					argv[a++] = (char *)sdkroot;
+				}
+				argv[a++] = (char *)"-module-name";
+				argv[a++] = (char *)module;
+				argv[a++] = (char *)"-wmo";
+				argv[a++] = (char *)"-emit-object";
+				argv[a++] = (char *)"-o";
+				argv[a++] = obj;
+				for (j = 0; j < nswift && a < 270; j++)
+					argv[a++] = swifts[j];
+				argv[a] = NULL;
+
+				printf("CompileSwift %s (%d file%s)\n", module,
+				    nswift, (nswift == 1) ? "" : "s");
+				if (run(argv, opts->verbose) != 0) {
+					fprintf(stderr, "xcodebuild: error:"
+					    " failed to compile the Swift"
+					    " sources of %s\n", module);
+					rc = 1;
+				} else if (nobjs < (int)(sizeof(objs) /
+				    sizeof(objs[0]))) {
+					objs[nobjs++] = strdup(obj);
+				}
+			}
+		}
+
 		if (rc == 0 && nobjs > 0) {
 			char *argv[264];
 			char libtool[PATH_MAX];
@@ -765,6 +880,29 @@ int build_run(const char *project, settings_table *t,
 
 				printf("Libtool %s\n", product);
 			} else if (rc == 0) {
+				/*
+				 * A target with Swift in it is linked by
+				 * swiftc, which knows to bring in the Swift
+				 * runtime and the standard library; clang
+				 * would leave those symbols undefined.
+				 */
+				char swiftc[PATH_MAX];
+
+				if (nswift > 0) {
+					snprintf(swiftc, sizeof(swiftc),
+					    "%s/Toolchains/XcodeDefault"
+					    ".xctoolchain/usr/bin/swiftc",
+					    devpath);
+					argv[a++] = swiftc;
+					if (prod.kind == PRODUCT_DYNAMIC_LIB)
+						argv[a++] = (char *)"-emit-library";
+					if (sdkroot != NULL && *sdkroot != '\0') {
+						argv[a++] = (char *)"-sdk";
+						argv[a++] = (char *)sdkroot;
+					}
+					goto have_linker;
+				}
+
 				argv[a++] = clang;
 				if (prod.kind == PRODUCT_DYNAMIC_LIB)
 					argv[a++] = (char *)"-dynamiclib";
@@ -772,6 +910,7 @@ int build_run(const char *project, settings_table *t,
 					argv[a++] = (char *)"-isysroot";
 					argv[a++] = (char *)sdkroot;
 				}
+have_linker:
 				argv[a++] = (char *)"-o";
 				argv[a++] = product;
 				for (j = 0; j < nobjs; j++)
@@ -801,6 +940,8 @@ int build_run(const char *project, settings_table *t,
 
 		for (i = 0; i < nobjs; i++)
 			free(objs[i]);
+		for (i = 0; i < nswift; i++)
+			free(swifts[i]);
 	}
 
 	if (rc == 0 && nsources == 0) {
