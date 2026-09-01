@@ -42,7 +42,10 @@
 #include <sys/types.h>
 
 #include "ini.h"
+#include <stdbool.h>
+
 #include "devpath.h"
+#include "xcselect.h"
 #include "sdkpath.h"
 
 /* General stuff */
@@ -559,7 +562,7 @@ static char *get_developer_path(void)
 	FILE *fp = NULL;
 	char devpath[PATH_MAX - 1];
 	char *pathtocfg = NULL;
-	char *cfg_path = NULL;
+	char cfg_path[PATH_MAX];
 	char *value = NULL;
 
 	verbose_printf(stdout, "xcrun: info: attempting to retrieve developer path from DEVELOPER_DIR...\n");
@@ -577,9 +580,18 @@ static char *get_developer_path(void)
 		return NULL;
 	}
 
-	cfg_path = (char *)malloc((strlen(pathtocfg) + sizeof(SDK_CFG)));
-
-	sprintf(cfg_path, "%s/%s", pathtocfg, SDK_CFG);
+	/*
+	 * Bounded, and correctly sized.  The allocation here was
+	 * strlen(HOME) + sizeof(SDK_CFG), which leaves no room for the
+	 * separator the very next line writes -- one byte past the end of
+	 * the buffer, every time this ran.
+	 */
+	if (snprintf(cfg_path, sizeof(cfg_path), "%s/%s", pathtocfg,
+	    SDK_CFG) >= (int)sizeof(cfg_path)) {
+		fprintf(stderr, "%s: error: configuration path too long.\n",
+		    progname);
+		return NULL;
+	}
 
 	if ((fp = fopen(cfg_path, "r")) != NULL) {
 		fseek(fp, 0, SEEK_SET);
@@ -589,35 +601,41 @@ static char *get_developer_path(void)
 	} else {
 		struct stat st;
 
-		free(cfg_path);
 
 		/*
-		 * No per-user selection yet.  Prefer the Developer directory
-		 * this binary actually lives in -- that keeps a relocated or
-		 * freshly built release tree working with no configuration --
-		 * and only then the compiled-in system default.
+		 * No per-user selection.  libxcselect answers the rest --
+		 * the link xcode-select -s writes, this binary's own
+		 * Developer directory, then the system defaults.  Apple's
+		 * xcrun asks the same library, which is what stops it and
+		 * xcode-select from disagreeing about where the tools are.
 		 */
-		{
-			const char *self = xt_default_developer_dir();
+		static char devdir[PATH_MAX];
+		bool cltools = false, missing = false, invalid = false;
 
-			if (self != NULL) {
-				verbose_printf(stdout, "xcrun: info: using developer path \'%s\' derived from executable location.\n", self);
-				return (char *)self;
-			}
+		(void)st;
+
+		if (xcselect_get_developer_dir_path(devdir, sizeof(devdir),
+		    &cltools, &missing, &invalid)) {
+			verbose_printf(stdout, "xcrun: info: using developer"
+			    " path \'%s\' from libxcselect%s.\n", devdir,
+			    cltools ? " (command line tools)" : "");
+			if (invalid)
+				verbose_printf(stdout, "xcrun: info: note: that"
+				    " directory does not exist.\n");
+			return devdir;
 		}
 
-		if (stat(XCRUN_DEFAULT_DEVELOPER_DIR, &st) == 0 && S_ISDIR(st.st_mode)) {
-			verbose_printf(stdout, "xcrun: info: using default developer path \'%s\'.\n", XCRUN_DEFAULT_DEVELOPER_DIR);
-			return XCRUN_DEFAULT_DEVELOPER_DIR;
-		}
-
-		fprintf(stderr, "xcrun: error: unable to read configuration cache. (errno=%s)\n", strerror(errno));
+		if (missing)
+			fprintf(stderr, "xcrun: error: no developer directory"
+			    " has been selected.\n");
+		else
+			fprintf(stderr, "xcrun: error: unable to determine the"
+			    " developer directory.\n");
 		return NULL;
 	}
 
 	verbose_printf(stdout, "xcrun: info: using developer path \'%s\' from configuration cache.\n", value);
 
-	free(cfg_path);
 
 	return value;
 }

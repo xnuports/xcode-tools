@@ -107,7 +107,7 @@ static char *get_developer_path(void)
 	FILE *fp = NULL;
 	char devpath[PATH_MAX - 1];
 	char *pathtocfg = NULL;
-	char *cfg_path = NULL;
+	char cfg_path[PATH_MAX];
 	char *value = NULL;
 
 	if ((value = getenv("DEVELOPER_DIR")) != NULL)
@@ -120,10 +120,19 @@ static char *get_developer_path(void)
 		return NULL;
 	}
 
-	cfg_path = (char *)malloc((strlen(pathtocfg) + sizeof(SDK_CFG)));
-
-	strcat(pathtocfg, "/");
-	strcat(cfg_path, strcat(pathtocfg, SDK_CFG));
+	/*
+	 * Built with snprintf into a bounded buffer.  What stood here
+	 * appended to the string getenv() returned -- writing past the end
+	 * of the environment's own copy of HOME -- and then strcat'd onto
+	 * a malloc'd buffer that had never been initialised, so the
+	 * destination length came from whatever the heap happened to hold.
+	 */
+	if (snprintf(cfg_path, sizeof(cfg_path), "%s/%s", pathtocfg,
+	    SDK_CFG) >= (int)sizeof(cfg_path)) {
+		fprintf(stderr, "xcode-select: error: configuration path too"
+		    " long.\n");
+		return NULL;
+	}
 
 	if ((fp = fopen(cfg_path, "r")) != NULL) {
 		fseek(fp, SEEK_SET, 0);
@@ -132,8 +141,6 @@ static char *get_developer_path(void)
 		fclose(fp);
 	} else {
 		struct stat st;
-
-		free(cfg_path);
 
 		/*
 		 * No per-user selection.  libxcselect answers the rest --
@@ -156,8 +163,6 @@ static char *get_developer_path(void)
 		return NULL;
 	}
 
-	free(cfg_path);
-
 	return value;
 }
 
@@ -170,17 +175,19 @@ static int set_developer_path(const char *path)
 {
 	FILE *fp = NULL;
 	char *pathtocfg = NULL;
-	char *cfg_path = NULL;
+	char cfg_path[PATH_MAX];
 
 	if ((pathtocfg = getenv("HOME")) == NULL) {
 		fprintf(stderr, "xcode-select: error: failed to read HOME variable.\n");
 		return -1;
 	}
 
-        cfg_path = (char *)malloc((strlen(pathtocfg) + sizeof(SDK_CFG)));
-
-        strcat(pathtocfg, "/");
-	strcat(cfg_path, strcat(pathtocfg, SDK_CFG));
+	if (snprintf(cfg_path, sizeof(cfg_path), "%s/%s", pathtocfg,
+	    SDK_CFG) >= (int)sizeof(cfg_path)) {
+		fprintf(stderr, "xcode-select: error: configuration path too"
+		    " long.\n");
+		return -1;
+	}
 
 	if ((fp = fopen(cfg_path, "w+")) != NULL) {
 		fwrite(path, 1, strlen(path), fp);
@@ -190,7 +197,6 @@ static int set_developer_path(const char *path)
 		return -1;
 	}
 
-	free(cfg_path);
 
 	return 0;
 }
