@@ -93,3 +93,6 @@
 [submodule "lib/libutil"]
 	path = lib/libutil
 	url = https://github.com/apple-oss-distributions/libutil
+[submodule "src/swiftlang-llvm/swift-crypto"]
+	path = src/swiftlang-llvm/swift-crypto
+	url = https://github.com/apple/swift-crypto
