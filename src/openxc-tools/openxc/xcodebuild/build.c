@@ -202,6 +202,98 @@ walk_group(CFTypeRef objects, CFTypeRef group, const char *prefix,
 }
 
 /* ------------------------------------------------------------------ */
+/* product types                                                        */
+/*                                                                      */
+/* What a target produces, and what it is called.  Verified against     */
+/* Apple's -showBuildSettings for a tool (mh_execute, no affixes,        */
+/* FULL_PRODUCT_NAME the target name) and a static library (staticlib,  */
+/* "lib" and ".a", libDCE.a).  The dynamic library and bundle forms are  */
+/* the long-standing Xcode conventions; they could not be read back      */
+/* here, since Apple needs a platform it can resolve to answer at all.  */
+/* ------------------------------------------------------------------ */
+
+enum product_kind {
+	PRODUCT_TOOL,
+	PRODUCT_STATIC_LIB,
+	PRODUCT_DYNAMIC_LIB,
+	PRODUCT_BUNDLE		/* application or framework */
+};
+
+struct product {
+	enum product_kind kind;
+	const char *macho_type;
+	const char *prefix;
+	const char *suffix;
+	const char *wrapper;	/* bundle extension, without the dot */
+};
+
+static void
+classify_product(const char *product_type, struct product *out)
+{
+	out->kind = PRODUCT_TOOL;
+	out->macho_type = "mh_execute";
+	out->prefix = "";
+	out->suffix = "";
+	out->wrapper = NULL;
+
+	if (product_type == NULL)
+		return;
+
+	if (strstr(product_type, "library.static") != NULL) {
+		out->kind = PRODUCT_STATIC_LIB;
+		out->macho_type = "staticlib";
+		out->prefix = "lib";
+		out->suffix = ".a";
+	} else if (strstr(product_type, "library.dynamic") != NULL) {
+		out->kind = PRODUCT_DYNAMIC_LIB;
+		out->macho_type = "mh_dylib";
+		out->prefix = "lib";
+		out->suffix = ".dylib";
+	} else if (strstr(product_type, "framework") != NULL) {
+		out->kind = PRODUCT_BUNDLE;
+		out->macho_type = "mh_dylib";
+		out->wrapper = "framework";
+	} else if (strstr(product_type, "application") != NULL) {
+		out->kind = PRODUCT_BUNDLE;
+		out->wrapper = "app";
+	}
+}
+
+/*
+ * Record what a target produces.  Called while settings are resolved,
+ * so -showBuildSettings reports the same names a build writes -- the
+ * classification is a property of the target, not of building it.
+ */
+void
+build_apply_product_settings(settings_table *t, const char *product_type)
+{
+	struct product prod;
+	const char *pn;
+	char full[PATH_MAX];
+
+	if (t == NULL || product_type == NULL || *product_type == '\0')
+		return;
+
+	classify_product(product_type, &prod);
+
+	settings_set(t, "PRODUCT_TYPE", product_type);
+	settings_set(t, "MACH_O_TYPE", prod.macho_type);
+	settings_set(t, "EXECUTABLE_PREFIX", prod.prefix);
+	settings_set(t, "EXECUTABLE_SUFFIX", prod.suffix);
+
+	if ((pn = settings_get(t, "PRODUCT_NAME")) == NULL || *pn == '\0')
+		pn = "product";
+
+	if (prod.wrapper != NULL)
+		snprintf(full, sizeof(full), "%s.%s", pn, prod.wrapper);
+	else
+		snprintf(full, sizeof(full), "%s%s%s", prod.prefix, pn,
+		    prod.suffix);
+
+	settings_set(t, "FULL_PRODUCT_NAME", full);
+}
+
+/* ------------------------------------------------------------------ */
 /* running a command                                                    */
 /* ------------------------------------------------------------------ */
 
@@ -265,6 +357,133 @@ is_compilable(const char *path)
 	    strcmp(dot, ".s") == 0 || strcmp(dot, ".S") == 0;
 }
 
+/*
+ * The minimum an application bundle needs to be one: the name of its
+ * executable and an identifier.  Written with CoreFoundation, as every
+ * property list this tree emits now is.
+ */
+static int
+write_app_infoplist(const char *build_dir, const char *full_name,
+    const char *exe_name, settings_table *t)
+{
+	CFMutableDictionaryRef info;
+	char path[PATH_MAX];
+	const char *bundle_id;
+	CFDataRef data;
+	FILE *fp;
+	int rc = 0;
+
+	if (full_name == NULL || exe_name == NULL)
+		return 1;
+
+	snprintf(path, sizeof(path), "%s/%s/Contents/Info.plist", build_dir,
+	    full_name);
+
+	info = CFDictionaryCreateMutable(NULL, 0, &kCFTypeDictionaryKeyCallBacks,
+	    &kCFTypeDictionaryValueCallBacks);
+	if (info == NULL)
+		return 1;
+
+	bundle_id = settings_get(t, "PRODUCT_BUNDLE_IDENTIFIER");
+	if (bundle_id == NULL || *bundle_id == '\0')
+		bundle_id = exe_name;
+
+	{
+		CFStringRef k, v;
+
+		k = CFSTR("CFBundleExecutable");
+		v = CFStringCreateWithCString(NULL, exe_name, kCFStringEncodingUTF8);
+		if (v != NULL) { CFDictionarySetValue(info, k, v); CFRelease(v); }
+
+		k = CFSTR("CFBundleIdentifier");
+		v = CFStringCreateWithCString(NULL, bundle_id, kCFStringEncodingUTF8);
+		if (v != NULL) { CFDictionarySetValue(info, k, v); CFRelease(v); }
+
+		k = CFSTR("CFBundleName");
+		v = CFStringCreateWithCString(NULL, exe_name, kCFStringEncodingUTF8);
+		if (v != NULL) { CFDictionarySetValue(info, k, v); CFRelease(v); }
+
+		CFDictionarySetValue(info, CFSTR("CFBundlePackageType"),
+		    CFSTR("APPL"));
+		CFDictionarySetValue(info, CFSTR("CFBundleInfoDictionaryVersion"),
+		    CFSTR("6.0"));
+	}
+
+	data = CFPropertyListCreateData(NULL, info, kCFPropertyListXMLFormat_v1_0,
+	    0, NULL);
+	CFRelease(info);
+	if (data == NULL)
+		return 1;
+
+	if ((fp = fopen(path, "wb")) == NULL) {
+		fprintf(stderr, "xcodebuild: error: cannot write %s\n", path);
+		rc = 1;
+	} else {
+		fwrite(CFDataGetBytePtr(data), 1, (size_t)CFDataGetLength(data), fp);
+		fclose(fp);
+	}
+
+	CFRelease(data);
+	return rc;
+}
+
+/*
+ * Split a build setting into arguments, each prefixed with a flag.
+ *
+ * Search paths and preprocessor definitions are single settings holding
+ * several whitespace-separated values, quoted where a value contains a
+ * space.  A relative path is relative to the project, which is what a
+ * project means when it writes DCE/include.
+ */
+static int
+add_setting_args(char *argv[], int a, int max, const char *value,
+    const char *flag, const char *srcroot)
+{
+	const char *p = value;
+
+	if (value == NULL || *value == '\0')
+		return a;
+
+	while (*p != '\0' && a + 2 < max) {
+		char word[PATH_MAX];
+		size_t n = 0;
+		char quote = '\0';
+
+		while (*p == ' ' || *p == '\t')
+			p++;
+		if (*p == '\0')
+			break;
+
+		if (*p == '"' || *p == '\'')
+			quote = *p++;
+
+		while (*p != '\0' && n + 1 < sizeof(word)) {
+			if (quote != '\0' && *p == quote) {
+				p++;
+				break;
+			}
+			if (quote == '\0' && (*p == ' ' || *p == '\t'))
+				break;
+			word[n++] = *p++;
+		}
+		word[n] = '\0';
+		if (n == 0)
+			continue;
+
+		argv[a++] = strdup(flag);
+		if (word[0] == '/' || srcroot == NULL) {
+			argv[a++] = strdup(word);
+		} else {
+			char full[PATH_MAX];
+
+			snprintf(full, sizeof(full), "%s/%s", srcroot, word);
+			argv[a++] = strdup(full);
+		}
+	}
+
+	return a;
+}
+
 /* ------------------------------------------------------------------ */
 
 int build_run(const char *project, settings_table *t,
@@ -275,7 +494,8 @@ int build_run(const char *project, settings_table *t,
 	struct pathmap map;
 	char source_root[PATH_MAX], clang[PATH_MAX];
 	char build_dir[PATH_MAX], obj_dir[PATH_MAX], product[PATH_MAX];
-	const char *slash, *product_name, *configuration, *sdkroot;
+	const char *slash, *product_name, *configuration, *sdkroot, *srcroot;
+	struct product prod;
 	char name_buf[512];
 	CFIndex i;
 	int rc = 0, nsources = 0;
@@ -328,6 +548,14 @@ int build_run(const char *project, settings_table *t,
 	main_group = bderef(objects, bget(project_obj, "mainGroup"));
 	walk_group(objects, main_group, source_root, source_root, &map);
 
+	/* What this target builds, and under what name. */
+	{
+		char ptbuf[128];
+
+		classify_product(bstr(bget(chosen, "productType"), ptbuf,
+		    sizeof(ptbuf)), &prod);
+	}
+
 	configuration = settings_get(t, "CONFIGURATION");
 	if (configuration == NULL || *configuration == '\0')
 		configuration = "Release";
@@ -339,7 +567,25 @@ int build_run(const char *project, settings_table *t,
 	    configuration);
 	snprintf(obj_dir, sizeof(obj_dir), "%s/build/%s.build", source_root,
 	    configuration);
-	snprintf(product, sizeof(product), "%s/%s", build_dir, product_name);
+	{
+		const char *full = settings_get(t, "FULL_PRODUCT_NAME");
+
+		if (full == NULL || *full == '\0')
+			full = product_name;
+
+		/*
+		 * A bundle's binary lives inside it.  On macOS that is
+		 * Contents/MacOS for an application and Versions/A for a
+		 * framework; only the application form is assembled here.
+		 */
+		if (prod.kind == PRODUCT_BUNDLE)
+			snprintf(product, sizeof(product),
+			    "%s/%s/Contents/MacOS/%s", build_dir, full,
+			    product_name);
+		else
+			snprintf(product, sizeof(product), "%s/%s", build_dir,
+			    full);
+	}
 
 	if (mkdirs(build_dir) != 0 || mkdirs(obj_dir) != 0) {
 		fprintf(stderr, "xcodebuild: error: cannot create %s\n", build_dir);
@@ -361,6 +607,10 @@ int build_run(const char *project, settings_table *t,
 	 * value that is not a path is resolved, and SDK_DIR, which is
 	 * always the resolved default, is the fallback.
 	 */
+	srcroot = settings_get(t, "SRCROOT");
+	if (srcroot == NULL || *srcroot == '\0')
+		srcroot = source_root;
+
 	sdkroot = settings_get(t, "SDKROOT");
 	if (sdkroot == NULL || sdkroot[0] != '/')
 		sdkroot = settings_get(t, "SDK_DIR");
@@ -421,7 +671,7 @@ int build_run(const char *project, settings_table *t,
 				const char *ref = bstr(bget(bf, "fileRef"),
 				    refbuf, sizeof(refbuf));
 				const char *src;
-				char obj[PATH_MAX], *argv[16];
+				char obj[PATH_MAX], *argv[256];
 				const char *base;
 				int a = 0;
 
@@ -442,6 +692,21 @@ int build_run(const char *project, settings_table *t,
 					argv[a++] = (char *)"-isysroot";
 					argv[a++] = (char *)sdkroot;
 				}
+
+				/* What the project asks the compiler for. */
+				a = add_setting_args(argv, a, 240,
+				    settings_get(t, "HEADER_SEARCH_PATHS"),
+				    "-I", srcroot);
+				a = add_setting_args(argv, a, 240,
+				    settings_get(t, "USER_HEADER_SEARCH_PATHS"),
+				    "-I", srcroot);
+				a = add_setting_args(argv, a, 240,
+				    settings_get(t, "FRAMEWORK_SEARCH_PATHS"),
+				    "-F", srcroot);
+				a = add_setting_args(argv, a, 240,
+				    settings_get(t, "GCC_PREPROCESSOR_DEFINITIONS"),
+				    "-D", NULL);
+
 				argv[a++] = (char *)"-o";
 				argv[a++] = obj;
 				argv[a++] = (char *)src;
@@ -463,24 +728,75 @@ int build_run(const char *project, settings_table *t,
 
 		if (rc == 0 && nobjs > 0) {
 			char *argv[264];
+			char libtool[PATH_MAX];
 			int a = 0, j;
 
-			argv[a++] = clang;
-			if (sdkroot != NULL && *sdkroot != '\0') {
-				argv[a++] = (char *)"-isysroot";
-				argv[a++] = (char *)sdkroot;
-			}
-			argv[a++] = (char *)"-o";
-			argv[a++] = product;
-			for (j = 0; j < nobjs; j++)
-				argv[a++] = objs[j];
-			argv[a] = NULL;
+			/* A bundle's binary sits in a directory of its own. */
+			if (prod.kind == PRODUCT_BUNDLE) {
+				char dir[PATH_MAX];
+				const char *sl = strrchr(product, '/');
 
-			printf("Ld %s\n", product);
-			if (run(argv, opts->verbose) != 0) {
+				snprintf(dir, sizeof(dir), "%.*s",
+				    (int)(sl - product), product);
+				if (mkdirs(dir) != 0) {
+					fprintf(stderr, "xcodebuild: error:"
+					    " cannot create %s\n", dir);
+					rc = 1;
+				}
+			}
+
+			if (rc == 0 && prod.kind == PRODUCT_STATIC_LIB) {
+				/*
+				 * An archive, not a link.  libtool is what
+				 * Xcode runs for a static library, and it is
+				 * in the toolchain beside clang.
+				 */
+				snprintf(libtool, sizeof(libtool),
+				    "%s/Toolchains/XcodeDefault.xctoolchain"
+				    "/usr/bin/libtool", devpath);
+
+				argv[a++] = libtool;
+				argv[a++] = (char *)"-static";
+				argv[a++] = (char *)"-o";
+				argv[a++] = product;
+				for (j = 0; j < nobjs; j++)
+					argv[a++] = objs[j];
+				argv[a] = NULL;
+
+				printf("Libtool %s\n", product);
+			} else if (rc == 0) {
+				argv[a++] = clang;
+				if (prod.kind == PRODUCT_DYNAMIC_LIB)
+					argv[a++] = (char *)"-dynamiclib";
+				if (sdkroot != NULL && *sdkroot != '\0') {
+					argv[a++] = (char *)"-isysroot";
+					argv[a++] = (char *)sdkroot;
+				}
+				argv[a++] = (char *)"-o";
+				argv[a++] = product;
+				for (j = 0; j < nobjs; j++)
+					argv[a++] = objs[j];
+				argv[a] = NULL;
+
+				printf("Ld %s\n", product);
+			}
+
+			if (rc == 0 && run(argv, opts->verbose) != 0) {
 				fprintf(stderr, "xcodebuild: error: link failed\n");
 				rc = 1;
 			}
+
+			/*
+			 * An application is a bundle: without an Info.plist
+			 * naming its executable, the binary is there but
+			 * nothing will launch it.
+			 */
+			if (rc == 0 && prod.kind == PRODUCT_BUNDLE &&
+			    prod.wrapper != NULL &&
+			    strcmp(prod.wrapper, "app") == 0)
+				rc = write_app_infoplist(build_dir,
+				    settings_get(t, "FULL_PRODUCT_NAME"),
+				    product_name, t);
 		}
 
 		for (i = 0; i < nobjs; i++)

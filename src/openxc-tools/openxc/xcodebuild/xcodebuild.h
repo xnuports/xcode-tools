@@ -164,5 +164,6 @@ const char *xbuild_resolve_toolchain_name(const xcodebuild_opts *opts, const cha
 /* build.c -- compile and link a target's sources. */
 int build_run(const char *project, settings_table *t,
               const xcodebuild_opts *opts, const char *devpath);
+void build_apply_product_settings(settings_table *t, const char *product_type);
 
 #endif /* __XCODEBUILD_H__ */

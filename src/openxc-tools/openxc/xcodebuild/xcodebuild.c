@@ -500,6 +500,27 @@ static settings_table *resolve_settings(xcodebuild_opts *opts, const char *devpa
 			if (pname[0] != '\0')
 				settings_set(t, "PROJECT_NAME", pname);
 
+			/*
+			 * Where the project lives.  Paths in its settings
+			 * are written relative to this, and $(SRCROOT)
+			 * appears in them constantly.
+			 */
+			{
+				char sr[PATH_MAX];
+				const char *sl;
+
+				snprintf(sr, sizeof(sr), "%s", project);
+				if ((sl = strrchr(sr, '/')) != NULL)
+					*(char *)sl = '\0';
+				settings_set(t, "SRCROOT", sr);
+				settings_set(t, "SOURCE_ROOT", sr);
+				settings_set(t, "PROJECT_DIR", sr);
+			}
+
+			/* Project settings first; a target's inherit them. */
+			settings_merge_plist_dict(t,
+			    project_find_project_buildsettings(root, configuration));
+
 			CFTypeRef bs = project_find_buildsettings(root,
 			    opts->target, configuration, chosen, sizeof(chosen));
 
@@ -508,6 +529,17 @@ static settings_table *resolve_settings(xcodebuild_opts *opts, const char *devpa
 
 			if (bs != NULL)
 				settings_merge_plist_dict(t, bs);
+
+			{
+				char pt[128];
+
+				project_target_product_type(root,
+				    (opts->target != NULL) ? opts->target :
+				    (chosen[0] != '\0' ? chosen : NULL),
+				    pt, sizeof(pt));
+				build_apply_product_settings(t, pt);
+			}
+
 			CFRelease(root);
 		} else if (opts->verbose) {
 			fprintf(stderr, "xcodebuild: warning: could not parse project '%s'\n", project);

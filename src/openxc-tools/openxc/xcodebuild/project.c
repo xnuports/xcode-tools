@@ -504,6 +504,160 @@ collect_subproject_targets(CFTypeRef objects, CFTypeRef project_obj,
 }
 
 /*
+ * The project's own build settings for a configuration.
+ *
+ * Xcode resolves a setting by inheritance: the project's configuration
+ * first, then the target's on top.  Merging only the target's loses
+ * everything set once for the whole project -- header search paths,
+ * most often, which is why sources that include their own headers
+ * failed to compile.
+ */
+CFTypeRef project_find_project_buildsettings(CFTypeRef root,
+    const char *configuration)
+{
+	CFTypeRef root_id = NULL;
+	CFTypeRef objects = get_objects_dict(root, &root_id);
+	CFTypeRef project_obj = pderef(objects, root_id);
+	CFTypeRef clist = pderef(objects,
+	    pget(project_obj, "buildConfigurationList"));
+	CFTypeRef configs = pget(clist, "buildConfigurations");
+	CFTypeRef first = NULL;
+	char name_buf[512];
+	CFIndex i;
+
+	for (i = 0; i < pcount(configs); i++) {
+		CFTypeRef cfg = pderef(objects, pat(configs, i));
+		const char *cname = pstr(pget(cfg, "name"), name_buf,
+		    sizeof(name_buf));
+
+		if (cname == NULL)
+			continue;
+		if (first == NULL)
+			first = cfg;
+		if (configuration != NULL && strcmp(cname, configuration) == 0)
+			return pget(cfg, "buildSettings");
+	}
+
+	return (configuration == NULL && first != NULL) ?
+	    pget(first, "buildSettings") : NULL;
+}
+
+/* The productType of a target: what it builds. */
+void project_target_product_type(CFTypeRef root, const char *target,
+    char *buf, size_t len)
+{
+	CFTypeRef root_id = NULL;
+	CFTypeRef objects = get_objects_dict(root, &root_id);
+	CFTypeRef project_obj = pderef(objects, root_id);
+	CFTypeRef targets = pget(project_obj, "targets");
+	char name_buf[512];
+	CFIndex i;
+
+	if (buf == NULL || len == 0)
+		return;
+	buf[0] = '\0';
+
+	for (i = 0; i < pcount(targets); i++) {
+		CFTypeRef tobj = pderef(objects, pat(targets, i));
+		const char *name = pstr(pget(tobj, "name"), name_buf,
+		    sizeof(name_buf));
+
+		if (target != NULL && (name == NULL || strcmp(name, target) != 0))
+			continue;
+
+		if (pstr(pget(tobj, "productType"), buf, len) == NULL)
+			buf[0] = '\0';
+		return;
+	}
+}
+
+/*
+ * Target ids Xcode was told not to autocreate a scheme for.
+ *
+ * xcschememanagement.plist records this under
+ * SuppressBuildableAutocreation, keyed by target id.  It lives in a
+ * user's xcuserdata and in xcshareddata; both are read, since either may
+ * carry the setting.  The file is a property list of either flavour, so
+ * CoreFoundation reads it.
+ */
+static void
+merge_suppressed(const char *plist_path, strvec *out)
+{
+	CFDataRef data;
+	CFPropertyListRef root;
+	CFDictionaryRef suppress;
+	char *text;
+	size_t len;
+	CFIndex n, i;
+	const void **keys;
+
+	if ((text = file_read_all(plist_path, &len)) == NULL)
+		return;
+
+	data = CFDataCreate(NULL, (const UInt8 *)text, (CFIndex)len);
+	free(text);
+	if (data == NULL)
+		return;
+
+	root = CFPropertyListCreateWithData(NULL, data, kCFPropertyListImmutable,
+	    NULL, NULL);
+	CFRelease(data);
+	if (root == NULL)
+		return;
+
+	if (CFGetTypeID(root) == CFDictionaryGetTypeID()) {
+		suppress = CFDictionaryGetValue((CFDictionaryRef)root,
+		    CFSTR("SuppressBuildableAutocreation"));
+
+		if (suppress != NULL &&
+		    CFGetTypeID(suppress) == CFDictionaryGetTypeID()) {
+			n = CFDictionaryGetCount(suppress);
+			keys = calloc((size_t)n, sizeof(*keys));
+			if (keys != NULL) {
+				CFDictionaryGetKeysAndValues(suppress, keys, NULL);
+				for (i = 0; i < n; i++) {
+					char id[512];
+
+					if (CFStringGetCString((CFStringRef)keys[i],
+					    id, sizeof(id), kCFStringEncodingUTF8))
+						strvec_push_unique(out, id);
+				}
+				free(keys);
+			}
+		}
+	}
+
+	CFRelease(root);
+}
+
+static void
+collect_suppressed_targets(const char *project, strvec *out)
+{
+	char path[PATH_MAX], userdata[PATH_MAX];
+	DIR *d;
+	struct dirent *e;
+
+	/* Shared. */
+	snprintf(path, sizeof(path),
+	    "%s/xcshareddata/xcschemes/xcschememanagement.plist", project);
+	merge_suppressed(path, out);
+
+	/* Every user's, since the project may be anyone's checkout. */
+	snprintf(userdata, sizeof(userdata), "%s/xcuserdata", project);
+	if ((d = opendir(userdata)) != NULL) {
+		while ((e = readdir(d)) != NULL) {
+			if (e->d_name[0] == '.')
+				continue;
+			snprintf(path, sizeof(path),
+			    "%s/%s/xcschemes/xcschememanagement.plist",
+			    userdata, e->d_name);
+			merge_suppressed(path, out);
+		}
+		closedir(d);
+	}
+}
+
+/*
  * A project's name is its bundle's, minus the extension: PBXProject
  * carries no "name" of its own.
  */
@@ -613,11 +767,13 @@ int project_list(const char *project, const char *workspace, const xcodebuild_op
 	 * without regard to case, which is the order they are printed in.
 	 */
 	strvec schemes = {0};
+	strvec suppressed = {0};
 	char base[PATH_MAX], sdir[PATH_MAX];
 	DIR *d;
 
 	snprintf(base, sizeof(base), "%s",
 	    project ? project : (workspace ? workspace : "."));
+	collect_suppressed_targets(base, &suppressed);
 	snprintf(sdir, sizeof(sdir), "%s/xcshareddata/xcschemes", base);
 
 	if ((d = opendir(sdir)) != NULL) {
@@ -638,8 +794,27 @@ int project_list(const char *project, const char *workspace, const xcodebuild_op
 		closedir(d);
 	}
 
-	for (size_t i = 0; i < targets.count; i++)
-		strvec_push_unique(&schemes, targets.items[i]);
+	/*
+	 * A scheme per target, except targets Xcode was told not to
+	 * autocreate one for.  That list is SuppressBuildableAutocreation
+	 * in xcschememanagement.plist, keyed by target id -- which is why
+	 * a test bundle appears for one project and not another: it is a
+	 * per-project choice recorded there, not a property of the type.
+	 */
+	for (CFIndex ti = 0; ti < pcount(tarr); ti++) {
+		CFTypeRef tid = pat(tarr, ti);
+		CFTypeRef tobj = pderef(objects, tid);
+		char idbuf[512], tnbuf[512];
+		const char *id = pstr(tid, idbuf, sizeof(idbuf));
+		const char *tn = pstr(pget(tobj, "name"), tnbuf, sizeof(tnbuf));
+
+		if (tn == NULL)
+			continue;
+		if (id != NULL && strvec_present(&suppressed, id))
+			continue;
+
+		strvec_push_unique(&schemes, tn);
+	}
 
 	collect_subproject_targets(objects, project_obj, base, &schemes);
 
@@ -655,6 +830,7 @@ int project_list(const char *project, const char *workspace, const xcodebuild_op
 	}
 
 	strvec_free(&schemes);
+	strvec_free(&suppressed);
 	strvec_free(&targets);
 
 	CFRelease(root);

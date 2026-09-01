@@ -55,6 +55,14 @@ CFTypeRef project_find_buildsettings(CFTypeRef root, const char *target,
                                      const char *configuration,
                                      char *chosen_name, size_t chosen_len);
 
+/* The project's own build settings, which a target's inherit from. */
+CFTypeRef project_find_project_buildsettings(CFTypeRef root,
+                                             const char *configuration);
+
+/* The productType of a target (the first, when target is NULL). */
+void project_target_product_type(CFTypeRef root, const char *target,
+                                 char *buf, size_t len);
+
 /* A project's display name: its bundle's, minus the extension. */
 void project_display_name(const char *path, char *buf, size_t len);
 

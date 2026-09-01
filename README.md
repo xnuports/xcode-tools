@@ -50,6 +50,18 @@ work against a stock Xcode with no configuration at all. `xcrun --show-sdk-path`
 `--show-sdk-version`, `--show-sdk-platform-path`, `--show-sdk-platform-version`
 and `--find` match Apple's output exactly when pointed at one.
 
+`xcodebuild` reads project files with CoreFoundation, as Apple's does. `-list`
+is byte-identical to Apple's (schemes and all, including which targets get an
+autocreated one); `-showBuildSettings` resolves the identity and product
+settings — `PRODUCT_NAME`, `MACH_O_TYPE`, `FULL_PRODUCT_NAME` — to Apple's
+values. `xcodebuild build` compiles a native target: it resolves the sources,
+passes the project's search paths and defines to clang, and produces the right
+artifact for the target — an executable, a `.dylib`, or a static `.a` built with
+our libtool (Apple's own linker links against the result). It needs an SDK with
+headers, which the emitted bundles do not have yet; point `-sdk` at a real one.
+Swift targets, `.app`/framework resource phases, and multi-target dependency
+ordering are not done.
+
 **48 programs** build: 42 compiled directly, 6 through their own build systems.
 
 | Where | What |
