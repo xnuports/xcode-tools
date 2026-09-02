@@ -59,6 +59,12 @@ sdk-headers:
 	# every other header composes itself from, and without them
 	# stdio.h has no definition of va_list.
 	@cp -f ${LIBC}/include/*.h ${SDK_INC}/ 2>/dev/null || true
+
+	# FreeBSD/ holds headers Libc took from there and installs flat.
+	# nl_types.h is the one that matters: libc++ reaches for it
+	# through <locale>, so without it no C++ program including
+	# <vector> or <string> gets as far as being compiled.
+	@cp -f ${LIBC}/include/FreeBSD/*.h ${SDK_INC}/ 2>/dev/null || true
 .for d in sys arpa malloc xlocale secure libkern protocols _types
 	@mkdir -p ${SDK_INC}/${d}
 	@cp -Rf ${LIBC}/include/${d}/. ${SDK_INC}/${d}/ 2>/dev/null || true
@@ -202,18 +208,22 @@ sdk-stubs:
 	@${ECHO} "sdk: generating library stubs"
 	@mkdir -p ${SDK_LIB}
 	@${TOP}/mk/scripts/make-tbd.sh /usr/lib/libSystem.B.dylib \
-	    ${SDK_LIB}/libSystem.B.tbd || true
+	    ${SDK_LIB}/libSystem.B.tbd \
+	    ${SDK_INC} || true
 	@ln -sfn libSystem.B.tbd ${SDK_LIB}/libSystem.tbd
 	@${TOP}/mk/scripts/make-tbd.sh /usr/lib/libc++.1.dylib \
-	    ${SDK_LIB}/libc++.1.tbd 2>/dev/null || true
+	    ${SDK_LIB}/libc++.1.tbd \
+	    ${SDK_INC} 2>/dev/null || true
 	@[ -f ${SDK_LIB}/libc++.1.tbd ] && \
 	    ln -sfn libc++.1.tbd ${SDK_LIB}/libc++.tbd || true
 	@${TOP}/mk/scripts/make-tbd.sh /usr/lib/libobjc.A.dylib \
-	    ${SDK_LIB}/libobjc.A.tbd 2>/dev/null || true
+	    ${SDK_LIB}/libobjc.A.tbd \
+	    ${SDK_INC} 2>/dev/null || true
 	# libc++abi carries the personality routine every C++ program
 	# references for exception unwinding, even one that throws nothing.
 	@${TOP}/mk/scripts/make-tbd.sh /usr/lib/libc++abi.dylib \
-	    ${SDK_LIB}/libc++abi.tbd 2>/dev/null || true
+	    ${SDK_LIB}/libc++abi.tbd \
+	    ${SDK_INC} 2>/dev/null || true
 	@[ -f ${SDK_LIB}/libobjc.A.tbd ] && \
 	    ln -sfn libobjc.A.tbd ${SDK_LIB}/libobjc.tbd || true
 

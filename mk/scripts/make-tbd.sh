@@ -24,11 +24,15 @@
 
 set -e
 
-[ $# -eq 2 ] || { echo "usage: $0 <install-name> <output.tbd>" >&2; exit 1; }
+[ $# -ge 2 ] && [ $# -le 3 ] ||
+	{ echo "usage: $0 <install-name> <output.tbd> [sdk-include-dir]" >&2
+	  exit 1; }
 
 INSTALL_NAME="$1"
 OUTPUT="$2"
 TMP="${OUTPUT}.symbols.$$"
+TMP_X86="${OUTPUT}.x86.$$"
+SDK_INC="$3"
 
 command -v dyld_info >/dev/null 2>&1 || {
 	echo "$0: dyld_info is required to read the shared cache" >&2
@@ -58,6 +62,53 @@ for lib in $libs; do
 done
 
 sort -u "$TMP" -o "$TMP"
+
+# The symbols x86_64 has and arm64 does not.
+#
+# A few libc functions are declared with an assembler name that carries
+# a suffix on some architectures and not others: sys/cdefs.h gives
+# __DARWIN_SUF_64_BIT_INO_T and __DARWIN_SUF_1050 a value only where the
+# old 32-bit-inode and pre-10.5 entry points still exist, which on macOS
+# means x86_64 and not arm64.  So on x86_64 the compiler emits
+# _stat$INODE64 where on arm64 it emits _stat.
+#
+# The exports read above come from this machine's shared cache, which is
+# arm64: it has no idea those variants exist, and a stub built from it
+# alone links every arm64 program and fails the first x86_64 one that
+# calls stat or opendir.  There is no x86_64 cache this can read, but
+# there is something better -- the headers declare exactly which
+# functions take which suffix, and they are the same declarations the
+# compiler reads, so the two cannot disagree.
+: > "$TMP_X86"
+
+if [ -n "$SDK_INC" ] && [ -d "$SDK_INC" ]; then
+	for spec in "INODE64:__DARWIN_INODE64 __DARWIN_ALIAS_I" \
+	            "1050:__DARWIN_1050 __DARWIN_1050ALIAS"; do
+		suffix=${spec%%:*}
+		macros=${spec#*:}
+
+		for m in ${macros}; do
+			grep -rhoE "${m}\([a-z_0-9]+\)" "$SDK_INC" 2>/dev/null |
+			    sed -e "s/^${m}(//" -e 's/)$//'
+		done | sort -u | while read -r name; do
+			[ -n "$name" ] || continue
+
+			# Only where this library exports the plain symbol:
+			# the same scan runs for libc++ and libobjc, which
+			# provide none of these.  Written as an if, because
+			# a bare grep that finds nothing is a failing
+			# command and set -e would end the script on the
+			# first symbol this library does not have.
+			if grep -qx "_${name}" "$TMP"; then
+				echo "_${name}\$${suffix}"
+			fi
+		done
+	done > "$TMP_X86"
+
+	sort -u "$TMP_X86" -o "$TMP_X86"
+fi
+
+x86count=$(wc -l < "$TMP_X86" | tr -d ' ')
 count=$(wc -l < "$TMP" | tr -d ' ')
 
 if [ "$count" -eq 0 ]; then
@@ -79,8 +130,21 @@ fi
 	# One symbol per line, wrapped as the format expects.
 	awk 'NR > 1 { printf ",\n                            " } { printf "%s", $0 }' "$TMP"
 	echo " ]"
+
+	if [ "$x86count" -gt 0 ]; then
+		echo "  - targets:              [ x86_64-macos ]"
+		printf "    symbols:              [ "
+		awk 'NR > 1 { printf ",\n                            " } { printf "%s", $0 }' "$TMP_X86"
+		echo " ]"
+	fi
+
 	echo "..."
 } > "$OUTPUT"
 
-rm -f "$TMP"
-echo "  $INSTALL_NAME: $count symbols"
+rm -f "$TMP" "$TMP_X86"
+
+if [ "$x86count" -gt 0 ]; then
+	echo "  $INSTALL_NAME: $count symbols (+$x86count for x86_64)"
+else
+	echo "  $INSTALL_NAME: $count symbols"
+fi
