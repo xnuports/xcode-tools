@@ -2631,6 +2631,7 @@ build_one_target(CFTypeRef objects, CFTypeRef chosen, const char *source_root,
 {
 	char clang[PATH_MAX];
 	char build_dir[PATH_MAX], obj_dir[PATH_MAX], product[PATH_MAX];
+	char objects_dir[PATH_MAX];
 	const char *product_name, *configuration, *sdkroot, *srcroot, *full;
 	const char *fw_version;
 	struct product prod;
@@ -2665,8 +2666,33 @@ build_one_target(CFTypeRef objects, CFTypeRef chosen, const char *source_root,
 	    sizeof(build_dir)) == NULL)
 		snprintf(build_dir, sizeof(build_dir), "%s/build/%s",
 		    source_root, configuration);
-	snprintf(obj_dir, sizeof(obj_dir), "%s/build/%s.build", source_root,
-	    configuration);
+	/*
+	 * A target's own directory for everything that is not the
+	 * product: its objects, the dependency lists beside them, the
+	 * scripts it runs and the record of what it last produced.  Two
+	 * targets that each compile a main.c wrote the same object
+	 * before this, and neither could tell its leftovers from the
+	 * other's.
+	 */
+	if (setting(t, "TARGET_TEMP_DIR", obj_dir, sizeof(obj_dir)) == NULL)
+		snprintf(obj_dir, sizeof(obj_dir), "%s/build/%s.build",
+		    source_root, configuration);
+
+	/* The objects themselves sit a little deeper, by architecture. */
+	if (setting(t, "OBJECT_FILE_DIR_normal", objects_dir,
+	    sizeof(objects_dir)) != NULL) {
+		char archbuf[64], base[PATH_MAX], *space;
+		const char *arch = setting(t, "ARCHS", archbuf, sizeof(archbuf));
+
+		if (arch != NULL && (space = strpbrk(archbuf, " \t")) != NULL)
+			*space = '\0';
+
+		snprintf(base, sizeof(base), "%s", objects_dir);
+		snprintf(objects_dir, sizeof(objects_dir), "%s/%s", base,
+		    (arch != NULL && archbuf[0] != '\0') ? archbuf : "normal");
+	} else {
+		snprintf(objects_dir, sizeof(objects_dir), "%s", obj_dir);
+	}
 	is_framework = (prod.kind == PRODUCT_BUNDLE && prod.wrapper != NULL &&
 	    strcmp(prod.wrapper, "framework") == 0);
 
@@ -2706,7 +2732,8 @@ build_one_target(CFTypeRef objects, CFTypeRef chosen, const char *source_root,
 	if (dylib)
 		setting(t, "LD_DYLIB_INSTALL_NAME", instname, sizeof(instname));
 
-	if (mkdirs(build_dir) != 0 || mkdirs(obj_dir) != 0) {
+	if (mkdirs(build_dir) != 0 || mkdirs(obj_dir) != 0 ||
+	    mkdirs(objects_dir) != 0) {
 		fprintf(stderr, "xcodebuild: error: cannot create %s\n", build_dir);
 		rc = 1;
 		goto out;
@@ -2890,7 +2917,18 @@ build_one_target(CFTypeRef objects, CFTypeRef chosen, const char *source_root,
 
 				base = strrchr(src, '/');
 				base = (base != NULL) ? base + 1 : src;
-				snprintf(obj, sizeof(obj), "%s/%s.o", obj_dir, base);
+
+				{
+					char stem[PATH_MAX];
+					char *dot;
+
+					snprintf(stem, sizeof(stem), "%s", base);
+					if ((dot = strrchr(stem, '.')) != NULL)
+						*dot = '\0';
+
+					snprintf(obj, sizeof(obj), "%s/%s.o",
+					    objects_dir, stem);
+				}
 
 				argv[a++] = clang;
 				argv[a++] = (char *)"-c";
@@ -2929,6 +2967,10 @@ build_one_target(CFTypeRef objects, CFTypeRef chosen, const char *source_root,
 				argv[a++] = obj;
 				argv[a++] = (char *)src;
 				argv[a] = NULL;
+
+				idlist_add(&made, obj);
+				idlist_add(&made, dep);
+				idlist_add(&made, cmdstamp);
 
 				if (source_up_to_date(obj, src, dep, cmdstamp,
 				    argv)) {
@@ -2985,7 +3027,7 @@ build_one_target(CFTypeRef objects, CFTypeRef chosen, const char *source_root,
 						module = product_name;
 
 					snprintf(obj, sizeof(obj), "%s/%s.swift.o",
-					    obj_dir, module);
+					    objects_dir, module);
 
 					argv[a++] = swiftc;
 					if (sdkroot != NULL && *sdkroot != '\0') {

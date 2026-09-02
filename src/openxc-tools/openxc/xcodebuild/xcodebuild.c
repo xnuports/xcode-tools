@@ -494,7 +494,7 @@ static settings_table *settings_for(const xcodebuild_opts *opts,
 	if (project != NULL) {
 		CFTypeRef root = project_load_pbxproj(project);
 		if (root != NULL) {
-			char chosen[512], pname[512];
+			char chosen[512], pname[512], sr[PATH_MAX];
 
 			/*
 			 * The project's own name, and the name of the
@@ -514,7 +514,6 @@ static settings_table *settings_for(const xcodebuild_opts *opts,
 			 * appears in them constantly.
 			 */
 			{
-				char sr[PATH_MAX];
 				const char *sl;
 
 				snprintf(sr, sizeof(sr), "%s", project);
@@ -541,6 +540,35 @@ static settings_table *settings_for(const xcodebuild_opts *opts,
 					settings_set(t, "CONFIGURATION_BUILD_DIR", bd);
 					settings_set(t, "TARGET_BUILD_DIR", bd);
 				}
+
+				/*
+				 * Where the intermediates go, read back from
+				 * Apple: the products under build/, and
+				 * everything else under a directory per
+				 * project, per configuration and per target.
+				 */
+				{
+					char root_dir[PATH_MAX];
+					char proj_dir[PATH_MAX];
+					char cfg_dir[PATH_MAX];
+
+					snprintf(root_dir, sizeof(root_dir),
+					         "%s/build", sr);
+					settings_set(t, "SYMROOT", root_dir);
+					settings_set(t, "OBJROOT", root_dir);
+
+					snprintf(proj_dir, sizeof(proj_dir),
+					         "%s/%s.build", root_dir,
+					         (pname[0] != '\0') ? pname :
+					         "project");
+					settings_set(t, "PROJECT_TEMP_DIR",
+					             proj_dir);
+
+					snprintf(cfg_dir, sizeof(cfg_dir),
+					         "%s/%s", proj_dir, configuration);
+					settings_set(t, "CONFIGURATION_TEMP_DIR",
+					             cfg_dir);
+				}
 			}
 
 			/* Project settings first; a target's inherit them. */
@@ -564,6 +592,35 @@ static settings_table *settings_for(const xcodebuild_opts *opts,
 				    (chosen[0] != '\0' ? chosen : NULL),
 				    pt, sizeof(pt));
 				build_apply_product_settings(t, pt);
+			}
+
+			/*
+			 * The target's own directory for intermediates.
+			 * Two targets that each compile a main.c would
+			 * otherwise write the same object, and neither
+			 * could tell its leftovers from the other's.
+			 */
+			{
+				const char *tn = settings_get(t, "TARGET_NAME");
+				const char *ct = settings_get(t,
+				    "CONFIGURATION_TEMP_DIR");
+				char tgt[PATH_MAX], objs[PATH_MAX];
+
+				if (ct != NULL && tn != NULL && *tn != '\0') {
+					snprintf(tgt, sizeof(tgt), "%s/%s.build",
+					         ct, tn);
+					settings_set(t, "TARGET_TEMP_DIR", tgt);
+					settings_set(t, "TEMP_DIR", tgt);
+
+					snprintf(objs, sizeof(objs),
+					         "%s/Objects", tgt);
+					settings_set(t, "OBJECT_FILE_DIR", objs);
+
+					snprintf(objs, sizeof(objs),
+					         "%s/Objects-normal", tgt);
+					settings_set(t, "OBJECT_FILE_DIR_normal",
+					             objs);
+				}
 			}
 
 			CFRelease(root);
