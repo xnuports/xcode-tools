@@ -26,6 +26,7 @@
 #include <string.h>
 #include <strings.h>
 #include <sys/stat.h>
+#include <sys/utsname.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -1142,6 +1143,7 @@ static int
 link_up_to_date(const char *product, char *const argv[], const char *cmd)
 {
 	struct timespec prod, in;
+	struct stat st;
 	int i, j;
 
 	if (!mtime_of(product, &prod))
@@ -1176,6 +1178,15 @@ link_up_to_date(const char *product, char *const argv[], const char *cmd)
 		}
 
 		if (argv[i][0] == '-')
+			continue;
+
+		/*
+		 * Only a file is an input.  A search path is a directory,
+		 * and its timestamp moves whenever anything is written
+		 * inside it -- including the finished binary this is
+		 * asking about, which would make every build relink.
+		 */
+		if (stat(argv[i], &st) != 0 || S_ISDIR(st.st_mode))
 			continue;
 
 		if (mtime_of(argv[i], &in) && newer_than(&in, &prod))
@@ -2005,6 +2016,63 @@ prune_empty_dirs(const char *path, const char *stop)
 }
 
 /*
+ * Intermediates from the flat directory this tree used to build into.
+ *
+ * Everything that was not the product went into one directory per
+ * configuration before each target was given its own, so a tree built
+ * by an older xcodebuild carries objects nothing reads any more.  Only
+ * files named the way that layout named them are removed, and the
+ * directory only if nothing else is left in it, so a directory that
+ * happens to sit at the same path is not disturbed.
+ */
+static void
+sweep_legacy_intermediates(const char *source_root, const char *configuration,
+    const char *obj_dir)
+{
+	char dir[PATH_MAX];
+	struct dirent *e;
+	DIR *d;
+	int removed = 0, kept = 0;
+
+	snprintf(dir, sizeof(dir), "%s/build/%s.build", source_root,
+	    configuration);
+
+	if (strcmp(dir, obj_dir) == 0 || (d = opendir(dir)) == NULL)
+		return;
+
+	while ((e = readdir(d)) != NULL) {
+		const char *n = e->d_name;
+		char path[PATH_MAX];
+
+		if (strcmp(n, ".") == 0 || strcmp(n, "..") == 0)
+			continue;
+
+		if (!has_ext(n, ".o") && !has_ext(n, ".d") &&
+		    !has_ext(n, ".cmd") && !has_ext(n, ".linked") &&
+		    !has_ext(n, ".manifest") && !has_ext(n, ".stamp") &&
+		    strncmp(n, "Script-", 7) != 0) {
+			kept++;
+			continue;
+		}
+
+		snprintf(path, sizeof(path), "%s/%s", dir, n);
+		if (remove_tree(path) == 0)
+			removed++;
+		else
+			kept++;
+	}
+
+	closedir(d);
+
+	if (kept == 0)
+		rmdir(dir);
+
+	if (removed > 0)
+		printf("RemoveStale %s (%d file%s from an older layout)\n",
+		    dir, removed, (removed == 1) ? "" : "s");
+}
+
+/*
  * Whatever the last build put in the product and this one did not.
  *
  * A file taken out of a project otherwise stays in the bundle for
@@ -2631,7 +2699,10 @@ build_one_target(CFTypeRef objects, CFTypeRef chosen, const char *source_root,
 {
 	char clang[PATH_MAX];
 	char build_dir[PATH_MAX], obj_dir[PATH_MAX], product[PATH_MAX];
-	char objects_dir[PATH_MAX];
+	char objects_dir[PATH_MAX], final_product[PATH_MAX];
+	char arch_objs[PATH_MAX], archs[8][64];
+	const char *exe_base;
+	int narchs = 0, ai;
 	const char *product_name, *configuration, *sdkroot, *srcroot, *full;
 	const char *fw_version;
 	struct product prod;
@@ -2678,20 +2749,51 @@ build_one_target(CFTypeRef objects, CFTypeRef chosen, const char *source_root,
 		snprintf(obj_dir, sizeof(obj_dir), "%s/build/%s.build",
 		    source_root, configuration);
 
-	/* The objects themselves sit a little deeper, by architecture. */
+	/* The objects sit a little deeper, under a directory per
+	   architecture that each pass through the sources adds. */
 	if (setting(t, "OBJECT_FILE_DIR_normal", objects_dir,
-	    sizeof(objects_dir)) != NULL) {
-		char archbuf[64], base[PATH_MAX], *space;
-		const char *arch = setting(t, "ARCHS", archbuf, sizeof(archbuf));
-
-		if (arch != NULL && (space = strpbrk(archbuf, " \t")) != NULL)
-			*space = '\0';
-
-		snprintf(base, sizeof(base), "%s", objects_dir);
-		snprintf(objects_dir, sizeof(objects_dir), "%s/%s", base,
-		    (arch != NULL && archbuf[0] != '\0') ? archbuf : "normal");
-	} else {
+	    sizeof(objects_dir)) == NULL)
 		snprintf(objects_dir, sizeof(objects_dir), "%s", obj_dir);
+
+	/*
+	 * The architectures to build.  A project asking for more than one
+	 * gets a compile and a link of each, and the results joined into
+	 * one binary at the end -- which is what a universal binary is.
+	 */
+	{
+		char abuf[256];
+		const char *list = setting(t, "ARCHS", abuf, sizeof(abuf));
+		const char *walk = (list != NULL) ? abuf : "";
+		char word[64];
+
+		while (narchs < (int)(sizeof(archs) / sizeof(archs[0])) &&
+		    next_word(&walk, word, sizeof(word)))
+			if (word[0] != '\0')
+				snprintf(archs[narchs++], sizeof(archs[0]),
+				    "%s", word);
+
+		/* No ARCHS at all: build once, without naming one. */
+		if (narchs == 0)
+			archs[narchs++][0] = '\0';
+
+		/*
+		 * A build for the machine it is running on, which is what
+		 * Apple does in Debug: the SDK can build for several
+		 * architectures, and ONLY_ACTIVE_ARCH says to pick one.
+		 */
+		if (narchs > 1) {
+			char obuf[16];
+			const char *only = setting(t, "ONLY_ACTIVE_ARCH", obuf,
+			    sizeof(obuf));
+			struct utsname u;
+
+			if (only != NULL && strcasecmp(only, "YES") == 0 &&
+			    uname(&u) == 0) {
+				snprintf(archs[0], sizeof(archs[0]), "%s",
+				    u.machine);
+				narchs = 1;
+			}
+		}
 	}
 	is_framework = (prod.kind == PRODUCT_BUNDLE && prod.wrapper != NULL &&
 	    strcmp(prod.wrapper, "framework") == 0);
@@ -2731,6 +2833,17 @@ build_one_target(CFTypeRef objects, CFTypeRef chosen, const char *source_root,
 	instname[0] = '\0';
 	if (dylib)
 		setting(t, "LD_DYLIB_INSTALL_NAME", instname, sizeof(instname));
+
+	sweep_legacy_intermediates(source_root, configuration, obj_dir);
+
+	/*
+	 * Where the finished binary goes.  With one architecture it is
+	 * linked straight there; with several each is linked beside its
+	 * own objects and they are joined at the end.
+	 */
+	snprintf(final_product, sizeof(final_product), "%s", product);
+	exe_base = strrchr(final_product, '/');
+	exe_base = (exe_base != NULL) ? exe_base + 1 : final_product;
 
 	if (mkdirs(build_dir) != 0 || mkdirs(obj_dir) != 0 ||
 	    mkdirs(objects_dir) != 0) {
@@ -2882,352 +2995,495 @@ build_one_target(CFTypeRef objects, CFTypeRef chosen, const char *source_root,
 
 			had_sources = 1;
 
-			files = bget(phase, "files");
-			for (f = 0; f < bcount(files) && rc == 0; f++) {
-				CFTypeRef bf = bderef(objects, bat(files, f));
-				char refbuf[512];
-				const char *ref = bstr(bget(bf, "fileRef"),
-				    refbuf, sizeof(refbuf));
-				const char *src;
-				char obj[PATH_MAX], *argv[256];
-				char dep[PATH_MAX], cmdstamp[PATH_MAX];
-				const char *base;
-				int a = 0;
+			/*
+			 * Once for each architecture: its own objects, its
+			 * own link.  With one there is nothing to join and
+			 * the product is linked where it belongs.
+			 */
+			for (ai = 0; ai < narchs && rc == 0; ai++) {
+				const char *ad = (archs[ai][0] != '\0') ?
+				    archs[ai] : "normal";
+				char triple[128], deploybuf[32];
+				const char *deploy = setting(t,
+				    "MACOSX_DEPLOYMENT_TARGET", deploybuf,
+				    sizeof(deploybuf));
+				int k;
 
-				if (ref == NULL)
-					continue;
-				if ((src = pathmap_get(map, ref)) == NULL)
-					continue;
-				/*
-				 * Swift is compiled as a module, not a
-				 * file at a time, so its sources are
-				 * gathered and handed to swiftc together
-				 * once the phase has been walked.
-				 */
-				if (is_swift(src)) {
-					if (nswift < (int)(sizeof(swifts) /
-					    sizeof(swifts[0])))
-						swifts[nswift++] = strdup(src);
-					nsources++;
-					continue;
+				snprintf(arch_objs, sizeof(arch_objs), "%s/%s",
+				    objects_dir, ad);
+
+				if (narchs == 1) {
+					snprintf(product, sizeof(product), "%s",
+					    final_product);
+				} else {
+					char bin[PATH_MAX];
+
+					snprintf(bin, sizeof(bin), "%s/Binary",
+					    arch_objs);
+
+					if (mkdirs(bin) != 0) {
+						fprintf(stderr, "xcodebuild:"
+						    " error: cannot create"
+						    " %s\n", bin);
+						rc = 1;
+						break;
+					}
+
+					snprintf(product, sizeof(product),
+					    "%s/%s", bin, exe_base);
 				}
 
-				if (!is_compilable(src))
-					continue;
-
-				base = strrchr(src, '/');
-				base = (base != NULL) ? base + 1 : src;
-
-				{
-					char stem[PATH_MAX];
-					char *dot;
-
-					snprintf(stem, sizeof(stem), "%s", base);
-					if ((dot = strrchr(stem, '.')) != NULL)
-						*dot = '\0';
-
-					snprintf(obj, sizeof(obj), "%s/%s.o",
-					    objects_dir, stem);
-				}
-
-				argv[a++] = clang;
-				argv[a++] = (char *)"-c";
-				if (sdkroot != NULL && *sdkroot != '\0') {
-					argv[a++] = (char *)"-isysroot";
-					argv[a++] = (char *)sdkroot;
-				}
-
-				/* What the project asks the compiler for. */
-				a = add_setting_args(argv, a, 240,
-				    settings_get(t, "HEADER_SEARCH_PATHS"),
-				    "-I", srcroot);
-				a = add_setting_args(argv, a, 240,
-				    settings_get(t, "USER_HEADER_SEARCH_PATHS"),
-				    "-I", srcroot);
-				a = add_setting_args(argv, a, 240,
-				    settings_get(t, "FRAMEWORK_SEARCH_PATHS"),
-				    "-F", srcroot);
-				a = add_setting_args(argv, a, 240,
-				    settings_get(t, "GCC_PREPROCESSOR_DEFINITIONS"),
-				    "-D", NULL);
-
-				/*
-				 * Ask for the header list while compiling:
-				 * it costs nothing here, and it is the only
-				 * record of what this object was built from.
-				 */
-				snprintf(dep, sizeof(dep), "%s.d", obj);
-				snprintf(cmdstamp, sizeof(cmdstamp), "%s.cmd",
-				    obj);
-
-				argv[a++] = (char *)"-MMD";
-				argv[a++] = (char *)"-MF";
-				argv[a++] = dep;
-				argv[a++] = (char *)"-o";
-				argv[a++] = obj;
-				argv[a++] = (char *)src;
-				argv[a] = NULL;
-
-				idlist_add(&made, obj);
-				idlist_add(&made, dep);
-				idlist_add(&made, cmdstamp);
-
-				if (source_up_to_date(obj, src, dep, cmdstamp,
-				    argv)) {
-					if (nobjs < (int)(sizeof(objs) /
-					    sizeof(objs[0])))
-						objs[nobjs++] = strdup(obj);
-					nsources++;
-					continue;
-				}
-
-				printf("CompileC %s\n", src);
-				if (run(argv, opts->verbose) != 0) {
+				if (mkdirs(arch_objs) != 0) {
 					fprintf(stderr, "xcodebuild: error:"
-					    " failed to compile %s\n", src);
+					    " cannot create %s\n", arch_objs);
 					rc = 1;
 					break;
 				}
 
-				record_command(cmdstamp, argv);
+				nobjs = 0;
+				nswift = 0;
 
-				if (nobjs < (int)(sizeof(objs) / sizeof(objs[0])))
-					objs[nobjs++] = strdup(obj);
-				nsources++;
-			}
+				files = bget(phase, "files");
+				for (f = 0; f < bcount(files) && rc == 0; f++) {
+					CFTypeRef bf = bderef(objects, bat(files, f));
+					char refbuf[512];
+					const char *ref = bstr(bget(bf, "fileRef"),
+					    refbuf, sizeof(refbuf));
+					const char *src;
+					char obj[PATH_MAX], *argv[256];
+					char dep[PATH_MAX], cmdstamp[PATH_MAX];
+					const char *base;
+					int a = 0;
 
-			/*
-			 * The Swift half of the target, compiled whole.  A Swift
-			 * module is one translation unit however many files it is
-			 * written across -- the files can refer to each other
-			 * without declarations -- so they go to swiftc together
-			 * and come back as a single object.
-			 */
-			if (rc == 0 && nswift > 0) {
-				char swiftc[PATH_MAX], obj[PATH_MAX], modbuf[256];
-				char swstamp[PATH_MAX];
-				char *argv[280];
-				struct timespec objtime;
-				const char *module;
-				int a = 0, j, fresh;
-
-				snprintf(swiftc, sizeof(swiftc),
-				    "%s/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
-				    devpath);
-
-				if (access(swiftc, X_OK) != 0) {
-					fprintf(stderr, "xcodebuild: error: this target"
-					    " has Swift sources but there is no swiftc"
-					    " at %s\n", swiftc);
-					rc = 1;
-				} else {
-					module = setting(t, "PRODUCT_MODULE_NAME",
-					    modbuf, sizeof(modbuf));
-					if (module == NULL)
-						module = product_name;
-
-					snprintf(obj, sizeof(obj), "%s/%s.swift.o",
-					    objects_dir, module);
-
-					argv[a++] = swiftc;
-					if (sdkroot != NULL && *sdkroot != '\0') {
-						argv[a++] = (char *)"-sdk";
-						argv[a++] = (char *)sdkroot;
-					}
-					argv[a++] = (char *)"-module-name";
-					argv[a++] = (char *)module;
-					argv[a++] = (char *)"-wmo";
-					argv[a++] = (char *)"-emit-object";
-					argv[a++] = (char *)"-o";
-					argv[a++] = obj;
-					for (j = 0; j < nswift && a < 270; j++)
-						argv[a++] = swifts[j];
-					argv[a] = NULL;
-
+					if (ref == NULL)
+						continue;
+					if ((src = pathmap_get(map, ref)) == NULL)
+						continue;
 					/*
-					 * A Swift module is compiled whole,
-					 * so any one of its sources being
-					 * newer than the object rebuilds all
-					 * of it.  There is no header list to
-					 * consult here: the sources are the
-					 * dependencies.
+					 * Swift is compiled as a module, not a
+					 * file at a time, so its sources are
+					 * gathered and handed to swiftc together
+					 * once the phase has been walked.
 					 */
-					snprintf(swstamp, sizeof(swstamp),
-					    "%s.cmd", obj);
-					fresh = mtime_of(obj, &objtime) &&
-					    !command_changed(swstamp, argv);
-
-					for (j = 0; fresh && j < nswift; j++)
-						if (out_of_date(obj, swifts[j]))
-							fresh = 0;
-
-					if (fresh) {
-						if (nobjs < (int)(sizeof(objs) /
-						    sizeof(objs[0])))
-							objs[nobjs++] =
-							    strdup(obj);
-					} else {
-						printf("CompileSwift %s (%d"
-						    " file%s)\n", module,
-						    nswift,
-						    (nswift == 1) ? "" : "s");
-
-						if (run(argv, opts->verbose) != 0) {
-							fprintf(stderr,
-							    "xcodebuild: error:"
-							    " failed to compile"
-							    " the Swift sources"
-							    " of %s\n", module);
-							rc = 1;
-						} else {
-							record_command(swstamp,
-							    argv);
-
-							if (nobjs < (int)(sizeof(objs) /
-							    sizeof(objs[0])))
-								objs[nobjs++] =
-								    strdup(obj);
-						}
+					if (is_swift(src)) {
+						if (nswift < (int)(sizeof(swifts) /
+						    sizeof(swifts[0])))
+							swifts[nswift++] = strdup(src);
+						nsources++;
+						continue;
 					}
-				}
-			}
 
-			if (rc == 0 && nobjs > 0) {
-				char *argv[512], stamp[PATH_MAX];
-				char libtool[PATH_MAX], swiftc[PATH_MAX];
-				const char *verb = "Ld";
-				int a = 0, j;
+					if (!is_compilable(src))
+						continue;
 
-				/* A bundle's binary sits in a directory of its own. */
-				if (prod.kind == PRODUCT_BUNDLE) {
-					char dir[PATH_MAX];
-					const char *sl = strrchr(product, '/');
+					base = strrchr(src, '/');
+					base = (base != NULL) ? base + 1 : src;
 
-					snprintf(dir, sizeof(dir), "%.*s",
-					    (int)(sl - product), product);
-					if (mkdirs(dir) != 0) {
-						fprintf(stderr, "xcodebuild: error:"
-						    " cannot create %s\n", dir);
-						rc = 1;
-					}
-				}
+					{
+						char stem[PATH_MAX];
+						char *dot;
 
-				if (rc == 0 && prod.kind == PRODUCT_STATIC_LIB) {
-					/*
-					 * An archive, not a link.  libtool is what
-					 * Xcode runs for a static library, and it is
-					 * in the toolchain beside clang.
-					 */
-					snprintf(libtool, sizeof(libtool),
-					    "%s/Toolchains/XcodeDefault.xctoolchain"
-					    "/usr/bin/libtool", devpath);
+						snprintf(stem, sizeof(stem), "%s", base);
+						if ((dot = strrchr(stem, '.')) != NULL)
+							*dot = '\0';
 
-					argv[a++] = libtool;
-					argv[a++] = (char *)"-static";
-					argv[a++] = (char *)"-o";
-					argv[a++] = product;
-					for (j = 0; j < nobjs; j++)
-						argv[a++] = objs[j];
-					argv[a] = NULL;
-
-					verb = "Libtool";
-				} else if (rc == 0) {
-					/*
-					 * A target with Swift in it is linked by
-					 * swiftc, which knows to bring in the Swift
-					 * runtime and the standard library; clang
-					 * would leave those symbols undefined.
-					 *
-					 * swiftc is declared with the rest of
-					 * the link: argv keeps a pointer to
-					 * it until the command runs, and a
-					 * buffer scoped to this branch would
-					 * be gone by then.
-					 */
-					if (nswift > 0) {
-						snprintf(swiftc, sizeof(swiftc),
-						    "%s/Toolchains/XcodeDefault"
-						    ".xctoolchain/usr/bin/swiftc",
-						    devpath);
-						argv[a++] = swiftc;
-						if (dylib)
-							argv[a++] = (char *)"-emit-library";
-						if (sdkroot != NULL && *sdkroot != '\0') {
-							argv[a++] = (char *)"-sdk";
-							argv[a++] = (char *)sdkroot;
-						}
-						goto have_linker;
+						snprintf(obj, sizeof(obj), "%s/%s.o",
+						    arch_objs, stem);
 					}
 
 					argv[a++] = clang;
-					if (dylib)
-						argv[a++] = (char *)"-dynamiclib";
+					argv[a++] = (char *)"-c";
+					if (archs[ai][0] != '\0') {
+						argv[a++] = (char *)"-arch";
+						argv[a++] = archs[ai];
+					}
 					if (sdkroot != NULL && *sdkroot != '\0') {
 						argv[a++] = (char *)"-isysroot";
 						argv[a++] = (char *)sdkroot;
 					}
-have_linker:
+
+					/* What the project asks the compiler for. */
+					a = add_setting_args(argv, a, 240,
+					    settings_get(t, "HEADER_SEARCH_PATHS"),
+					    "-I", srcroot);
+					a = add_setting_args(argv, a, 240,
+					    settings_get(t, "USER_HEADER_SEARCH_PATHS"),
+					    "-I", srcroot);
+					a = add_setting_args(argv, a, 240,
+					    settings_get(t, "FRAMEWORK_SEARCH_PATHS"),
+					    "-F", srcroot);
+					a = add_setting_args(argv, a, 240,
+					    settings_get(t, "GCC_PREPROCESSOR_DEFINITIONS"),
+					    "-D", NULL);
+
+					/*
+					 * Ask for the header list while compiling:
+					 * it costs nothing here, and it is the only
+					 * record of what this object was built from.
+					 */
+					snprintf(dep, sizeof(dep), "%s.d", obj);
+					snprintf(cmdstamp, sizeof(cmdstamp), "%s.cmd",
+					    obj);
+
+					argv[a++] = (char *)"-MMD";
+					argv[a++] = (char *)"-MF";
+					argv[a++] = dep;
 					argv[a++] = (char *)"-o";
-					argv[a++] = product;
-					for (j = 0; j < nobjs; j++)
-						argv[a++] = objs[j];
-
-					/*
-					 * What the project says this target links
-					 * against, after its own objects: a static
-					 * library only resolves symbols for objects
-					 * already on the line.
-					 */
-					a = add_link_inputs(argv, a,
-					    (int)(sizeof(argv) / sizeof(argv[0])) - 1,
-					    objects, chosen, map, build_dir, sdkroot,
-					    devpath, NULL);
-
-					if (dylib && instname[0] != '\0')
-						a = add_linker_arg(argv, a,
-						    (int)(sizeof(argv) /
-						    sizeof(argv[0])) - 1,
-						    "-install_name", instname);
-
-					/*
-					 * Where this binary looks for the dylibs it
-					 * links.  An install name beginning @rpath
-					 * means nothing without one.
-					 */
-					a = add_rpath_args(argv, a,
-					    (int)(sizeof(argv) / sizeof(argv[0])) - 1,
-					    setting(t, "LD_RUNPATH_SEARCH_PATHS", rpbuf,
-					    sizeof(rpbuf)));
-
+					argv[a++] = obj;
+					argv[a++] = (char *)src;
 					argv[a] = NULL;
 
-					verb = "Ld";
+					idlist_add(&made, obj);
+					idlist_add(&made, dep);
+					idlist_add(&made, cmdstamp);
+
+					if (source_up_to_date(obj, src, dep, cmdstamp,
+					    argv)) {
+						if (nobjs < (int)(sizeof(objs) /
+						    sizeof(objs[0])))
+							objs[nobjs++] = strdup(obj);
+						nsources++;
+						continue;
+					}
+
+					printf("CompileC %s\n", src);
+					if (run(argv, opts->verbose) != 0) {
+						fprintf(stderr, "xcodebuild: error:"
+						    " failed to compile %s\n", src);
+						rc = 1;
+						break;
+					}
+
+					record_command(cmdstamp, argv);
+
+					if (nobjs < (int)(sizeof(objs) / sizeof(objs[0])))
+						objs[nobjs++] = strdup(obj);
+					nsources++;
 				}
 
 				/*
-				 * Relink only when something on the line is
-				 * newer than the product, or the line itself
-				 * has changed.
+				 * The Swift half of the target, compiled whole.  A Swift
+				 * module is one translation unit however many files it is
+				 * written across -- the files can refer to each other
+				 * without declarations -- so they go to swiftc together
+				 * and come back as a single object.
 				 */
-				snprintf(stamp, sizeof(stamp), "%s/%s.linked",
-				    obj_dir, product_name);
+				if (rc == 0 && nswift > 0) {
+					char swiftc[PATH_MAX], obj[PATH_MAX], modbuf[256];
+					char swstamp[PATH_MAX];
+					char *argv[280];
+					struct timespec objtime;
+					const char *module;
+					int a = 0, j, fresh;
 
-				idlist_add(&made, product);
+					snprintf(swiftc, sizeof(swiftc),
+					    "%s/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+					    devpath);
 
-				if (rc == 0 && !link_up_to_date(product, argv,
-				    stamp)) {
-					printf("%s %s\n", verb, product);
-
-					if (run(argv, opts->verbose) != 0) {
-						fprintf(stderr, "xcodebuild:"
-						    " error: link failed\n");
+					if (access(swiftc, X_OK) != 0) {
+						fprintf(stderr, "xcodebuild: error: this target"
+						    " has Swift sources but there is no swiftc"
+						    " at %s\n", swiftc);
 						rc = 1;
 					} else {
-						record_command(stamp, argv);
+						module = setting(t, "PRODUCT_MODULE_NAME",
+						    modbuf, sizeof(modbuf));
+						if (module == NULL)
+							module = product_name;
+
+						snprintf(obj, sizeof(obj), "%s/%s.swift.o",
+						    arch_objs, module);
+
+						argv[a++] = swiftc;
+						if (sdkroot != NULL && *sdkroot != '\0') {
+							argv[a++] = (char *)"-sdk";
+							argv[a++] = (char *)sdkroot;
+						}
+						if (archs[ai][0] != '\0') {
+							snprintf(triple, sizeof(triple),
+							    "%s-apple-macos%s", archs[ai],
+							    (deploy != NULL) ? deploy :
+							    "13.0");
+							argv[a++] = (char *)"-target";
+							argv[a++] = triple;
+						}
+						argv[a++] = (char *)"-module-name";
+						argv[a++] = (char *)module;
+						argv[a++] = (char *)"-wmo";
+						argv[a++] = (char *)"-emit-object";
+						argv[a++] = (char *)"-o";
+						argv[a++] = obj;
+						for (j = 0; j < nswift && a < 270; j++)
+							argv[a++] = swifts[j];
+						argv[a] = NULL;
+
+						/*
+						 * A Swift module is compiled whole,
+						 * so any one of its sources being
+						 * newer than the object rebuilds all
+						 * of it.  There is no header list to
+						 * consult here: the sources are the
+						 * dependencies.
+						 */
+						snprintf(swstamp, sizeof(swstamp),
+						    "%s.cmd", obj);
+						fresh = mtime_of(obj, &objtime) &&
+						    !command_changed(swstamp, argv);
+
+						for (j = 0; fresh && j < nswift; j++)
+							if (out_of_date(obj, swifts[j]))
+								fresh = 0;
+
+						if (fresh) {
+							if (nobjs < (int)(sizeof(objs) /
+							    sizeof(objs[0])))
+								objs[nobjs++] =
+								    strdup(obj);
+						} else {
+							printf("CompileSwift %s (%d"
+							    " file%s)\n", module,
+							    nswift,
+							    (nswift == 1) ? "" : "s");
+
+							if (run(argv, opts->verbose) != 0) {
+								fprintf(stderr,
+								    "xcodebuild: error:"
+								    " failed to compile"
+								    " the Swift sources"
+								    " of %s\n", module);
+								rc = 1;
+							} else {
+								record_command(swstamp,
+								    argv);
+
+								if (nobjs < (int)(sizeof(objs) /
+								    sizeof(objs[0])))
+									objs[nobjs++] =
+									    strdup(obj);
+							}
+						}
 					}
 				}
 
+				if (rc == 0 && nobjs > 0) {
+					char *argv[512], stamp[PATH_MAX];
+					char libtool[PATH_MAX], swiftc[PATH_MAX];
+					const char *verb = "Ld";
+					int a = 0, j;
+
+					/* A bundle's binary sits in a directory of its own. */
+					if (prod.kind == PRODUCT_BUNDLE) {
+						char dir[PATH_MAX];
+						const char *sl = strrchr(product, '/');
+
+						snprintf(dir, sizeof(dir), "%.*s",
+						    (int)(sl - product), product);
+						if (mkdirs(dir) != 0) {
+							fprintf(stderr, "xcodebuild: error:"
+							    " cannot create %s\n", dir);
+							rc = 1;
+						}
+					}
+
+					if (rc == 0 && prod.kind == PRODUCT_STATIC_LIB) {
+						/*
+						 * An archive, not a link.  libtool is what
+						 * Xcode runs for a static library, and it is
+						 * in the toolchain beside clang.
+						 */
+						snprintf(libtool, sizeof(libtool),
+						    "%s/Toolchains/XcodeDefault.xctoolchain"
+						    "/usr/bin/libtool", devpath);
+
+						argv[a++] = libtool;
+						argv[a++] = (char *)"-static";
+						argv[a++] = (char *)"-o";
+						argv[a++] = product;
+						for (j = 0; j < nobjs; j++)
+							argv[a++] = objs[j];
+						argv[a] = NULL;
+
+						verb = "Libtool";
+					} else if (rc == 0) {
+						/*
+						 * A target with Swift in it is linked by
+						 * swiftc, which knows to bring in the Swift
+						 * runtime and the standard library; clang
+						 * would leave those symbols undefined.
+						 *
+						 * swiftc is declared with the rest of
+						 * the link: argv keeps a pointer to
+						 * it until the command runs, and a
+						 * buffer scoped to this branch would
+						 * be gone by then.
+						 */
+						if (nswift > 0) {
+							snprintf(swiftc, sizeof(swiftc),
+							    "%s/Toolchains/XcodeDefault"
+							    ".xctoolchain/usr/bin/swiftc",
+							    devpath);
+							argv[a++] = swiftc;
+
+							/*
+							 * swiftc links for the
+							 * machine it runs on
+							 * unless told, and would
+							 * refuse the objects of
+							 * any other.
+							 */
+							if (archs[ai][0] != '\0') {
+								argv[a++] = (char *)"-target";
+								argv[a++] = triple;
+							}
+
+							if (dylib)
+								argv[a++] = (char *)"-emit-library";
+							if (sdkroot != NULL && *sdkroot != '\0') {
+								argv[a++] = (char *)"-sdk";
+								argv[a++] = (char *)sdkroot;
+							}
+							goto have_linker;
+						}
+
+						argv[a++] = clang;
+						if (archs[ai][0] != '\0') {
+							argv[a++] = (char *)"-arch";
+							argv[a++] = archs[ai];
+						}
+						if (dylib)
+							argv[a++] = (char *)"-dynamiclib";
+						if (sdkroot != NULL && *sdkroot != '\0') {
+							argv[a++] = (char *)"-isysroot";
+							argv[a++] = (char *)sdkroot;
+						}
+have_linker:
+						argv[a++] = (char *)"-o";
+						argv[a++] = product;
+						for (j = 0; j < nobjs; j++)
+							argv[a++] = objs[j];
+
+						/*
+						 * What the project says this target links
+						 * against, after its own objects: a static
+						 * library only resolves symbols for objects
+						 * already on the line.
+						 */
+						a = add_link_inputs(argv, a,
+						    (int)(sizeof(argv) / sizeof(argv[0])) - 1,
+						    objects, chosen, map, build_dir, sdkroot,
+						    devpath, NULL);
+
+						if (dylib && instname[0] != '\0')
+							a = add_linker_arg(argv, a,
+							    (int)(sizeof(argv) /
+							    sizeof(argv[0])) - 1,
+							    "-install_name", instname);
+
+						/*
+						 * Where this binary looks for the dylibs it
+						 * links.  An install name beginning @rpath
+						 * means nothing without one.
+						 */
+						a = add_rpath_args(argv, a,
+						    (int)(sizeof(argv) / sizeof(argv[0])) - 1,
+						    setting(t, "LD_RUNPATH_SEARCH_PATHS", rpbuf,
+						    sizeof(rpbuf)));
+
+						argv[a] = NULL;
+
+						verb = "Ld";
+					}
+
+					/*
+					 * Relink only when something on the line is
+					 * newer than the product, or the line itself
+					 * has changed.
+					 */
+					snprintf(stamp, sizeof(stamp),
+					    "%s/%s.linked", arch_objs,
+					    product_name);
+
+					idlist_add(&made, product);
+
+					if (rc == 0 && !link_up_to_date(product, argv,
+					    stamp)) {
+						printf("%s %s\n", verb, product);
+
+						if (run(argv, opts->verbose) != 0) {
+							fprintf(stderr, "xcodebuild:"
+							    " error: link failed\n");
+							rc = 1;
+						} else {
+							record_command(stamp, argv);
+						}
+					}
+
+				}
+
+
+				for (k = 0; k < nobjs; k++)
+					free(objs[k]);
+				for (k = 0; k < nswift; k++)
+					free(swifts[k]);
+				nobjs = 0;
+				nswift = 0;
 			}
+
+			/*
+			 * One binary holding every architecture.  Each was
+			 * linked beside its own objects; lipo puts them in
+			 * one file, which is all a universal binary is.
+			 */
+			if (rc == 0 && narchs > 1) {
+				char *largv[16], lipo[PATH_MAX];
+				char bins[8][PATH_MAX], dir[PATH_MAX];
+				const char *sl;
+				int la = 0, k, stale = 0;
+
+				for (k = 0; k < narchs; k++) {
+					snprintf(bins[k], sizeof(bins[k]),
+					    "%s/%s/Binary/%s", objects_dir,
+					    archs[k], exe_base);
+
+					if (out_of_date(final_product, bins[k]))
+						stale = 1;
+				}
+
+				snprintf(dir, sizeof(dir), "%s", final_product);
+				if ((sl = strrchr(dir, '/')) != NULL) {
+					*(char *)sl = '\0';
+					if (mkdirs(dir) != 0)
+						rc = 1;
+				}
+
+				snprintf(lipo, sizeof(lipo),
+				    "%s/Toolchains/XcodeDefault.xctoolchain"
+				    "/usr/bin/lipo", devpath);
+
+				largv[la++] = lipo;
+				largv[la++] = (char *)"-create";
+				for (k = 0; k < narchs && la < 12; k++)
+					largv[la++] = bins[k];
+				largv[la++] = (char *)"-output";
+				largv[la++] = final_product;
+				largv[la] = NULL;
+
+				if (rc == 0 && stale) {
+					printf("CreateUniversalBinary %s\n",
+					    final_product);
+
+					if (run(largv, opts->verbose) != 0) {
+						fprintf(stderr, "xcodebuild:"
+						    " error: cannot join the"
+						    " architectures of %s\n",
+						    final_product);
+						rc = 1;
+					}
+				}
+			}
+
+			snprintf(product, sizeof(product), "%s", final_product);
+			idlist_add(&made, product);
 
 			/*
 			 * A bundle needs an Info.plist naming its

@@ -65,6 +65,14 @@ XT_SDK_CANONICAL?=	macosx${XT_SDK_VERSION}
 XT_SDK_INTERNAL_CANONICAL?=	macosx${XT_SDK_VERSION}.internal
 XT_DEFAULT_ARCH!=	uname -m 2>/dev/null || echo arm64
 
+# The architectures the SDK can build for, which is not the same as the
+# one it is being built on: the stubs this tree generates carry
+# arm64, arm64e and x86_64, and a build asks the SDK what it supports
+# before it will compile for anything.  arm64e is left out for the same
+# reason Apple leaves it out -- it is not an architecture a project
+# asks for by name.
+XT_SDK_ARCHS?=		arm64 x86_64
+
 # The toolchain identifier is Apple's on purpose: it is the name build
 # systems look up to find the default toolchain, so a replacement has to
 # answer to it, exactly as our tools have to answer to Apple's argv.
@@ -169,14 +177,14 @@ SDKSETTINGS=	${TOP}/mk/scripts/emit-sdksettings.sh
 ${SDK_DIR}/SDKSettings.plist: ${SDKSETTINGS}
 	@mkdir -p ${.TARGET:H}
 	@${SDKSETTINGS} ${XT_SDK_CANONICAL} "macOS ${XT_SDK_VERSION}" \
-	    ${XT_SDK_VERSION} ${XT_DEPLOYMENT_TARGET} ${XT_DEFAULT_ARCH} \
+	    ${XT_SDK_VERSION} ${XT_DEPLOYMENT_TARGET} "${XT_SDK_ARCHS}" \
 	    > ${.TARGET}
 
 ${INTERNAL_SDK_DIR}/SDKSettings.plist: ${SDKSETTINGS}
 	@mkdir -p ${.TARGET:H}
 	@${SDKSETTINGS} ${XT_SDK_INTERNAL_CANONICAL} \
 	    "macOS ${XT_SDK_VERSION} Internal" \
-	    ${XT_SDK_VERSION} ${XT_DEPLOYMENT_TARGET} ${XT_DEFAULT_ARCH} \
+	    ${XT_SDK_VERSION} ${XT_DEPLOYMENT_TARGET} "${XT_SDK_ARCHS}" \
 	    > ${.TARGET}
 
 # --- toolchain shims --------------------------------------------------

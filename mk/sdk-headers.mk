@@ -43,7 +43,7 @@ MSUN=		${TOP}/lib/msun
 sdk-headers:
 	@${ECHO} "sdk: installing headers into MacOSX.sdk/usr/include"
 	@mkdir -p ${SDK_INC}/sys ${SDK_INC}/mach ${SDK_INC}/machine \
-	    ${SDK_INC}/arm ${SDK_INC}/pthread ${SDK_INC}/malloc \
+	    ${SDK_INC}/arm ${SDK_INC}/i386 ${SDK_INC}/pthread ${SDK_INC}/malloc \
 	    ${SDK_INC}/os ${SDK_INC}/dispatch ${SDK_INC}/libkern \
 	    ${SDK_INC}/net ${SDK_INC}/netinet ${SDK_INC}/arpa \
 	    ${SDK_INC}/uuid ${SDK_INC}/xpc ${SDK_INC}/CommonCrypto
@@ -83,17 +83,25 @@ sdk-headers:
 	@cp -f ${XNU}/osfmk/mach/*.h ${SDK_INC}/mach/ 2>/dev/null || true
 	@cp -Rf ${XNU}/osfmk/mach/machine/. ${SDK_INC}/mach/machine/ 2>/dev/null || true
 	@cp -Rf ${XNU}/osfmk/mach/arm/. ${SDK_INC}/mach/arm/ 2>/dev/null || true
+	@cp -Rf ${XNU}/osfmk/mach/i386/. ${SDK_INC}/mach/i386/ 2>/dev/null || true
 	@cp -f ${XNU}/bsd/net/*.h ${SDK_INC}/net/ 2>/dev/null || true
 	@cp -f ${XNU}/bsd/netinet/*.h ${SDK_INC}/netinet/ 2>/dev/null || true
 	@cp -f ${XNU}/bsd/uuid/*.h ${SDK_INC}/uuid/ 2>/dev/null || true
 	@cp -f ${XNU}/libkern/libkern/*.h ${SDK_INC}/libkern/ 2>/dev/null || true
-	@mkdir -p ${SDK_INC}/libkern/arm
+	@mkdir -p ${SDK_INC}/libkern/arm ${SDK_INC}/libkern/i386
 	@cp -f ${XNU}/libkern/libkern/arm/*.h ${SDK_INC}/libkern/arm/ 2>/dev/null || true
+	@cp -f ${XNU}/libkern/libkern/i386/*.h ${SDK_INC}/libkern/i386/ 2>/dev/null || true
 
 	# machine/ is the per-architecture indirection every sys header
-	# reaches through; on this hardware it is arm.
+	# reaches through, and it reaches through to whichever machine is
+	# being compiled for rather than the one doing the compiling.  An
+	# SDK carries the headers of every architecture it can build, so
+	# both are installed: without i386 here, -arch x86_64 stops on
+	# machine/_types.h before it has read anything else.
 	@cp -f ${XNU}/osfmk/arm/*.h ${SDK_INC}/arm/ 2>/dev/null || true
 	@cp -f ${XNU}/bsd/arm/*.h ${SDK_INC}/arm/ 2>/dev/null || true
+	@cp -f ${XNU}/osfmk/i386/*.h ${SDK_INC}/i386/ 2>/dev/null || true
+	@cp -f ${XNU}/bsd/i386/*.h ${SDK_INC}/i386/ 2>/dev/null || true
 	@cp -f ${XNU}/bsd/machine/*.h ${SDK_INC}/machine/ 2>/dev/null || true
 	@cp -f ${XNU}/osfmk/machine/*.h ${SDK_INC}/machine/ 2>/dev/null || true
 

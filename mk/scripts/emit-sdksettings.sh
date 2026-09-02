@@ -27,11 +27,22 @@ if [ $# -ne 5 ]; then
 	exit 1
 fi
 
+# The architectures this SDK can build for.  <arch> may name several,
+# separated by spaces, and each becomes an entry: a build asks the SDK
+# what it supports before it will compile for anything, and one that
+# claims a single architecture cannot produce a universal binary.
+arch_entries=""
+
 canonical=$1
 display=$2
 version=$3
 deployment=$4
 arch=$5
+
+for a in ${arch}; do
+	arch_entries="${arch_entries}				<string>${a}</string>
+"
+done
 
 cat <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -63,8 +74,7 @@ cat <<PLIST
 		<dict>
 			<key>Archs</key>
 			<array>
-				<string>${arch}</string>
-			</array>
+${arch_entries}			</array>
 			<key>DefaultDeploymentTarget</key>
 			<string>${deployment}</string>
 			<key>PlatformFamilyName</key>

@@ -294,9 +294,133 @@ static int toolchain_ini_handler(void *user, const char *section, const char *na
 	return 1;
 }
 
+static char *cf_string_dup(CFTypeRef v)
+{
+	char buf[256];
+
+	if (v == NULL || CFGetTypeID(v) != CFStringGetTypeID())
+		return NULL;
+	if (!CFStringGetCString((CFStringRef)v, buf, sizeof(buf),
+	                        kCFStringEncodingUTF8))
+		return NULL;
+
+	return strdup(buf);
+}
+
+static CFTypeRef cf_dict_get(CFTypeRef dict, const char *key)
+{
+	CFStringRef k;
+	CFTypeRef v;
+
+	if (dict == NULL || CFGetTypeID(dict) != CFDictionaryGetTypeID())
+		return NULL;
+	if ((k = CFStringCreateWithCString(NULL, key,
+	                                   kCFStringEncodingUTF8)) == NULL)
+		return NULL;
+
+	v = CFDictionaryGetValue((CFDictionaryRef)dict, k);
+	CFRelease(k);
+
+	return v;
+}
+
+/* What an SDK says about itself, from the file Apple's SDKs carry. */
+static int read_sdk_settings_plist(const char *path, sdk_info *out)
+{
+	CFPropertyListRef root;
+	CFTypeRef targets, macos;
+	CFDataRef data;
+	long len;
+	FILE *fp;
+	char *raw;
+
+	if ((fp = fopen(path, "rb")) == NULL)
+		return -1;
+
+	if (fseek(fp, 0, SEEK_END) != 0 || (len = ftell(fp)) < 0) {
+		fclose(fp);
+		return -1;
+	}
+	rewind(fp);
+
+	if ((raw = malloc((size_t)len)) == NULL) {
+		fclose(fp);
+		return -1;
+	}
+
+	if (len > 0 && fread(raw, 1, (size_t)len, fp) != (size_t)len) {
+		free(raw);
+		fclose(fp);
+		return -1;
+	}
+	fclose(fp);
+
+	data = CFDataCreate(NULL, (const UInt8 *)raw, (CFIndex)len);
+	free(raw);
+	if (data == NULL)
+		return -1;
+
+	root = CFPropertyListCreateWithData(NULL, data, 0, NULL, NULL);
+	CFRelease(data);
+	if (root == NULL)
+		return -1;
+
+	out->version = cf_string_dup(cf_dict_get(root, "Version"));
+	out->name = cf_string_dup(cf_dict_get(root, "CanonicalName"));
+	out->deployment_target =
+	    cf_string_dup(cf_dict_get(root, "DefaultDeploymentTarget"));
+
+	/* The architectures this SDK can build for, as one list. */
+	targets = cf_dict_get(root, "SupportedTargets");
+	if ((macos = cf_dict_get(targets, "macosx")) != NULL) {
+		CFTypeRef archs = cf_dict_get(macos, "Archs");
+
+		if (out->deployment_target == NULL)
+			out->deployment_target = cf_string_dup(
+			    cf_dict_get(macos, "DefaultDeploymentTarget"));
+
+		if (archs != NULL && CFGetTypeID(archs) == CFArrayGetTypeID()) {
+			char list[256] = "";
+			CFIndex i;
+
+			for (i = 0; i < CFArrayGetCount((CFArrayRef)archs); i++) {
+				char *a = cf_string_dup(
+				    CFArrayGetValueAtIndex((CFArrayRef)archs, i));
+
+				if (a == NULL)
+					continue;
+				if (list[0] != '\0')
+					strlcat(list, " ", sizeof(list));
+				strlcat(list, a, sizeof(list));
+				free(a);
+			}
+
+			if (list[0] != '\0')
+				out->default_arch = strdup(list);
+		}
+	}
+
+	CFRelease(root);
+
+	return (out->version != NULL || out->deployment_target != NULL) ? 0 : -1;
+}
+
 static int read_sdk_info(const char *path, sdk_info *out)
 {
 	char info_path[PATH_MAX];
+
+	/*
+	 * An SDK describes itself in SDKSettings.plist -- Apple's carry
+	 * one and so does this tree's.  Only info.ini was read before,
+	 * which no SDK has ever had, so nothing an SDK said was heard at
+	 * all: its version, its architectures and its deployment target
+	 * all fell back to placeholders, and swiftc refuses a target
+	 * triple built from a deployment target of 1.0.
+	 */
+	snprintf(info_path, sizeof(info_path), "%s/SDKSettings.plist", path);
+	if (read_sdk_settings_plist(info_path, out) == 0)
+		return 0;
+
 	snprintf(info_path, sizeof(info_path), "%s/info.ini", path);
 	return ini_parse(info_path, sdk_ini_handler, out) == -1 ? -1 : 0;
 }
@@ -400,8 +524,16 @@ int settings_load_defaults(settings_table *t, const char *devpath,
 		sdk.default_arch = strdup(arch);
 	}
 
-	/* Resolve deployment target. */
-	const char *deploy = sdk.deployment_target ? sdk.deployment_target : "1.0";
+	/*
+	 * Resolve deployment target.
+	 *
+	 * An SDK that does not name one deploys to itself: Apple reports
+	 * the SDK's own version for a project that says nothing, and a
+	 * placeholder like 1.0 is not a version anything will accept --
+	 * swiftc refuses a target triple built from it outright.
+	 */
+	const char *deploy = sdk.deployment_target ? sdk.deployment_target :
+	    (sdk.version ? sdk.version : "1.0");
 
 	/* Platform / SDK-derived values. */
 	settings_defaults_set(t, "ACTION", "build");
@@ -410,6 +542,10 @@ int settings_load_defaults(settings_table *t, const char *devpath,
 	settings_defaults_set(t, "ALWAYS_SEARCH_USER_PATHS", "NO");
 	settings_defaults_set(t, "ARCHS", sdk.default_arch ? sdk.default_arch : "arm64");
 	settings_defaults_set(t, "BUILD_ACTIVE_ARCH_ONLY", "YES");
+	/* Apple's own default, read back from -showBuildSettings on a
+	   project that does not set it.  Xcode's templates say YES for
+	   Debug; a project that wants that says so itself. */
+	settings_defaults_set(t, "ONLY_ACTIVE_ARCH", "NO");
 	settings_defaults_set(t, "BUILD_DIR", "");
 	settings_defaults_set(t, "BUILD_ROOT", "");
 	settings_defaults_set(t, "BUILT_PRODUCTS_DIR", "");
