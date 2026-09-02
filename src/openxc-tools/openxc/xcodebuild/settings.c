@@ -670,7 +670,6 @@ int settings_load_defaults(settings_table *t, const char *devpath,
 	settings_defaults_set(t, "GCC_VERSION_IDENTIFIER", "com_apple_compilers_llvm_clang_1_0");
 	settings_defaults_set(t, "GCC_WARN_64_TO_32_BIT_CONVERSION", "NO");
 	settings_defaults_set(t, "GENERATE_INTERMEDIATE_TEXT_BASED_STUBS", "YES");
-	settings_defaults_set(t, "GENERATE_PKGINFO_FILE", "NO");
 	settings_defaults_set(t, "GENERATE_PRELINK_OBJECT_FILE", "NO");
 	settings_defaults_set(t, "GENERATE_PROFILING_CODE", "NO");
 	settings_defaults_set(t, "GENERATE_TEXT_BASED_STUBS", "NO");
@@ -931,7 +930,6 @@ settings_defaults_set(t, "ALWAYS_SEARCH_USER_PATHS", "YES");
 	settings_defaults_set(t, "EXECUTABLE_SUFFIX", "");
 	settings_defaults_set(t, "FILE_BASENAME", "");
 	settings_defaults_set(t, "FRAMEWORK_SEARCH_PATHS", "");
-	settings_defaults_set(t, "GENERATE_INFOPLIST_FILE", "NO");
 	settings_defaults_set(t, "GCC_C_LANGUAGE_STANDARD", "gnu11");
 	settings_defaults_set(t, "INFOPLIST_FILE", "");
 	settings_defaults_set(t, "INFOPLIST_OUTPUT_FORMAT", "same-as-input");

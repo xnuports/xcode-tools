@@ -6,6 +6,7 @@
  */
 
 #include "codesign.h"
+#include <CoreFoundation/CoreFoundation.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -73,6 +74,322 @@ find_bundle_identifier(const char *bundle_path)
 }
 
 /* ---- Core signing ---- */
+
+/* ------------------------------------------------------------------ */
+/* the bundle seal                                                      */
+/* ------------------------------------------------------------------ */
+
+/*
+ * A bundle is signed by signing the executable inside it, but the
+ * signature has to cover the rest of the bundle too or the bundle
+ * could be filled with anything afterwards.  That cover is
+ * Contents/_CodeSignature/CodeResources: every resource with its
+ * hash, sealed in turn by slot -3 of the code directory.
+ *
+ * The seal is a property of the bundle rather than of any one
+ * architecture inside it, so it is worked out once and every slice
+ * signs the same one.
+ */
+static uint8_t g_resource_seal[CS_SHA256_LEN];
+static int g_have_resource_seal;
+
+static void
+cf_set_data(CFMutableDictionaryRef d, const char *key, const uint8_t *bytes,
+    size_t len)
+{
+	CFStringRef k = CFStringCreateWithCString(NULL, key,
+	    kCFStringEncodingUTF8);
+	CFDataRef v = CFDataCreate(NULL, bytes, (CFIndex)len);
+
+	if (k != NULL && v != NULL)
+		CFDictionarySetValue(d, k, v);
+	if (k != NULL)
+		CFRelease(k);
+	if (v != NULL)
+		CFRelease(v);
+}
+
+/* Every file under a bundle's Resources, with the path it is sealed by. */
+static void
+seal_directory(const char *root, const char *rel, CFMutableDictionaryRef files,
+    CFMutableDictionaryRef files2)
+{
+	char path[4096];
+	struct dirent *e;
+	DIR *d;
+
+	snprintf(path, sizeof(path), "%s/%s", root, rel);
+	if ((d = opendir(path)) == NULL)
+		return;
+
+	while ((e = readdir(d)) != NULL) {
+		char sub[4096], full[4096];
+		uint8_t sha1[CS_SHA1_LEN], sha256[CS_SHA256_LEN];
+		struct stat st;
+		uint8_t *buf;
+		long len;
+		FILE *fp;
+
+		if (e->d_name[0] == '.')
+			continue;
+
+		snprintf(sub, sizeof(sub), "%s/%s", rel, e->d_name);
+		snprintf(full, sizeof(full), "%s/%s", root, sub);
+
+		if (lstat(full, &st) != 0)
+			continue;
+
+		if (S_ISDIR(st.st_mode)) {
+			seal_directory(root, sub, files, files2);
+			continue;
+		}
+
+		if ((fp = fopen(full, "rb")) == NULL)
+			continue;
+		if (fseek(fp, 0, SEEK_END) != 0 || (len = ftell(fp)) < 0) {
+			fclose(fp);
+			continue;
+		}
+		rewind(fp);
+		if ((buf = malloc((size_t)len + 1)) == NULL) {
+			fclose(fp);
+			continue;
+		}
+		if (len > 0 && fread(buf, 1, (size_t)len, fp) != (size_t)len) {
+			free(buf);
+			fclose(fp);
+			continue;
+		}
+		fclose(fp);
+
+		sha1_raw(buf, (size_t)len, sha1);
+		sha256_raw(buf, (size_t)len, sha256);
+		free(buf);
+
+		/*
+		 * A resource inside a .lproj is one translation of it, and
+		 * a bundle is complete without any given language, so it
+		 * is sealed as optional -- which is what Apple marks.
+		 */
+		if (strstr(sub, ".lproj/") != NULL) {
+			CFMutableDictionaryRef e1, e2;
+			CFStringRef key = CFStringCreateWithCString(NULL, sub,
+			    kCFStringEncodingUTF8);
+
+			e1 = CFDictionaryCreateMutable(NULL, 0,
+			    &kCFTypeDictionaryKeyCallBacks,
+			    &kCFTypeDictionaryValueCallBacks);
+			e2 = CFDictionaryCreateMutable(NULL, 0,
+			    &kCFTypeDictionaryKeyCallBacks,
+			    &kCFTypeDictionaryValueCallBacks);
+
+			if (key != NULL && e1 != NULL && e2 != NULL) {
+				cf_set_data(e1, "hash", sha1, sizeof(sha1));
+				CFDictionarySetValue(e1, CFSTR("optional"),
+				    kCFBooleanTrue);
+				cf_set_data(e2, "hash2", sha256, sizeof(sha256));
+				CFDictionarySetValue(e2, CFSTR("optional"),
+				    kCFBooleanTrue);
+				CFDictionarySetValue(files, key, e1);
+				CFDictionarySetValue(files2, key, e2);
+			}
+
+			if (key != NULL)
+				CFRelease(key);
+			if (e1 != NULL)
+				CFRelease(e1);
+			if (e2 != NULL)
+				CFRelease(e2);
+		} else {
+			CFMutableDictionaryRef e2 =
+			    CFDictionaryCreateMutable(NULL, 0,
+			    &kCFTypeDictionaryKeyCallBacks,
+			    &kCFTypeDictionaryValueCallBacks);
+			CFStringRef key = CFStringCreateWithCString(NULL, sub,
+			    kCFStringEncodingUTF8);
+
+			if (key != NULL && e2 != NULL) {
+				cf_set_data(files, sub, sha1, sizeof(sha1));
+				cf_set_data(e2, "hash2", sha256,
+				    sizeof(sha256));
+				CFDictionarySetValue(files2, key, e2);
+			}
+
+			if (key != NULL)
+				CFRelease(key);
+			if (e2 != NULL)
+				CFRelease(e2);
+		}
+	}
+
+	closedir(d);
+}
+
+/* One entry of the rule table: a flag or two and a weight. */
+static void
+seal_rule(CFMutableDictionaryRef rules, const char *pattern, const char *flag,
+    double weight)
+{
+	CFMutableDictionaryRef v;
+	CFStringRef key;
+
+	key = CFStringCreateWithCString(NULL, pattern, kCFStringEncodingUTF8);
+	if (key == NULL)
+		return;
+
+	if (flag == NULL && weight == 0.0) {
+		CFDictionarySetValue(rules, key, kCFBooleanTrue);
+		CFRelease(key);
+		return;
+	}
+
+	v = CFDictionaryCreateMutable(NULL, 0, &kCFTypeDictionaryKeyCallBacks,
+	    &kCFTypeDictionaryValueCallBacks);
+	if (v != NULL) {
+		if (flag != NULL) {
+			CFStringRef f = CFStringCreateWithCString(NULL, flag,
+			    kCFStringEncodingUTF8);
+
+			if (f != NULL) {
+				CFDictionarySetValue(v, f, kCFBooleanTrue);
+				CFRelease(f);
+			}
+		}
+
+		if (weight != 0.0) {
+			CFNumberRef w = CFNumberCreate(NULL, kCFNumberDoubleType,
+			    &weight);
+
+			if (w != NULL) {
+				CFDictionarySetValue(v, CFSTR("weight"), w);
+				CFRelease(w);
+			}
+		}
+
+		CFDictionarySetValue(rules, key, v);
+		CFRelease(v);
+	}
+
+	CFRelease(key);
+}
+
+/*
+ * What a bundle seals, and what it deliberately does not.
+ *
+ * Read back from a bundle Apple signed rather than invented.  The two
+ * that matter most are the omissions: Info.plist and PkgInfo are
+ * covered by the code directory's own slots, and everything under
+ * MacOS is code in its own right and signed as such, so sealing any
+ * of them here would seal them twice and verification would object.
+ */
+static CFMutableDictionaryRef
+seal_rules(int modern)
+{
+	CFMutableDictionaryRef r = CFDictionaryCreateMutable(NULL, 0,
+	    &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+
+	if (r == NULL)
+		return NULL;
+
+	if (!modern) {
+		seal_rule(r, "^Resources/", NULL, 0.0);
+		seal_rule(r, "^Resources/.*\\.lproj/", "optional", 1000.0);
+		seal_rule(r, "^Resources/.*\\.lproj/locversion.plist$", "omit",
+		    1100.0);
+		seal_rule(r, "^Resources/Base\\.lproj/", NULL, 1010.0);
+		seal_rule(r, "^version.plist$", NULL, 0.0);
+
+		return r;
+	}
+
+	seal_rule(r, "^.*", NULL, 0.0);
+	seal_rule(r, ".*\\.dSYM($|/)", NULL, 11.0);
+	seal_rule(r, "^(.*/)?\\.DS_Store$", "omit", 2000.0);
+	seal_rule(r, "^(Frameworks|SharedFrameworks|PlugIns|Plug-ins|"
+	    "XPCServices|Helpers|MacOS|Library/(Automator|Spotlight|"
+	    "LoginItems))/", "nested", 10.0);
+	seal_rule(r, "^Info\\.plist$", "omit", 20.0);
+	seal_rule(r, "^PkgInfo$", "omit", 20.0);
+	seal_rule(r, "^Resources/", NULL, 20.0);
+	seal_rule(r, "^Resources/.*\\.lproj/", "optional", 1000.0);
+	seal_rule(r, "^Resources/.*\\.lproj/locversion.plist$", "omit", 1100.0);
+	seal_rule(r, "^Resources/Base\\.lproj/", NULL, 1010.0);
+	seal_rule(r, "^[^/]+$", "nested", 10.0);
+	seal_rule(r, "^embedded\\.provisionprofile$", NULL, 20.0);
+	seal_rule(r, "^version\\.plist$", NULL, 20.0);
+
+	return r;
+}
+
+/*
+ * Write the bundle's seal and remember its hash for slot -3.
+ */
+static int
+build_code_resources(const char *bundle, const char *contents)
+{
+	CFMutableDictionaryRef root, files, files2, rules, rules2;
+	char dir[4096], path[4096];
+	CFDataRef data;
+	FILE *fp;
+	int rc = -1;
+
+	root = CFDictionaryCreateMutable(NULL, 0, &kCFTypeDictionaryKeyCallBacks,
+	    &kCFTypeDictionaryValueCallBacks);
+	files = CFDictionaryCreateMutable(NULL, 0, &kCFTypeDictionaryKeyCallBacks,
+	    &kCFTypeDictionaryValueCallBacks);
+	files2 = CFDictionaryCreateMutable(NULL, 0,
+	    &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+
+	if (root == NULL || files == NULL || files2 == NULL)
+		goto out;
+
+	snprintf(dir, sizeof(dir), "%s", contents);
+	seal_directory(dir, "Resources", files, files2);
+
+	CFDictionarySetValue(root, CFSTR("files"), files);
+	CFDictionarySetValue(root, CFSTR("files2"), files2);
+
+	if ((rules = seal_rules(0)) != NULL) {
+		CFDictionarySetValue(root, CFSTR("rules"), rules);
+		CFRelease(rules);
+	}
+	if ((rules2 = seal_rules(1)) != NULL) {
+		CFDictionarySetValue(root, CFSTR("rules2"), rules2);
+		CFRelease(rules2);
+	}
+
+	data = CFPropertyListCreateData(NULL, root, kCFPropertyListXMLFormat_v1_0,
+	    0, NULL);
+	if (data == NULL)
+		goto out;
+
+	snprintf(path, sizeof(path), "%s/_CodeSignature", contents);
+	mkdir(path, 0777);
+	snprintf(path, sizeof(path), "%s/_CodeSignature/CodeResources",
+	    contents);
+
+	if ((fp = fopen(path, "wb")) != NULL) {
+		fwrite(CFDataGetBytePtr(data), 1,
+		    (size_t)CFDataGetLength(data), fp);
+		fclose(fp);
+
+		sha256_raw(CFDataGetBytePtr(data),
+		    (size_t)CFDataGetLength(data), g_resource_seal);
+		g_have_resource_seal = 1;
+		rc = 0;
+	}
+
+	CFRelease(data);
+out:
+	if (files != NULL)
+		CFRelease(files);
+	if (files2 != NULL)
+		CFRelease(files2);
+	if (root != NULL)
+		CFRelease(root);
+
+	return rc;
+}
 
 static int
 sign_arch(struct arch_info *ai,
@@ -160,8 +477,14 @@ sign_arch(struct arch_info *ai,
 	memset(special_data + n_special * CS_SHA256_LEN, 0, CS_SHA256_LEN);
 	n_special++;
 
-	/* CodeResources (slot -3, zero for bare Mach-O) */
-	memset(special_data + n_special * CS_SHA256_LEN, 0, CS_SHA256_LEN);
+	/* CodeResources (slot -3): the bundle's seal, or zero for a bare
+	   Mach-O, which has no bundle around it to seal. */
+	if (g_have_resource_seal)
+		memcpy(special_data + n_special * CS_SHA256_LEN,
+		    g_resource_seal, CS_SHA256_LEN);
+	else
+		memset(special_data + n_special * CS_SHA256_LEN, 0,
+		    CS_SHA256_LEN);
 	n_special++;
 
 	/* Requirements (slot -2) */
@@ -848,14 +1171,49 @@ sign_bundle(const char *path, const char *identity, int force,
     const char *key_file, const char *p12_file,
     const char *key_password, const char *req_str)
 {
-	char exe_path[4096];
+	char exe_path[4096], contents[4096];
 	char *exe_name = find_bundle_executable(path);
+	struct stat st;
+
+	/*
+	 * Where a bundle keeps things depends on what kind it is.  An
+	 * application has Contents, with the binary under MacOS; a
+	 * framework is versioned, and its binary sits in the version
+	 * directory beside its Resources.
+	 */
+	snprintf(contents, sizeof(contents), "%s/Contents", path);
+
+	if (stat(contents, &st) != 0 || !S_ISDIR(st.st_mode))
+		snprintf(contents, sizeof(contents), "%s/Versions/Current",
+		    path);
+
 	if (!exe_name) {
-		fprintf(stderr, "codesign: cannot find CFBundleExecutable\n");
-		return -1;
+		/*
+		 * A bundle with no Info.plist to name its executable --
+		 * a framework built without one -- is named after itself.
+		 */
+		const char *base = strrchr(path, '/');
+		char *dot;
+
+		base = (base != NULL) ? base + 1 : path;
+		exe_name = strdup(base);
+
+		if (exe_name != NULL && (dot = strrchr(exe_name, '.')) != NULL)
+			*dot = '\0';
+
+		if (exe_name == NULL) {
+			fprintf(stderr, "codesign: cannot find"
+			    " CFBundleExecutable\n");
+			return -1;
+		}
 	}
-	snprintf(exe_path, sizeof(exe_path), "%s/Contents/MacOS/%s",
-	    path, exe_name);
+
+	snprintf(exe_path, sizeof(exe_path), "%s/MacOS/%s", contents, exe_name);
+
+	if (!cs_file_exists(exe_path))
+		snprintf(exe_path, sizeof(exe_path), "%s/%s", contents,
+		    exe_name);
+
 	free(exe_name);
 
 	if (!cs_file_exists(exe_path)) {
@@ -872,6 +1230,14 @@ sign_bundle(const char *path, const char *identity, int force,
 			final_id = id_buf;
 		}
 	}
+
+	/*
+	 * Seal the bundle before signing what is inside it: the code
+	 * directory carries the seal's hash, so it has to exist first.
+	 */
+	if (build_code_resources(path, contents) != 0)
+		fprintf(stderr, "codesign: warning: cannot write the resource"
+		    " seal for %s\n", path);
 
 	int result = sign_macho(exe_path, identity, force, adhoc,
 	    final_id, entitlements_file, cd_flags,
@@ -903,6 +1269,8 @@ sign_bundle(const char *path, const char *identity, int force,
 	if (result == 0 && g_verbose)
 		fprintf(stderr, "%s: signed\n", path);
 
+
+	g_have_resource_seal = 0;
 	return result;
 }
 

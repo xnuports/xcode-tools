@@ -838,6 +838,23 @@ build_apply_product_settings(settings_table *t, const char *product_type)
 			settings_default_if_empty(t, "INSTALL_PATH", "/usr/local/lib");
 		}
 
+		/*
+		 * Whether the bundle's plist and PkgInfo are written for
+		 * it.  These depend on what is being built -- Apple says
+		 * YES for an application and NO for a tool or a framework
+		 * -- so they cannot be constants, and a project that says
+		 * either still wins.
+		 */
+		{
+			const char *want = (prod.kind == PRODUCT_BUNDLE &&
+			    !framework) ? "YES" : "NO";
+
+			settings_default_if_empty(t, "GENERATE_INFOPLIST_FILE",
+			    want);
+			settings_default_if_empty(t, "GENERATE_PKGINFO_FILE",
+			    want);
+		}
+
 		settings_default_if_empty(t, "EXECUTABLE_NAME", exe);
 		settings_default_if_empty(t, "EXECUTABLE_PATH", epath);
 
@@ -2163,6 +2180,136 @@ sweep_stale(const char *manifest, const struct idlist *made, const char *stop)
 	fclose(fp);
 }
 
+/* ------------------------------------------------------------------ */
+/* code signing                                                         */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Which identity to sign with, or nothing when signing is turned off.
+ *
+ * Apple signs every product it builds -- a command line tool as much
+ * as an application -- and signs ad hoc unless told otherwise, which
+ * is what "-" means.  On Apple silicon that is not decoration: the
+ * kernel will not run an arm64 binary carrying no signature at all.
+ */
+static const char *
+signing_identity(settings_table *t, char *buf, size_t len)
+{
+	char allowed[16];
+	const char *a = setting(t, "CODE_SIGNING_ALLOWED", allowed,
+	    sizeof(allowed));
+	const char *id;
+
+	if (a != NULL && strcasecmp(a, "NO") == 0)
+		return NULL;
+
+	if ((id = setting(t, "CODE_SIGN_IDENTITY", buf, sizeof(buf))) == NULL ||
+	    *id == '\0') {
+		snprintf(buf, len, "-");
+		id = buf;
+	}
+
+	return id;
+}
+
+/*
+ * The entitlements to sign with.
+ *
+ * A project may name a file of its own.  Otherwise Xcode writes one
+ * for the occasion when CODE_SIGN_INJECT_BASE_ENTITLEMENTS says so,
+ * carrying get-task-allow, which is what lets a debugger attach to
+ * what was just built.  Returns NULL when there are none.
+ */
+static const char *
+signing_entitlements(settings_table *t, const char *srcroot,
+    const char *obj_dir, const char *name, char *out, size_t len)
+{
+	char buf[PATH_MAX];
+	const char *given = setting(t, "CODE_SIGN_ENTITLEMENTS", buf,
+	    sizeof(buf));
+	CFMutableDictionaryRef ent;
+	CFDataRef data;
+	const char *inject;
+	char ibuf[16];
+
+	if (given != NULL) {
+		if (given[0] == '/')
+			snprintf(out, len, "%s", given);
+		else
+			snprintf(out, len, "%s/%s", srcroot, given);
+		return out;
+	}
+
+	inject = setting(t, "CODE_SIGN_INJECT_BASE_ENTITLEMENTS", ibuf,
+	    sizeof(ibuf));
+	if (inject == NULL || strcasecmp(inject, "YES") != 0)
+		return NULL;
+
+	ent = CFDictionaryCreateMutable(NULL, 0, &kCFTypeDictionaryKeyCallBacks,
+	    &kCFTypeDictionaryValueCallBacks);
+	if (ent == NULL)
+		return NULL;
+
+	CFDictionarySetValue(ent, CFSTR("com.apple.security.get-task-allow"),
+	    kCFBooleanTrue);
+
+	data = CFPropertyListCreateData(NULL, ent, kCFPropertyListXMLFormat_v1_0,
+	    0, NULL);
+	CFRelease(ent);
+	if (data == NULL)
+		return NULL;
+
+	snprintf(out, len, "%s/%s.xcent", obj_dir, name);
+
+	if (write_if_changed(out, CFDataGetBytePtr(data),
+	    (size_t)CFDataGetLength(data)) != 0) {
+		CFRelease(data);
+		return NULL;
+	}
+
+	CFRelease(data);
+	return out;
+}
+
+/* Sign one thing with this tree's own codesign. */
+static int
+codesign_run(const char *path, const char *identity, const char *ident,
+    const char *entitlements, const char *devpath, int echo)
+{
+	char tool[PATH_MAX];
+	char *argv[16];
+	int a = 0;
+
+	snprintf(tool, sizeof(tool), "%s/usr/bin/codesign", devpath);
+
+	if (access(tool, X_OK) != 0) {
+		fprintf(stderr, "xcodebuild: error: no codesign at %s\n", tool);
+		return -1;
+	}
+
+	argv[a++] = tool;
+	argv[a++] = (char *)"--force";
+	argv[a++] = (char *)"--sign";
+	argv[a++] = (char *)identity;
+
+	if (ident != NULL && *ident != '\0') {
+		argv[a++] = (char *)"-i";
+		argv[a++] = (char *)ident;
+	}
+
+	if (entitlements != NULL) {
+		argv[a++] = (char *)"--entitlements";
+		argv[a++] = (char *)entitlements;
+	}
+
+	argv[a++] = (char *)path;
+	argv[a] = NULL;
+
+	printf("CodeSign %s\n", path);
+
+	return run(argv, echo);
+}
+
 /*
  * Where a copy files phase puts what it copies.
  *
@@ -2362,6 +2509,26 @@ install_copy_files(CFTypeRef objects, CFTypeRef phase,
 		if (build_file_has_attr(bf, "RemoveHeadersOnCopy") &&
 		    has_ext(dst, ".framework"))
 			strip_embedded_headers(dst);
+
+		/*
+		 * Embedded content is signed as it lands, before whatever
+		 * holds it is: signing a bundle seals what is inside it,
+		 * so anything put in afterwards breaks the seal.
+		 */
+		if (build_file_has_attr(bf, "CodeSignOnCopy")) {
+			char idbuf[256];
+			const char *identity = signing_identity(t, idbuf,
+			    sizeof(idbuf));
+
+			if (identity != NULL &&
+			    codesign_run(dst, identity, NULL, NULL, devpath,
+			    0) != 0) {
+				fprintf(stderr, "xcodebuild: error: cannot"
+				    " sign %s\n", dst);
+				rc = 1;
+				break;
+			}
+		}
 
 		{
 			FILE *fp = fopen(stamp, "wb");
@@ -3592,6 +3759,83 @@ have_linker:
 			snprintf(manifest, sizeof(manifest), "%s/%s.manifest",
 			    obj_dir, product_name);
 			sweep_stale(manifest, &made, build_dir);
+		}
+
+		/*
+		 * The product, once nothing else will touch it.  A static
+		 * library is not signed -- it is not code that runs, and
+		 * Apple does not sign one either.
+		 */
+		if (rc == 0 && prod.kind != PRODUCT_STATIC_LIB) {
+			char idbuf[256], entbuf[PATH_MAX], stamp[PATH_MAX];
+			char identbuf[256];
+			const char *identity = signing_identity(t, idbuf,
+			    sizeof(idbuf));
+			const char *what = (prod.kind == PRODUCT_BUNDLE) ?
+			    bundle : final_product;
+
+			snprintf(stamp, sizeof(stamp), "%s/%s.signed", obj_dir,
+			    product_name);
+
+			/*
+			 * Signing changes what it signs, so the stamp is
+			 * written after and is newer than the product: a
+			 * build that changed nothing signs nothing, and
+			 * whatever embeds this is not disturbed.
+			 */
+			/*
+			 * A bundle with no Info.plist is not a bundle that
+			 * anything will load, and signing one produces a
+			 * signature nothing accepts.  Apple refuses such a
+			 * target outright; this leaves it unsigned and
+			 * says so, rather than making it look signed.
+			 */
+			if (identity != NULL && prod.kind == PRODUCT_BUNDLE) {
+				char probe[PATH_MAX];
+				struct stat pst;
+
+				snprintf(probe, sizeof(probe), "%s/Info.plist",
+				    is_framework ? res_dir : contents);
+
+				if (stat(probe, &pst) != 0) {
+					fprintf(stderr, "xcodebuild: warning:"
+					    " %s has no Info.plist and is left"
+					    " unsigned\n", bundle);
+					identity = NULL;
+				}
+			}
+
+			if (identity != NULL && out_of_date(stamp, what)) {
+				const char *ent, *ident;
+
+				ident = setting(t, "PRODUCT_BUNDLE_IDENTIFIER",
+				    identbuf, sizeof(identbuf));
+				if (ident == NULL)
+					ident = product_name;
+
+				ent = signing_entitlements(t, srcroot, obj_dir,
+				    product_name, entbuf, sizeof(entbuf));
+
+				if (codesign_run(what, identity, ident, ent,
+				    devpath, opts->verbose) != 0) {
+					char reqbuf[16];
+					const char *req = setting(t,
+					    "CODE_SIGNING_REQUIRED", reqbuf,
+					    sizeof(reqbuf));
+
+					fprintf(stderr, "xcodebuild: error:"
+					    " cannot sign %s\n", what);
+
+					if (req == NULL ||
+					    strcasecmp(req, "NO") != 0)
+						rc = 1;
+				} else {
+					FILE *fp = fopen(stamp, "wb");
+
+					if (fp != NULL)
+						fclose(fp);
+				}
+			}
 		}
 
 		idlist_free(&made);
