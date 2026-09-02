@@ -79,6 +79,31 @@ bstr(CFTypeRef v, char *buf, size_t len)
 	return buf;
 }
 
+/* A property list string, however long, as a fresh C string. */
+static char *
+bstrdup(CFTypeRef v)
+{
+	CFIndex max;
+	char *buf;
+
+	if (v == NULL || CFGetTypeID(v) != CFStringGetTypeID())
+		return NULL;
+
+	max = CFStringGetMaximumSizeForEncoding(
+	    CFStringGetLength((CFStringRef)v), kCFStringEncodingUTF8) + 1;
+
+	if ((buf = malloc((size_t)max)) == NULL)
+		return NULL;
+
+	if (!CFStringGetCString((CFStringRef)v, buf, max,
+	    kCFStringEncodingUTF8)) {
+		free(buf);
+		return NULL;
+	}
+
+	return buf;
+}
+
 static CFTypeRef
 bderef(CFTypeRef objects, CFTypeRef id_value)
 {
@@ -1325,67 +1350,185 @@ install_one_resource(const struct pathmap *map, const char *ref,
  * children is installed in turn.
  */
 static int
-install_bundle_resources(CFTypeRef objects, CFTypeRef target,
+install_bundle_resources(CFTypeRef objects, CFTypeRef phase,
     const struct pathmap *map, const char *build_dir, const char *sdkroot,
     const char *devpath, const char *res_dir, settings_table *t,
     int *ncopied)
 {
-	CFTypeRef phases = bget(target, "buildPhases");
-	CFIndex p;
+	CFTypeRef files = bget(phase, "files");
+	CFIndex f;
 	int rc = 0;
 
 	*ncopied = 0;
 
-	for (p = 0; p < bcount(phases) && rc == 0; p++) {
-		CFTypeRef phase = bderef(objects, bat(phases, p));
-		char isabuf[64];
-		const char *isa = bstr(bget(phase, "isa"), isabuf,
-		    sizeof(isabuf));
-		CFTypeRef files;
-		CFIndex f;
+	files = bget(phase, "files");
+	for (f = 0; f < bcount(files) && rc == 0; f++) {
+		CFTypeRef bf = bderef(objects, bat(files, f));
+		CFTypeRef fref;
+		char refbuf[512], rabuf[64];
+		const char *ref = bstr(bget(bf, "fileRef"), refbuf,
+		    sizeof(refbuf));
+		const char *rasa;
 
-		if (isa == NULL || strcmp(isa, "PBXResourcesBuildPhase") != 0)
+		if (ref == NULL)
 			continue;
 
-		files = bget(phase, "files");
-		for (f = 0; f < bcount(files) && rc == 0; f++) {
-			CFTypeRef bf = bderef(objects, bat(files, f));
-			CFTypeRef fref;
-			char refbuf[512], rabuf[64];
-			const char *ref = bstr(bget(bf, "fileRef"), refbuf,
-			    sizeof(refbuf));
-			const char *rasa;
+		fref = bget(objects, ref);
+		rasa = bstr(bget(fref, "isa"), rabuf, sizeof(rabuf));
 
-			if (ref == NULL)
-				continue;
+		if (rasa != NULL && strstr(rasa, "Group") != NULL) {
+			CFTypeRef kids = bget(fref, "children");
+			CFIndex k;
 
-			fref = bget(objects, ref);
-			rasa = bstr(bget(fref, "isa"), rabuf, sizeof(rabuf));
+			for (k = 0; k < bcount(kids) && rc == 0; k++) {
+				char kb[512];
+				const char *kid = bstr(bat(kids, k), kb,
+				    sizeof(kb));
 
-			if (rasa != NULL && strstr(rasa, "Group") != NULL) {
-				CFTypeRef kids = bget(fref, "children");
-				CFIndex k;
-
-				for (k = 0; k < bcount(kids) && rc == 0; k++) {
-					char kb[512];
-					const char *kid = bstr(bat(kids, k), kb,
-					    sizeof(kb));
-
-					if (kid != NULL)
-						rc = install_one_resource(map,
-						    kid, build_dir, sdkroot,
-						    devpath, res_dir, t,
-						    ncopied);
-				}
-				continue;
+				if (kid != NULL)
+					rc = install_one_resource(map,
+					    kid, build_dir, sdkroot,
+					    devpath, res_dir, t,
+					    ncopied);
 			}
-
-			rc = install_one_resource(map, ref, build_dir, sdkroot,
-			    devpath, res_dir, t, ncopied);
+			continue;
 		}
+
+		rc = install_one_resource(map, ref, build_dir, sdkroot,
+		    devpath, res_dir, t, ncopied);
 	}
 
 	return rc;
+}
+
+/* SCRIPT_INPUT_FILE_0.., as Xcode hands a script its declared paths. */
+static void
+export_script_paths(CFTypeRef phase, const settings_table *t, const char *key,
+    const char *prefix)
+{
+	CFTypeRef arr = bget(phase, key);
+	char name[128], count[32];
+	CFIndex i;
+
+	snprintf(count, sizeof(count), "%ld", (long)bcount(arr));
+	snprintf(name, sizeof(name), "%s_COUNT", prefix);
+	setenv(name, count, 1);
+
+	for (i = 0; i < bcount(arr); i++) {
+		char buf[PATH_MAX];
+		const char *v = bstr(bat(arr, i), buf, sizeof(buf));
+		char *expanded;
+
+		if (v == NULL)
+			continue;
+
+		snprintf(name, sizeof(name), "%s_%ld", prefix, (long)i);
+		expanded = settings_expand(t, v);
+		setenv(name, (expanded != NULL) ? expanded : v, 1);
+		free(expanded);
+	}
+}
+
+/*
+ * A shell script build phase.
+ *
+ * The script is written out and handed to its interpreter with the
+ * build settings in the environment, which is how it reaches $SRCROOT,
+ * $BUILT_PRODUCTS_DIR and the rest -- most scripts do nothing useful
+ * without them.  It runs in the project's directory, and a non-zero
+ * exit stops the build.
+ *
+ * Xcode skips a phase whose outputs are newer than its inputs.  This
+ * tree builds everything every time and has nothing to compare, so the
+ * script runs every time; the declared paths are exported for it to
+ * read rather than used to decide whether to bother.
+ */
+static int
+run_script_phase(CFTypeRef phase, settings_table *t, const char *srcroot,
+    const char *obj_dir, int index, int echo)
+{
+	char path[PATH_MAX], shellbuf[PATH_MAX], namebuf[256];
+	const char *shell, *name;
+	char *script;
+	pid_t pid;
+	FILE *fp;
+	int status = 0;
+
+	if ((script = bstrdup(bget(phase, "shellScript"))) == NULL)
+		return 0;
+
+	shell = bstr(bget(phase, "shellPath"), shellbuf, sizeof(shellbuf));
+	if (shell == NULL || *shell == '\0')
+		shell = "/bin/sh";
+
+	if ((name = bstr(bget(phase, "name"), namebuf, sizeof(namebuf))) == NULL)
+		name = "Run Script";
+
+	if (mkdirs(obj_dir) != 0) {
+		free(script);
+		return 1;
+	}
+
+	snprintf(path, sizeof(path), "%s/Script-%d.sh", obj_dir, index);
+
+	if ((fp = fopen(path, "w")) == NULL) {
+		fprintf(stderr, "xcodebuild: error: cannot write %s\n", path);
+		free(script);
+		return 1;
+	}
+
+	fputs(script, fp);
+	fclose(fp);
+	free(script);
+
+	printf("PhaseScriptExecution %s\n", name);
+	if (echo)
+		printf("%s %s\n", shell, path);
+
+	if ((pid = fork()) == 0) {
+		char *argv[3];
+		size_t i;
+
+		for (i = 0; i < t->count; i++) {
+			const char *v = t->entries[i].value;
+			char *expanded;
+
+			if (t->entries[i].key == NULL)
+				continue;
+
+			expanded = settings_expand(t, (v != NULL) ? v : "");
+			setenv(t->entries[i].key,
+			    (expanded != NULL) ? expanded : ((v != NULL) ? v : ""),
+			    1);
+			free(expanded);
+		}
+
+		export_script_paths(phase, t, "inputPaths", "SCRIPT_INPUT_FILE");
+		export_script_paths(phase, t, "outputPaths",
+		    "SCRIPT_OUTPUT_FILE");
+
+		if (srcroot != NULL && chdir(srcroot) != 0)
+			_exit(126);
+
+		argv[0] = (char *)shell;
+		argv[1] = path;
+		argv[2] = NULL;
+		execv(shell, argv);
+		_exit(127);
+	}
+
+	if (pid < 0)
+		return 1;
+
+	waitpid(pid, &status, 0);
+
+	if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+		fprintf(stderr, "xcodebuild: error: the script phase '%s'"
+		    " failed\n", name);
+		return 1;
+	}
+
+	return 0;
 }
 
 /*
@@ -1503,84 +1646,72 @@ strip_embedded_headers(const char *bundle)
  * .lproj to keep, because the phase says exactly where each file goes.
  */
 static int
-install_copy_files(CFTypeRef objects, CFTypeRef target,
+install_copy_files(CFTypeRef objects, CFTypeRef phase,
     const struct pathmap *map, const char *build_dir, const char *sdkroot,
     const char *devpath, const char *bundle, const char *contents,
     int is_framework, settings_table *t)
 {
-	CFTypeRef phases = bget(target, "buildPhases");
-	CFIndex p;
-	int rc = 0;
+	char dstbuf[PATH_MAX], dir[PATH_MAX];
+	CFTypeRef files;
+	const char *dst_path;
+	CFIndex f;
+	int spec, rc = 0;
 
-	for (p = 0; p < bcount(phases) && rc == 0; p++) {
-		CFTypeRef phase = bderef(objects, bat(phases, p));
-		char isabuf[64], dstbuf[PATH_MAX], dir[PATH_MAX];
-		const char *isa = bstr(bget(phase, "isa"), isabuf,
-		    sizeof(isabuf));
-		const char *dst_path;
-		CFTypeRef files;
-		CFIndex f;
-		int spec;
+	spec = bint(bget(phase, "dstSubfolderSpec"), -1);
+	dst_path = bstr(bget(phase, "dstPath"), dstbuf, sizeof(dstbuf));
 
-		if (isa == NULL || strcmp(isa, "PBXCopyFilesBuildPhase") != 0)
+	if (copy_phase_dir(spec, dst_path, bundle, contents, build_dir,
+	    is_framework, dir, sizeof(dir)) != 0) {
+		fprintf(stderr, "xcodebuild: error: a copy files phase"
+		    " names a destination this does not know (%d)\n", spec);
+		return 1;
+	}
+
+	files = bget(phase, "files");
+
+	files = bget(phase, "files");
+	for (f = 0; f < bcount(files) && rc == 0; f++) {
+		CFTypeRef bf = bderef(objects, bat(files, f));
+		char refbuf[512], resbuf[PATH_MAX], dst[PATH_MAX];
+		const char *ref = bstr(bget(bf, "fileRef"), refbuf,
+		    sizeof(refbuf));
+		const char *src, *base;
+
+		if (ref == NULL)
 			continue;
 
-		spec = bint(bget(phase, "dstSubfolderSpec"), -1);
-		dst_path = bstr(bget(phase, "dstPath"), dstbuf, sizeof(dstbuf));
-
-		if (copy_phase_dir(spec, dst_path, bundle, contents, build_dir,
-		    is_framework, dir, sizeof(dir)) != 0) {
-			fprintf(stderr, "xcodebuild: error: a copy files phase"
-			    " names a destination this does not know (%d)\n",
-			    spec);
+		src = pathmap_resolve(map, ref, build_dir, sdkroot,
+		    devpath, resbuf, sizeof(resbuf));
+		if (src == NULL) {
+			fprintf(stderr, "xcodebuild: error: cannot find"
+			    " '%s' to copy\n", ref);
 			rc = 1;
 			break;
 		}
 
-		files = bget(phase, "files");
-		for (f = 0; f < bcount(files) && rc == 0; f++) {
-			CFTypeRef bf = bderef(objects, bat(files, f));
-			char refbuf[512], resbuf[PATH_MAX], dst[PATH_MAX];
-			const char *ref = bstr(bget(bf, "fileRef"), refbuf,
-			    sizeof(refbuf));
-			const char *src, *base;
-
-			if (ref == NULL)
-				continue;
-
-			src = pathmap_resolve(map, ref, build_dir, sdkroot,
-			    devpath, resbuf, sizeof(resbuf));
-			if (src == NULL) {
-				fprintf(stderr, "xcodebuild: error: cannot find"
-				    " '%s' to copy\n", ref);
-				rc = 1;
-				break;
-			}
-
-			if (mkdirs(dir) != 0) {
-				fprintf(stderr, "xcodebuild: error: cannot"
-				    " create %s\n", dir);
-				rc = 1;
-				break;
-			}
-
-			base = strrchr(src, '/');
-			base = (base != NULL) ? base + 1 : src;
-			snprintf(dst, sizeof(dst), "%s/%s", dir, base);
-
-			printf("CpResource %s\n", dst);
-
-			if (copy_tree(src, dst) != 0) {
-				fprintf(stderr, "xcodebuild: error: cannot copy"
-				    " %s\n", src);
-				rc = 1;
-				break;
-			}
-
-			if (build_file_has_attr(bf, "RemoveHeadersOnCopy") &&
-			    has_ext(dst, ".framework"))
-				strip_embedded_headers(dst);
+		if (mkdirs(dir) != 0) {
+			fprintf(stderr, "xcodebuild: error: cannot"
+			    " create %s\n", dir);
+			rc = 1;
+			break;
 		}
+
+		base = strrchr(src, '/');
+		base = (base != NULL) ? base + 1 : src;
+		snprintf(dst, sizeof(dst), "%s/%s", dir, base);
+
+		printf("CpResource %s\n", dst);
+
+		if (copy_tree(src, dst) != 0) {
+			fprintf(stderr, "xcodebuild: error: cannot copy"
+			    " %s\n", src);
+			rc = 1;
+			break;
+		}
+
+		if (build_file_has_attr(bf, "RemoveHeadersOnCopy") &&
+		    has_ext(dst, ".framework"))
+			strip_embedded_headers(dst);
 	}
 
 	return rc;
@@ -1606,74 +1737,62 @@ relink(const char *dir, const char *name, const char *target)
  * with neither is the target's own business and is not installed.
  */
 static int
-install_framework_headers(CFTypeRef objects, CFTypeRef target,
+install_framework_headers(CFTypeRef objects, CFTypeRef phase,
     const struct pathmap *map, const char *build_dir, const char *sdkroot,
     const char *devpath, const char *version_dir, int *npublic, int *nprivate)
 {
-	CFTypeRef phases = bget(target, "buildPhases");
-	CFIndex p;
+	CFTypeRef files = bget(phase, "files");
+	CFIndex f;
 	int rc = 0;
 
 	*npublic = 0;
 	*nprivate = 0;
 
-	for (p = 0; p < bcount(phases) && rc == 0; p++) {
-		CFTypeRef phase = bderef(objects, bat(phases, p));
-		char isabuf[64];
-		const char *isa = bstr(bget(phase, "isa"), isabuf,
-		    sizeof(isabuf));
-		CFTypeRef files;
-		CFIndex f;
+	files = bget(phase, "files");
+	for (f = 0; f < bcount(files) && rc == 0; f++) {
+		CFTypeRef bf = bderef(objects, bat(files, f));
+		char refbuf[512], resbuf[PATH_MAX];
+		char dir[PATH_MAX], dst[PATH_MAX];
+		const char *ref = bstr(bget(bf, "fileRef"), refbuf,
+		    sizeof(refbuf));
+		const char *src, *base, *sub;
 
-		if (isa == NULL || strcmp(isa, "PBXHeadersBuildPhase") != 0)
+		if (ref == NULL)
 			continue;
 
-		files = bget(phase, "files");
-		for (f = 0; f < bcount(files) && rc == 0; f++) {
-			CFTypeRef bf = bderef(objects, bat(files, f));
-			char refbuf[512], resbuf[PATH_MAX];
-			char dir[PATH_MAX], dst[PATH_MAX];
-			const char *ref = bstr(bget(bf, "fileRef"), refbuf,
-			    sizeof(refbuf));
-			const char *src, *base, *sub;
+		if (build_file_has_attr(bf, "Public"))
+			sub = "Headers";
+		else if (build_file_has_attr(bf, "Private"))
+			sub = "PrivateHeaders";
+		else
+			continue;
 
-			if (ref == NULL)
-				continue;
+		src = pathmap_resolve(map, ref, build_dir, sdkroot,
+		    devpath, resbuf, sizeof(resbuf));
+		if (src == NULL)
+			continue;
 
-			if (build_file_has_attr(bf, "Public"))
-				sub = "Headers";
-			else if (build_file_has_attr(bf, "Private"))
-				sub = "PrivateHeaders";
-			else
-				continue;
-
-			src = pathmap_resolve(map, ref, build_dir, sdkroot,
-			    devpath, resbuf, sizeof(resbuf));
-			if (src == NULL)
-				continue;
-
-			snprintf(dir, sizeof(dir), "%s/%s", version_dir, sub);
-			if (mkdirs(dir) != 0) {
-				rc = -1;
-				break;
-			}
-
-			base = strrchr(src, '/');
-			base = (base != NULL) ? base + 1 : src;
-			snprintf(dst, sizeof(dst), "%s/%s", dir, base);
-
-			if (copy_file(src, dst) != 0) {
-				fprintf(stderr, "xcodebuild: error: cannot"
-				    " install the header %s\n", src);
-				rc = -1;
-				break;
-			}
-
-			if (strcmp(sub, "Headers") == 0)
-				(*npublic)++;
-			else
-				(*nprivate)++;
+		snprintf(dir, sizeof(dir), "%s/%s", version_dir, sub);
+		if (mkdirs(dir) != 0) {
+			rc = -1;
+			break;
 		}
+
+		base = strrchr(src, '/');
+		base = (base != NULL) ? base + 1 : src;
+		snprintf(dst, sizeof(dst), "%s/%s", dir, base);
+
+		if (copy_file(src, dst) != 0) {
+			fprintf(stderr, "xcodebuild: error: cannot"
+			    " install the header %s\n", src);
+			rc = -1;
+			break;
+		}
+
+		if (strcmp(sub, "Headers") == 0)
+			(*npublic)++;
+		else
+			(*nprivate)++;
 	}
 
 	return rc;
@@ -1687,13 +1806,21 @@ install_framework_headers(CFTypeRef objects, CFTypeRef target,
  * symlinks naming whichever version is current.  Without them the
  * directory holds everything a framework has and still cannot be
  * linked against, because -framework looks for the binary at the top.
+ *
+ * Which directories to link is read from the version itself rather
+ * than counted as it is filled: a headers phase and a resources phase
+ * run wherever the project puts them, and this runs once they all
+ * have.
  */
 static int
 framework_finalize(const char *bundle, const char *version,
-    const char *exe_name, int have_headers, int have_private,
-    int have_resources)
+    const char *exe_name)
 {
+	static const char *const linked[] = {
+		"Resources", "Headers", "PrivateHeaders", "Modules"
+	};
 	char versions[PATH_MAX], target[PATH_MAX];
+	size_t i;
 
 	snprintf(versions, sizeof(versions), "%s/Versions", bundle);
 
@@ -1704,18 +1831,20 @@ framework_finalize(const char *bundle, const char *version,
 	if (relink(bundle, exe_name, target) != 0)
 		return -1;
 
-	if (have_resources &&
-	    relink(bundle, "Resources", "Versions/Current/Resources") != 0)
-		return -1;
+	for (i = 0; i < sizeof(linked) / sizeof(linked[0]); i++) {
+		char dir[PATH_MAX], rel[PATH_MAX];
+		struct stat st;
 
-	if (have_headers &&
-	    relink(bundle, "Headers", "Versions/Current/Headers") != 0)
-		return -1;
+		snprintf(dir, sizeof(dir), "%s/Versions/%s/%s", bundle,
+		    version, linked[i]);
 
-	if (have_private &&
-	    relink(bundle, "PrivateHeaders",
-	    "Versions/Current/PrivateHeaders") != 0)
-		return -1;
+		if (stat(dir, &st) != 0 || !S_ISDIR(st.st_mode))
+			continue;
+
+		snprintf(rel, sizeof(rel), "Versions/Current/%s", linked[i]);
+		if (relink(bundle, linked[i], rel) != 0)
+			return -1;
+	}
 
 	return 0;
 }
@@ -1944,7 +2073,7 @@ build_one_target(CFTypeRef objects, CFTypeRef chosen, const char *source_root,
 	char instname[PATH_MAX];
 	int is_framework, dylib;
 	CFIndex i;
-	int rc = 0, nsources = 0;
+	int rc = 0, nsources = 0, had_sources = 0;
 
 	/* What this target builds, and under what name. */
 	{
@@ -2069,13 +2198,41 @@ build_one_target(CFTypeRef objects, CFTypeRef chosen, const char *source_root,
 		}
 	}
 
-	/* Compile every source in the target's sources phase. */
+	/* Every phase, in the order the project lists them. */
 	{
 		CFTypeRef phases = bget(chosen, "buildPhases");
 		char *objs[256];
 		char *swifts[256];
+		char bundle[PATH_MAX], contents[PATH_MAX], res_dir[PATH_MAX];
+		const char *bp = NULL, *cp = NULL;
 		int nobjs = 0, nswift = 0;
 		CFIndex p;
+
+		/*
+		 * A bundle's shape, settled before anything runs: a phase
+		 * the project puts before the link still needs somewhere
+		 * to put what it copies.
+		 */
+		if (prod.kind == PRODUCT_BUNDLE && prod.wrapper != NULL) {
+			snprintf(bundle, sizeof(bundle), "%s/%s", build_dir,
+			    full);
+
+			if (is_framework)
+				snprintf(contents, sizeof(contents),
+				    "%s/Versions/%s", bundle, fw_version);
+			else
+				snprintf(contents, sizeof(contents),
+				    "%s/Contents", bundle);
+
+			snprintf(res_dir, sizeof(res_dir), "%s/Resources",
+			    contents);
+			bp = bundle;
+			cp = contents;
+		} else {
+			snprintf(res_dir, sizeof(res_dir), "%s", build_dir);
+			snprintf(contents, sizeof(contents), "%s", build_dir);
+			snprintf(bundle, sizeof(bundle), "%s", build_dir);
+		}
 
 		for (p = 0; p < bcount(phases) && rc == 0; p++) {
 			CFTypeRef phase = bderef(objects, bat(phases, p));
@@ -2084,10 +2241,46 @@ build_one_target(CFTypeRef objects, CFTypeRef chosen, const char *source_root,
 			    sizeof(isabuf));
 			CFTypeRef files;
 			CFIndex f;
+			int n = 0, n2 = 0;
 
-			if (isa == NULL ||
-			    strcmp(isa, "PBXSourcesBuildPhase") != 0)
+			if (isa == NULL)
 				continue;
+
+			if (strcmp(isa, "PBXShellScriptBuildPhase") == 0) {
+				rc = run_script_phase(phase, t, srcroot,
+				    obj_dir, (int)p, opts->verbose);
+				continue;
+			}
+
+			if (strcmp(isa, "PBXResourcesBuildPhase") == 0) {
+				if (install_bundle_resources(objects, phase,
+				    map, build_dir, sdkroot, devpath, res_dir,
+				    t, &n) != 0)
+					rc = 1;
+				continue;
+			}
+
+			if (strcmp(isa, "PBXHeadersBuildPhase") == 0) {
+				if (is_framework &&
+				    install_framework_headers(objects, phase,
+				    map, build_dir, sdkroot, devpath, contents,
+				    &n, &n2) != 0)
+					rc = 1;
+				continue;
+			}
+
+			if (strcmp(isa, "PBXCopyFilesBuildPhase") == 0) {
+				if (install_copy_files(objects, phase, map,
+				    build_dir, sdkroot, devpath, bp, cp,
+				    is_framework, t) != 0)
+					rc = 1;
+				continue;
+			}
+
+			if (strcmp(isa, "PBXSourcesBuildPhase") != 0)
+				continue;
+
+			had_sources = 1;
 
 			files = bget(phase, "files");
 			for (f = 0; f < bcount(files) && rc == 0; f++) {
@@ -2163,316 +2356,227 @@ build_one_target(CFTypeRef objects, CFTypeRef chosen, const char *source_root,
 					objs[nobjs++] = strdup(obj);
 				nsources++;
 			}
-		}
 
-		/*
-		 * The Swift half of the target, compiled whole.  A Swift
-		 * module is one translation unit however many files it is
-		 * written across -- the files can refer to each other
-		 * without declarations -- so they go to swiftc together
-		 * and come back as a single object.
-		 */
-		if (rc == 0 && nswift > 0) {
-			char swiftc[PATH_MAX], obj[PATH_MAX], modbuf[256];
-			char *argv[280];
-			const char *module;
-			int a = 0, j;
+			/*
+			 * The Swift half of the target, compiled whole.  A Swift
+			 * module is one translation unit however many files it is
+			 * written across -- the files can refer to each other
+			 * without declarations -- so they go to swiftc together
+			 * and come back as a single object.
+			 */
+			if (rc == 0 && nswift > 0) {
+				char swiftc[PATH_MAX], obj[PATH_MAX], modbuf[256];
+				char *argv[280];
+				const char *module;
+				int a = 0, j;
 
-			snprintf(swiftc, sizeof(swiftc),
-			    "%s/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
-			    devpath);
+				snprintf(swiftc, sizeof(swiftc),
+				    "%s/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+				    devpath);
 
-			if (access(swiftc, X_OK) != 0) {
-				fprintf(stderr, "xcodebuild: error: this target"
-				    " has Swift sources but there is no swiftc"
-				    " at %s\n", swiftc);
-				rc = 1;
-			} else {
-				module = setting(t, "PRODUCT_MODULE_NAME",
-				    modbuf, sizeof(modbuf));
-				if (module == NULL)
-					module = product_name;
-
-				snprintf(obj, sizeof(obj), "%s/%s.swift.o",
-				    obj_dir, module);
-
-				argv[a++] = swiftc;
-				if (sdkroot != NULL && *sdkroot != '\0') {
-					argv[a++] = (char *)"-sdk";
-					argv[a++] = (char *)sdkroot;
-				}
-				argv[a++] = (char *)"-module-name";
-				argv[a++] = (char *)module;
-				argv[a++] = (char *)"-wmo";
-				argv[a++] = (char *)"-emit-object";
-				argv[a++] = (char *)"-o";
-				argv[a++] = obj;
-				for (j = 0; j < nswift && a < 270; j++)
-					argv[a++] = swifts[j];
-				argv[a] = NULL;
-
-				printf("CompileSwift %s (%d file%s)\n", module,
-				    nswift, (nswift == 1) ? "" : "s");
-				if (run(argv, opts->verbose) != 0) {
-					fprintf(stderr, "xcodebuild: error:"
-					    " failed to compile the Swift"
-					    " sources of %s\n", module);
+				if (access(swiftc, X_OK) != 0) {
+					fprintf(stderr, "xcodebuild: error: this target"
+					    " has Swift sources but there is no swiftc"
+					    " at %s\n", swiftc);
 					rc = 1;
-				} else if (nobjs < (int)(sizeof(objs) /
-				    sizeof(objs[0]))) {
-					objs[nobjs++] = strdup(obj);
-				}
-			}
-		}
+				} else {
+					module = setting(t, "PRODUCT_MODULE_NAME",
+					    modbuf, sizeof(modbuf));
+					if (module == NULL)
+						module = product_name;
 
-		if (rc == 0 && nobjs > 0) {
-			char *argv[512];
-			char libtool[PATH_MAX];
-			int a = 0, j;
+					snprintf(obj, sizeof(obj), "%s/%s.swift.o",
+					    obj_dir, module);
 
-			/* A bundle's binary sits in a directory of its own. */
-			if (prod.kind == PRODUCT_BUNDLE) {
-				char dir[PATH_MAX];
-				const char *sl = strrchr(product, '/');
-
-				snprintf(dir, sizeof(dir), "%.*s",
-				    (int)(sl - product), product);
-				if (mkdirs(dir) != 0) {
-					fprintf(stderr, "xcodebuild: error:"
-					    " cannot create %s\n", dir);
-					rc = 1;
-				}
-			}
-
-			if (rc == 0 && prod.kind == PRODUCT_STATIC_LIB) {
-				/*
-				 * An archive, not a link.  libtool is what
-				 * Xcode runs for a static library, and it is
-				 * in the toolchain beside clang.
-				 */
-				snprintf(libtool, sizeof(libtool),
-				    "%s/Toolchains/XcodeDefault.xctoolchain"
-				    "/usr/bin/libtool", devpath);
-
-				argv[a++] = libtool;
-				argv[a++] = (char *)"-static";
-				argv[a++] = (char *)"-o";
-				argv[a++] = product;
-				for (j = 0; j < nobjs; j++)
-					argv[a++] = objs[j];
-				argv[a] = NULL;
-
-				printf("Libtool %s\n", product);
-			} else if (rc == 0) {
-				/*
-				 * A target with Swift in it is linked by
-				 * swiftc, which knows to bring in the Swift
-				 * runtime and the standard library; clang
-				 * would leave those symbols undefined.
-				 */
-				char swiftc[PATH_MAX];
-
-				if (nswift > 0) {
-					snprintf(swiftc, sizeof(swiftc),
-					    "%s/Toolchains/XcodeDefault"
-					    ".xctoolchain/usr/bin/swiftc",
-					    devpath);
 					argv[a++] = swiftc;
-					if (dylib)
-						argv[a++] = (char *)"-emit-library";
 					if (sdkroot != NULL && *sdkroot != '\0') {
 						argv[a++] = (char *)"-sdk";
 						argv[a++] = (char *)sdkroot;
 					}
-					goto have_linker;
+					argv[a++] = (char *)"-module-name";
+					argv[a++] = (char *)module;
+					argv[a++] = (char *)"-wmo";
+					argv[a++] = (char *)"-emit-object";
+					argv[a++] = (char *)"-o";
+					argv[a++] = obj;
+					for (j = 0; j < nswift && a < 270; j++)
+						argv[a++] = swifts[j];
+					argv[a] = NULL;
+
+					printf("CompileSwift %s (%d file%s)\n", module,
+					    nswift, (nswift == 1) ? "" : "s");
+					if (run(argv, opts->verbose) != 0) {
+						fprintf(stderr, "xcodebuild: error:"
+						    " failed to compile the Swift"
+						    " sources of %s\n", module);
+						rc = 1;
+					} else if (nobjs < (int)(sizeof(objs) /
+					    sizeof(objs[0]))) {
+						objs[nobjs++] = strdup(obj);
+					}
 				}
-
-				argv[a++] = clang;
-				if (dylib)
-					argv[a++] = (char *)"-dynamiclib";
-				if (sdkroot != NULL && *sdkroot != '\0') {
-					argv[a++] = (char *)"-isysroot";
-					argv[a++] = (char *)sdkroot;
-				}
-have_linker:
-				argv[a++] = (char *)"-o";
-				argv[a++] = product;
-				for (j = 0; j < nobjs; j++)
-					argv[a++] = objs[j];
-
-				/*
-				 * What the project says this target links
-				 * against, after its own objects: a static
-				 * library only resolves symbols for objects
-				 * already on the line.
-				 */
-				a = add_link_inputs(argv, a,
-				    (int)(sizeof(argv) / sizeof(argv[0])) - 1,
-				    objects, chosen, map, build_dir, sdkroot,
-				    devpath, NULL);
-
-				if (dylib && instname[0] != '\0')
-					a = add_linker_arg(argv, a,
-					    (int)(sizeof(argv) /
-					    sizeof(argv[0])) - 1,
-					    "-install_name", instname);
-
-				/*
-				 * Where this binary looks for the dylibs it
-				 * links.  An install name beginning @rpath
-				 * means nothing without one.
-				 */
-				a = add_rpath_args(argv, a,
-				    (int)(sizeof(argv) / sizeof(argv[0])) - 1,
-				    setting(t, "LD_RUNPATH_SEARCH_PATHS", rpbuf,
-				    sizeof(rpbuf)));
-
-				argv[a] = NULL;
-
-				printf("Ld %s\n", product);
 			}
 
-			if (rc == 0 && run(argv, opts->verbose) != 0) {
-				fprintf(stderr, "xcodebuild: error: link failed\n");
-				rc = 1;
+			if (rc == 0 && nobjs > 0) {
+				char *argv[512];
+				char libtool[PATH_MAX];
+				int a = 0, j;
+
+				/* A bundle's binary sits in a directory of its own. */
+				if (prod.kind == PRODUCT_BUNDLE) {
+					char dir[PATH_MAX];
+					const char *sl = strrchr(product, '/');
+
+					snprintf(dir, sizeof(dir), "%.*s",
+					    (int)(sl - product), product);
+					if (mkdirs(dir) != 0) {
+						fprintf(stderr, "xcodebuild: error:"
+						    " cannot create %s\n", dir);
+						rc = 1;
+					}
+				}
+
+				if (rc == 0 && prod.kind == PRODUCT_STATIC_LIB) {
+					/*
+					 * An archive, not a link.  libtool is what
+					 * Xcode runs for a static library, and it is
+					 * in the toolchain beside clang.
+					 */
+					snprintf(libtool, sizeof(libtool),
+					    "%s/Toolchains/XcodeDefault.xctoolchain"
+					    "/usr/bin/libtool", devpath);
+
+					argv[a++] = libtool;
+					argv[a++] = (char *)"-static";
+					argv[a++] = (char *)"-o";
+					argv[a++] = product;
+					for (j = 0; j < nobjs; j++)
+						argv[a++] = objs[j];
+					argv[a] = NULL;
+
+					printf("Libtool %s\n", product);
+				} else if (rc == 0) {
+					/*
+					 * A target with Swift in it is linked by
+					 * swiftc, which knows to bring in the Swift
+					 * runtime and the standard library; clang
+					 * would leave those symbols undefined.
+					 */
+					char swiftc[PATH_MAX];
+
+					if (nswift > 0) {
+						snprintf(swiftc, sizeof(swiftc),
+						    "%s/Toolchains/XcodeDefault"
+						    ".xctoolchain/usr/bin/swiftc",
+						    devpath);
+						argv[a++] = swiftc;
+						if (dylib)
+							argv[a++] = (char *)"-emit-library";
+						if (sdkroot != NULL && *sdkroot != '\0') {
+							argv[a++] = (char *)"-sdk";
+							argv[a++] = (char *)sdkroot;
+						}
+						goto have_linker;
+					}
+
+					argv[a++] = clang;
+					if (dylib)
+						argv[a++] = (char *)"-dynamiclib";
+					if (sdkroot != NULL && *sdkroot != '\0') {
+						argv[a++] = (char *)"-isysroot";
+						argv[a++] = (char *)sdkroot;
+					}
+have_linker:
+					argv[a++] = (char *)"-o";
+					argv[a++] = product;
+					for (j = 0; j < nobjs; j++)
+						argv[a++] = objs[j];
+
+					/*
+					 * What the project says this target links
+					 * against, after its own objects: a static
+					 * library only resolves symbols for objects
+					 * already on the line.
+					 */
+					a = add_link_inputs(argv, a,
+					    (int)(sizeof(argv) / sizeof(argv[0])) - 1,
+					    objects, chosen, map, build_dir, sdkroot,
+					    devpath, NULL);
+
+					if (dylib && instname[0] != '\0')
+						a = add_linker_arg(argv, a,
+						    (int)(sizeof(argv) /
+						    sizeof(argv[0])) - 1,
+						    "-install_name", instname);
+
+					/*
+					 * Where this binary looks for the dylibs it
+					 * links.  An install name beginning @rpath
+					 * means nothing without one.
+					 */
+					a = add_rpath_args(argv, a,
+					    (int)(sizeof(argv) / sizeof(argv[0])) - 1,
+					    setting(t, "LD_RUNPATH_SEARCH_PATHS", rpbuf,
+					    sizeof(rpbuf)));
+
+					argv[a] = NULL;
+
+					printf("Ld %s\n", product);
+				}
+
+				if (rc == 0 && run(argv, opts->verbose) != 0) {
+					fprintf(stderr, "xcodebuild: error: link failed\n");
+					rc = 1;
+				}
+
 			}
 
 			/*
-			 * A bundle is a directory with a shape.  Without an
-			 * Info.plist naming its executable the binary is
-			 * there and nothing will load it, and a framework
-			 * needs the links at the top of it besides.
+			 * A bundle needs an Info.plist naming its
+			 * executable, and an application eight bytes of
+			 * package type beside it.  What fills the rest of
+			 * the bundle is a phase of its own.
 			 */
 			if (rc == 0 && prod.kind == PRODUCT_BUNDLE &&
-			    prod.wrapper != NULL) {
-				char bundle[PATH_MAX], plist[PATH_MAX];
+			    prod.wrapper != NULL && infoplist_wanted(t)) {
+				char plist[PATH_MAX];
 
-				snprintf(bundle, sizeof(bundle), "%s/%s",
-				    build_dir, full);
-
-				if (is_framework) {
-					char vdir[PATH_MAX], res[PATH_MAX];
-					int npub = 0, npriv = 0, nres = 0;
-					int want = infoplist_wanted(t);
-
-					snprintf(vdir, sizeof(vdir),
-					    "%s/Versions/%s", bundle,
-					    fw_version);
-					snprintf(res, sizeof(res),
-					    "%s/Resources", vdir);
-
-					if (want) {
-						if (mkdirs(res) != 0) {
-							fprintf(stderr,
-							    "xcodebuild: error:"
-							    " cannot create"
-							    " %s\n", res);
-							rc = 1;
-						}
-
-						if (rc == 0) {
-							snprintf(plist,
-							    sizeof(plist),
-							    "%s/Info.plist",
-							    res);
-							rc = install_infoplist(
-							    plist,
-							    product_name,
-							    "FMWK", t,
-							    srcroot);
-						}
-					}
-
-					if (rc == 0 &&
-					    install_bundle_resources(objects,
-					    chosen, map, build_dir, sdkroot,
-					    devpath, res, t, &nres) != 0)
-						rc = 1;
-
-					if (rc == 0 &&
-					    install_framework_headers(objects,
-					    chosen, map, build_dir, sdkroot,
-					    devpath, vdir, &npub,
-					    &npriv) != 0)
-						rc = 1;
-
-					if (rc == 0 && framework_finalize(
-					    bundle, fw_version, product_name,
-					    npub > 0, npriv > 0,
-					    want || nres > 0) != 0) {
-						fprintf(stderr, "xcodebuild:"
-						    " error: cannot assemble"
-						    " %s\n", bundle);
-						rc = 1;
-					}
-				} else if (strcmp(prod.wrapper, "app") == 0) {
-					char res[PATH_MAX];
-					int nres = 0;
-
-					if (infoplist_wanted(t)) {
-						snprintf(plist, sizeof(plist),
-						    "%s/Contents/Info.plist",
-						    bundle);
-						rc = install_infoplist(plist,
-						    product_name, "APPL", t,
-						    srcroot);
-					}
-
-					if (rc == 0) {
-						char pkg[PATH_MAX];
-
-						snprintf(pkg, sizeof(pkg),
-						    "%s/Contents/PkgInfo",
-						    bundle);
-						rc = write_pkginfo(pkg, "APPL",
-						    t);
-					}
-
-					snprintf(res, sizeof(res),
-					    "%s/Contents/Resources", bundle);
-
-					if (rc == 0 &&
-					    install_bundle_resources(objects,
-					    chosen, map, build_dir, sdkroot,
-					    devpath, res, t, &nres) != 0)
-						rc = 1;
-				}
-			}
-
-			/*
-			 * Copy files phases, which any target may have: an
-			 * application embeds the frameworks it links so they
-			 * travel with it, and a tool copies what it wants
-			 * beside its product.
-			 */
-			if (rc == 0) {
-				char bundle[PATH_MAX], contents[PATH_MAX];
-				const char *bp = NULL, *cp = NULL;
-
-				if (prod.kind == PRODUCT_BUNDLE &&
-				    prod.wrapper != NULL) {
-					snprintf(bundle, sizeof(bundle),
-					    "%s/%s", build_dir, full);
-
-					if (is_framework)
-						snprintf(contents,
-						    sizeof(contents),
-						    "%s/Versions/%s", bundle,
-						    fw_version);
-					else
-						snprintf(contents,
-						    sizeof(contents),
-						    "%s/Contents", bundle);
-
-					bp = bundle;
-					cp = contents;
-				}
-
-				if (install_copy_files(objects, chosen, map,
-				    build_dir, sdkroot, devpath, bp, cp,
-				    is_framework, t) != 0)
+				if (is_framework && mkdirs(res_dir) != 0) {
+					fprintf(stderr, "xcodebuild: error:"
+					    " cannot create %s\n", res_dir);
 					rc = 1;
+				}
+
+				if (rc == 0) {
+					snprintf(plist, sizeof(plist),
+					    "%s/Info.plist",
+					    is_framework ? res_dir : contents);
+					rc = install_infoplist(plist,
+					    product_name,
+					    is_framework ? "FMWK" : "APPL", t,
+					    srcroot);
+				}
 			}
+
+			if (rc == 0 && prod.kind == PRODUCT_BUNDLE &&
+			    prod.wrapper != NULL && !is_framework) {
+				char pkg[PATH_MAX];
+
+				snprintf(pkg, sizeof(pkg), "%s/PkgInfo",
+				    contents);
+				rc = write_pkginfo(pkg, "APPL", t);
+			}
+		}
+
+		/*
+		 * The links at the top of a framework, once every phase
+		 * that might have filled the version directory has run.
+		 */
+		if (rc == 0 && is_framework &&
+		    framework_finalize(bundle, fw_version, product_name) != 0) {
+			fprintf(stderr, "xcodebuild: error: cannot assemble"
+			    " %s\n", bundle);
+			rc = 1;
 		}
 
 		for (i = 0; i < nobjs; i++)
@@ -2481,7 +2585,13 @@ have_linker:
 			free(swifts[i]);
 	}
 
-	if (rc == 0 && nsources == 0) {
+	/*
+	 * A target with a sources phase and nothing in it this can
+	 * compile built nothing, whatever else its phases did.  One with
+	 * no sources phase at all -- a target that only runs a script --
+	 * is not a failure.
+	 */
+	if (rc == 0 && had_sources && nsources == 0) {
 		fprintf(stderr, "xcodebuild: error: target has no sources this"
 		    " tool can compile\n");
 		rc = 1;
