@@ -539,6 +539,25 @@ static settings_table *settings_for(const xcodebuild_opts *opts,
 					settings_set(t, "BUILT_PRODUCTS_DIR", bd);
 					settings_set(t, "CONFIGURATION_BUILD_DIR", bd);
 					settings_set(t, "TARGET_BUILD_DIR", bd);
+
+					/*
+					 * Apple looks for frameworks beside
+					 * the products by default, which is
+					 * how one target finds a framework
+					 * another has just built.
+					 */
+					{
+						const char *fsp = settings_get(t,
+						    "FRAMEWORK_SEARCH_PATHS");
+
+						/* Present but empty counts as
+						   unset: the defaults seed
+						   this key with "". */
+						if (fsp == NULL || *fsp == '\0')
+							settings_set(t,
+							    "FRAMEWORK_SEARCH_PATHS",
+							    bd);
+					}
 				}
 
 				/*
@@ -568,6 +587,27 @@ static settings_table *settings_for(const xcodebuild_opts *opts,
 					         "%s/%s", proj_dir, configuration);
 					settings_set(t, "CONFIGURATION_TEMP_DIR",
 					             cfg_dir);
+
+					settings_set(t, "BUILD_DIR", root_dir);
+					settings_set(t, "BUILD_ROOT", root_dir);
+
+
+					/*
+					 * Where `install` would put things.
+					 * Apple names a directory under /tmp
+					 * after the project, and nothing is
+					 * written there by a plain build.
+					 */
+					{
+						char dst[PATH_MAX];
+
+						snprintf(dst, sizeof(dst),
+						         "/tmp/%s.dst",
+						         (pname[0] != '\0') ?
+						         pname : "project");
+						settings_set(t, "DSTROOT", dst);
+						settings_set(t, "INSTALL_ROOT", dst);
+					}
 				}
 			}
 
@@ -620,6 +660,22 @@ static settings_table *settings_for(const xcodebuild_opts *opts,
 					         "%s/Objects-normal", tgt);
 					settings_set(t, "OBJECT_FILE_DIR_normal",
 					             objs);
+
+					/* The rest of what a target's own
+					   directory holds. */
+					snprintf(objs, sizeof(objs),
+					         "%s/DerivedSources", tgt);
+					settings_set(t, "DERIVED_FILE_DIR", objs);
+					settings_set(t, "DERIVED_FILES_DIR", objs);
+					settings_set(t, "DERIVED_SOURCES_DIR", objs);
+
+					snprintf(objs, sizeof(objs),
+					         "%s/JavaClasses", tgt);
+					settings_set(t, "CLASS_FILE_DIR", objs);
+
+					snprintf(objs, sizeof(objs),
+					         "%s/FixedFiles", tgt);
+					settings_set(t, "FIXED_FILES_DIR", objs);
 				}
 			}
 
@@ -648,6 +704,49 @@ static settings_table *settings_for(const xcodebuild_opts *opts,
 			settings_set(t, key, expanded);
 			free(expanded);
 		}
+	}
+
+	/*
+	 * The developer directory's own furniture.  These describe the
+	 * toolchain in use, so they are this tree's paths rather than
+	 * Apple's -- a project asking for $(DEVELOPER_BIN_DIR) wants the
+	 * tools that are building it.
+	 */
+	if (devpath != NULL) {
+		static const struct { const char *key, *tail; } d[] = {
+			{ "DEVELOPER_USR_DIR",          "/usr" },
+			{ "DEVELOPER_BIN_DIR",          "/usr/bin" },
+			{ "DEVELOPER_LIBRARY_DIR",      "/Library" },
+			{ "DEVELOPER_APPLICATIONS_DIR", "/Applications" },
+			{ "DEVELOPER_FRAMEWORKS_DIR",   "/Library/Frameworks" },
+			{ "DEVELOPER_FRAMEWORKS_DIR_QUOTED", "/Library/Frameworks" },
+			{ "DEVELOPER_TOOLS_DIR",        "/Tools" },
+			{ "DEVELOPER_SDK_DIR",
+			  "/Platforms/MacOSX.platform/Developer/SDKs" },
+			{ "DT_TOOLCHAIN_DIR",
+			  "/Toolchains/XcodeDefault.xctoolchain" }
+		};
+		char buf[PATH_MAX];
+		size_t i;
+
+		for (i = 0; i < sizeof(d) / sizeof(d[0]); i++) {
+			snprintf(buf, sizeof(buf), "%s%s", devpath, d[i].tail);
+			settings_defaults_set(t, d[i].key, buf);
+		}
+	}
+
+	/*
+	 * SDKROOT as a path.  A project writes "macosx" and means
+	 * whichever SDK that resolves to; Apple reports the resolved
+	 * path, and so does this now that one is known.
+	 */
+	{
+		const char *root = settings_get(t, "SDKROOT");
+		const char *dir = settings_get(t, "SDK_DIR");
+
+		if (dir != NULL && *dir == '/' &&
+		    (root == NULL || *root != '/'))
+			settings_set(t, "SDKROOT", dir);
 	}
 
 	settings_set(t, "ACTION", opts->action ? opts->action : "build");

@@ -841,6 +841,34 @@ build_apply_product_settings(settings_table *t, const char *product_type)
 		settings_default_if_empty(t, "EXECUTABLE_NAME", exe);
 		settings_default_if_empty(t, "EXECUTABLE_PATH", epath);
 
+		/* What signing would sign, and what a dSYM would be called. */
+		{
+			const char *built = settings_get(t, "BUILT_PRODUCTS_DIR");
+			const char *dst = settings_get(t, "DSTROOT");
+			const char *ipath = settings_get(t, "INSTALL_PATH");
+			char path[PATH_MAX], dsym[PATH_MAX];
+
+			if (built != NULL && *built != '\0') {
+				snprintf(path, sizeof(path), "%s/%s", built,
+				    full);
+				settings_default_if_empty(t,
+				    "CODESIGNING_FOLDER_PATH", path);
+				settings_default_if_empty(t,
+				    "DWARF_DSYM_FOLDER_PATH", built);
+			}
+
+			snprintf(dsym, sizeof(dsym), "%s.dSYM", full);
+			settings_default_if_empty(t, "DWARF_DSYM_FILE_NAME",
+			    dsym);
+
+			if (dst != NULL && ipath != NULL && *dst != '\0') {
+				snprintf(path, sizeof(path), "%s%s", dst,
+				    ipath);
+				settings_default_if_empty(t, "INSTALL_DIR",
+				    path);
+			}
+		}
+
 		if (framework || prod.kind == PRODUCT_DYNAMIC_LIB) {
 			const char *base = settings_get(t, "INSTALL_PATH");
 			char iname[PATH_MAX];
