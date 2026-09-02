@@ -117,3 +117,6 @@
 [submodule "src/extras/arm64th"]
 	path = src/extras/arm64th
 	url = https://github.com/erik/arm64th
+[submodule "src/swiftlang-llvm/swift-driver"]
+	path = src/swiftlang-llvm/swift-driver
+	url = https://github.com/swiftlang/swift-driver
