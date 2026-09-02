@@ -34,6 +34,14 @@ T_CFLAGS+=	-I${LD64_SRC}/ld -I${LD64_SRC}/abstraction -I${LD64_SRC}/mach_o \
 #   include/ld-internals   Apple linker internals (Atom.h, Options.h, ...)
 #   lib/libplatform        os/lock_private.h, for ld.cpp's assert lock
 #   lib/corecrypto         ccdigest/ccsha1/ccsha2, for code directories
+# ld-internals is reverse-engineered layout for Apple's linkers, ld-prime
+# above all -- MIT, and useful for reading what a linker produced.
+#
+# It must stay below ld64's own include path, and that is not a matter
+# of taste.  Both carry an Options.h, thirty-nine of ld64's sources
+# include "Options.h" unqualified, and whichever directory comes first
+# wins: put this one first and the linker silently compiles against a
+# description of a different linker's structures.
 T_CFLAGS+=	-I${TOP}/include/ld-internals
 T_CFLAGS+=	-I${TOP}/lib/libplatform/private
 

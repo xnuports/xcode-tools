@@ -5,6 +5,17 @@
 # in ld64.xcodeproj.
 .include "${TOP}/mk/with-ld64.mk"
 
+# ld-classic is what Apple calls this.
+#
+# Apple ships two linkers: ld, which is ld-prime, and ld-classic, which
+# is ld64 -- the same ld64-957.1 built here, under the name Apple gives
+# it.  ld-prime has never been published, so this tree cannot build it
+# and installs ld64 as ld as well, because a toolchain with no ld links
+# nothing.  Installing it under both names at least makes the honest
+# one available: a project that wants the classic linker by name finds
+# it, and `ld -v` says which it really is either way.
+T_LINKS+=	ld-classic
+
 T_SRCS!=	cd ${TOP} && ls src/apple-oss-distributions/distribution-Developer_Tools/ld64/src/ld/*.cpp \
 		    src/apple-oss-distributions/distribution-Developer_Tools/ld64/src/ld/parsers/*.cpp \
 		    src/apple-oss-distributions/distribution-Developer_Tools/ld64/src/ld/passes/*.cpp \
