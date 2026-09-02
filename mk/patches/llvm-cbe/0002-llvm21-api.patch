@@ -1,0 +1,33 @@
+--- a/lib/Target/CBackend/CTargetMachine.h	2026-09-02 19:40:43
++++ b/lib/Target/CBackend/CTargetMachine.h	2026-09-02 23:24:44
+@@ -24,7 +24,7 @@
+ class CTargetLowering : public TargetLowering {
+ public:
+   CTargetLowering(const TargetMachine &TM, const TargetSubtargetInfo &STI)
+-      : TargetLowering(TM, STI) {
++      : TargetLowering(TM) {
+     setMaxAtomicSizeInBitsSupported(0);
+   }
+ };
+@@ -63,7 +63,8 @@
+   addPassesToEmitFile(PassManagerBase &PM, raw_pwrite_stream &Out,
+                       raw_pwrite_stream *DwoOut, CodeGenFileType FileType,
+                       bool DisableVerify = true,
+-                      MachineModuleInfoWrapperPass *MMI = nullptr) override;
++                      MachineModuleInfoWrapperPass *MMI = nullptr,
++                      raw_pwrite_stream *CasIDOS = nullptr) override;
+ 
+   // TargetMachine interface
+   const TargetSubtargetInfo *getSubtargetImpl(const Function &) const override;
+--- a/lib/Target/CBackend/CTargetMachine.cpp	2026-09-02 19:40:43
++++ b/lib/Target/CBackend/CTargetMachine.cpp	2026-09-02 23:24:44
+@@ -23,7 +23,8 @@
+                                          raw_pwrite_stream *DwoOut,
+                                          CodeGenFileType FileType,
+                                          bool DisableVerify,
+-                                         MachineModuleInfoWrapperPass *MMI) {
++                                         MachineModuleInfoWrapperPass *MMI,
++                                         raw_pwrite_stream *CasIDOS) {
+ 
+   if (FileType != CodeGenFileType::AssemblyFile)
+     return true;

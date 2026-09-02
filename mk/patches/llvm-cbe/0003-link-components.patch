@@ -1,0 +1,24 @@
+--- a/tools/llvm-cbe/CMakeLists.txt	2026-09-02 19:40:43
++++ b/tools/llvm-cbe/CMakeLists.txt	2026-09-02 23:24:44
+@@ -34,8 +34,20 @@
+   llvm_map_components_to_libnames(llvm_libs
+     CBackendCodeGen
+     CBackendInfo
++    ${LLVM_TARGETS_TO_BUILD}
++    Analysis
++    AsmParser
++    AsmPrinter
++    BitReader
++    CodeGen
++    Core
++    IRReader
++    MC
++    ScalarOpts
++    SelectionDAG
++    Support
++    Target
+     )
+   target_link_libraries(llvm-cbe
+-    LLVM
+     ${llvm_libs})
+ endif()

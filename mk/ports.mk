@@ -39,25 +39,8 @@ PORTS+=	swiftlang-llvm/llvm-project llvm ${XCTOOLCHAIN}/usr/bin
 # ------------------------------------------------------------------
 PORTS+=	swiftlang-llvm/swift swift ${XCTOOLCHAIN}/usr/bin
 
-# llvm-cbe -- LLVM's C backend, which turns IR back into C.
-#
-# Not yet enabled, and the reason is worth writing down.  It is an
-# out-of-tree LLVM tool and its standalone CMake links the LLVM shared
-# library, which this tree does not build and Apple's toolchain does
-# not ship either -- Apple ships libLTO, libclang, libIndexStore and
-# libtapi, and no libLLVM.  Building one just to satisfy this would be
-# a step away from what Apple ships rather than towards it, so the
-# answer is to link the static component libraries instead, which
-# needs a patch to the tool's own CMakeLists.
-#
-# The C++ side is already known to work: llvm-cbe's master compiles
-# against the LLVM 21.1.6 this tree builds once two declarations in
-# CTargetMachine are adjusted -- TargetLowering took an extra argument
-# in LLVM 22, and this tree's LLVM is swiftlang's fork, whose
-# addPassesToEmitFile carries a CAS parameter upstream does not have.
-# Its own history offers no LLVM 21 version to fall back to: it went
-# from 20.1 straight to 22.1, and the 20.1 commit fares worse here.
-#PORTS+=	extras/llvm-cbe llvm-cbe ${XCTOOLCHAIN}/usr/bin
+# llvm-cbe reads the LLVM built above, so it comes after it.
+PORTS+=	extras/llvm-cbe llvm-cbe ${XCTOOLCHAIN}/usr/bin
 
 # ------------------------------------------------------------------
 # bsdmake -- Apple's BSD make, carried as a submodule at src/extras/bsdmake/.
