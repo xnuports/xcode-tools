@@ -626,6 +626,151 @@ xml_attr(const char *from, const char *to, const char *name, char *buf,
 	return NULL;
 }
 
+/* ------------------------------------------------------------------ */
+/* workspaces                                                           */
+/* ------------------------------------------------------------------ */
+
+/*
+ * The projects a workspace refers to.
+ *
+ * contents.xcworkspacedata is XML listing a FileRef per project, which
+ * Groups may nest.  A location carries the scheme it is measured from:
+ * "group:" is relative to the enclosing group, "container:" and
+ * "self:" to the workspace itself, and "absolute:" is already whole.
+ *
+ * Returns the number found; the caller frees each and the array.
+ */
+int
+workspace_projects(const char *workspace, char ***paths)
+{
+	char base[PATH_MAX], stack[16][PATH_MAX];
+	char file[PATH_MAX], *text, **list = NULL;
+	const char *p;
+	int depth = 0, count = 0;
+	long len;
+	FILE *fp;
+
+	*paths = NULL;
+	if (workspace == NULL)
+		return 0;
+
+	/*
+	 * Paths are measured from the directory holding the workspace,
+	 * not from the workspace itself: a bundle sitting beside the
+	 * projects it refers to is not above them.
+	 */
+	snprintf(base, sizeof(base), "%s", workspace);
+	{
+		char *slash = strrchr(base, '/');
+
+		if (slash != NULL)
+			*slash = '\0';
+		else
+			snprintf(base, sizeof(base), ".");
+	}
+
+	snprintf(stack[0], sizeof(stack[0]), "%s", base);
+
+	snprintf(file, sizeof(file), "%s/contents.xcworkspacedata", workspace);
+	if ((fp = fopen(file, "rb")) == NULL)
+		return 0;
+
+	if (fseek(fp, 0, SEEK_END) != 0 || (len = ftell(fp)) < 0) {
+		fclose(fp);
+		return 0;
+	}
+	rewind(fp);
+
+	if ((text = malloc((size_t)len + 1)) == NULL) {
+		fclose(fp);
+		return 0;
+	}
+	if (len > 0 && fread(text, 1, (size_t)len, fp) != (size_t)len) {
+		free(text);
+		fclose(fp);
+		return 0;
+	}
+	text[len] = '\0';
+	fclose(fp);
+
+	for (p = text; *p != '\0'; p++) {
+		const char *tag_end;
+		char loc[PATH_MAX], resolved[PATH_MAX];
+		const char *kind, *rest;
+		int is_group;
+
+		if (*p != '<')
+			continue;
+
+		if (strncmp(p, "</Group", 7) == 0) {
+			if (depth > 0)
+				depth--;
+			continue;
+		}
+
+		is_group = (strncmp(p, "<Group", 6) == 0);
+		if (!is_group && strncmp(p, "<FileRef", 8) != 0)
+			continue;
+
+		if ((tag_end = strchr(p, '>')) == NULL)
+			break;
+
+		if (xml_attr(p, tag_end, "location", loc, sizeof(loc)) == NULL) {
+			if (is_group && depth + 1 < 16) {
+				snprintf(stack[depth + 1],
+				    sizeof(stack[0]), "%s", stack[depth]);
+				depth++;
+			}
+			continue;
+		}
+
+		/* The part before the colon says what the path is from. */
+		if ((rest = strchr(loc, ':')) != NULL) {
+			kind = loc;
+			*(char *)rest = '\0';
+			rest++;
+		} else {
+			kind = "group";
+			rest = loc;
+		}
+
+		if (strcmp(kind, "absolute") == 0 || rest[0] == '/')
+			snprintf(resolved, sizeof(resolved), "%s", rest);
+		else if (strcmp(kind, "container") == 0 ||
+		    strcmp(kind, "self") == 0)
+			snprintf(resolved, sizeof(resolved), "%s/%s", base,
+			    rest);
+		else
+			snprintf(resolved, sizeof(resolved), "%s/%s",
+			    stack[depth], rest);
+
+		if (is_group) {
+			if (depth + 1 < 16) {
+				snprintf(stack[depth + 1], sizeof(stack[0]),
+				    "%s", resolved);
+				depth++;
+			}
+			continue;
+		}
+
+		{
+			char **grown = realloc(list,
+			    (size_t)(count + 1) * sizeof(*list));
+
+			if (grown != NULL) {
+				list = grown;
+				if ((list[count] = strdup(resolved)) != NULL)
+					count++;
+			}
+		}
+	}
+
+	free(text);
+	*paths = list;
+
+	return count;
+}
+
 /* Where a scheme of this name lives, shared or belonging to a user. */
 static int
 scheme_file(const char *project, const char *scheme, char *out, size_t len)
@@ -675,16 +820,19 @@ scheme_file(const char *project, const char *scheme, char *out, size_t len)
  * caller resolves.
  */
 int
-project_scheme_targets(const char *project, const char *scheme, char ***names)
+project_scheme_targets(const char *project, const char *scheme, char ***names,
+    char ***containers)
 {
 	char path[PATH_MAX];
-	char *text, **list = NULL;
+	char *text, **list = NULL, **clist = NULL;
 	const char *action, *action_end, *p;
 	long len;
 	FILE *fp;
 	int count = 0;
 
 	*names = NULL;
+	if (containers != NULL)
+		*containers = NULL;
 
 	if (project == NULL || scheme == NULL)
 		return 0;
@@ -756,8 +904,30 @@ project_scheme_targets(const char *project, const char *scheme, char ***names)
 		    (grown = realloc(list, (size_t)(count + 1) *
 		    sizeof(*list))) != NULL) {
 			list = grown;
-			if ((list[count] = strdup(name)) != NULL)
+
+			if ((list[count] = strdup(name)) != NULL) {
+				/*
+				 * Which project the target is in.  A
+				 * scheme in a workspace names targets of
+				 * several, so an entry says which.
+				 */
+				if (containers != NULL) {
+					char cbuf[PATH_MAX];
+					const char *c = xml_attr(p, entry_end,
+					    "ReferencedContainer", cbuf,
+					    sizeof(cbuf));
+					char **cg = realloc(clist,
+					    (size_t)(count + 1) * sizeof(*cg));
+
+					if (cg != NULL) {
+						clist = cg;
+						clist[count] = strdup(
+						    (c != NULL) ? c : "");
+					}
+				}
+
 				count++;
+			}
 		}
 
 		p = entry_end;
@@ -765,6 +935,8 @@ project_scheme_targets(const char *project, const char *scheme, char ***names)
 
 	free(text);
 	*names = list;
+	if (containers != NULL)
+		*containers = clist;
 
 	return count;
 }
@@ -877,10 +1049,138 @@ void project_display_name(const char *path, char *buf, size_t len)
 		*dot = '\0';
 }
 
+/*
+ * xcodebuild -list for a workspace.
+ *
+ * A workspace has no targets and no configurations of its own -- it
+ * refers to projects that have them -- so only schemes are listed:
+ * its own shared ones, and then everything each project it refers to
+ * would report, which is that project's shared schemes and one per
+ * target.
+ */
+static int
+workspace_list(const char *workspace)
+{
+	char name[PATH_MAX], sdir[PATH_MAX];
+	char **projects = NULL;
+	strvec schemes = {0};
+	const char *slash;
+	struct dirent *e;
+	int nprojects, i;
+	DIR *d;
+
+	snprintf(name, sizeof(name), "%s", workspace);
+	if ((slash = strrchr(name, '/')) != NULL)
+		memmove(name, slash + 1, strlen(slash + 1) + 1);
+	{
+		char *dot = strstr(name, ".xcworkspace");
+
+		if (dot != NULL)
+			*dot = '\0';
+	}
+
+	snprintf(sdir, sizeof(sdir), "%s/xcshareddata/xcschemes", workspace);
+	if ((d = opendir(sdir)) != NULL) {
+		while ((e = readdir(d)) != NULL) {
+			char buf[256];
+			char *dot;
+
+			if (!endswith(e->d_name, ".xcscheme"))
+				continue;
+
+			snprintf(buf, sizeof(buf), "%s", e->d_name);
+			if ((dot = strstr(buf, ".xcscheme")) != NULL)
+				*dot = '\0';
+			strvec_push_unique(&schemes, buf);
+		}
+		closedir(d);
+	}
+
+	nprojects = workspace_projects(workspace, &projects);
+
+	for (i = 0; i < nprojects; i++) {
+		CFTypeRef root, objects, project_obj, tarr;
+		strvec suppressed = {0};
+		char pdir[PATH_MAX];
+		CFIndex ti;
+
+		snprintf(pdir, sizeof(pdir), "%s/xcshareddata/xcschemes",
+		    projects[i]);
+		if ((d = opendir(pdir)) != NULL) {
+			while ((e = readdir(d)) != NULL) {
+				char buf[256];
+				char *dot;
+
+				if (!endswith(e->d_name, ".xcscheme"))
+					continue;
+
+				snprintf(buf, sizeof(buf), "%s", e->d_name);
+				if ((dot = strstr(buf, ".xcscheme")) != NULL)
+					*dot = '\0';
+				strvec_push_unique(&schemes, buf);
+			}
+			closedir(d);
+		}
+
+		collect_suppressed_targets(projects[i], &suppressed);
+
+		if ((root = project_load_pbxproj(projects[i])) != NULL) {
+			objects = pget(root, "objects");
+			project_obj = project_get_project_object(root);
+			tarr = pget(project_obj, "targets");
+
+			for (ti = 0; ti < pcount(tarr); ti++) {
+				CFTypeRef tid = pat(tarr, ti);
+				char idbuf[512], tnbuf[512];
+				const char *id = pstr(tid, idbuf, sizeof(idbuf));
+				const char *tn = pstr(pget(pderef(objects, tid),
+				    "name"), tnbuf, sizeof(tnbuf));
+
+				if (tn == NULL)
+					continue;
+				if (id != NULL && strvec_present(&suppressed, id))
+					continue;
+
+				strvec_push_unique(&schemes, tn);
+			}
+
+			CFRelease(root);
+		}
+
+		strvec_free(&suppressed);
+		free(projects[i]);
+	}
+	free(projects);
+
+	printf("Information about workspace \"%s\":\n", name);
+
+	if (schemes.count > 0) {
+		size_t k;
+
+		qsort(schemes.items, schemes.count, sizeof(*schemes.items),
+		    scheme_name_cmp);
+
+		printf("    Schemes:\n");
+		for (k = 0; k < schemes.count; k++)
+			printf("        %s\n", schemes.items[k]);
+		printf("\n");
+	}
+
+	strvec_free(&schemes);
+
+	return 0;
+}
+
 int project_list(const char *project, const char *workspace, const xcodebuild_opts *opts)
 {
 	(void)opts;
-	CFTypeRef root = project_load_pbxproj(project ? project : workspace);
+	CFTypeRef root;
+
+	/* A workspace has projects rather than targets of its own. */
+	if (project == NULL && workspace != NULL)
+		return workspace_list(workspace);
+
+	root = project_load_pbxproj(project ? project : workspace);
 	char name_buf[512];
 
 	if (root == NULL) {

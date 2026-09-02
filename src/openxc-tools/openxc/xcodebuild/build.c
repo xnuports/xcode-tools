@@ -3627,7 +3627,7 @@ out:
  * called are its own, not the settings of whatever asked for it.
  */
 int build_run(const char *project, settings_table *t,
-    const xcodebuild_opts *opts, const char *devpath)
+    const xcodebuild_opts *opts, const char *devpath, char **only, int nonly)
 {
 	CFTypeRef root, objects = NULL, root_id = NULL, project_obj, targets;
 	struct pathmap map;
@@ -3671,9 +3671,35 @@ int build_run(const char *project, settings_table *t,
 	 * names one; with neither, the first target of the project, as
 	 * everywhere else in this tool.
 	 */
-	if (opts->scheme != NULL) {
+	if (only != NULL && nonly > 0) {
+		/*
+		 * The caller has already worked out what to build -- a
+		 * workspace resolves its scheme across several projects
+		 * and then names this project's share of it.
+		 */
+		int k;
+
+		for (k = 0; k < nonly; k++)
+			if (target_id_by_name(objects, targets, only[k],
+			    chosen_id, sizeof(chosen_id)) != NULL)
+				idlist_add(&wanted, chosen_id);
+
+		chosen_id[0] = '\0';
+
+		/*
+		 * None of them is in this project.  That is not a failure
+		 * when a caller is working through several: it means this
+		 * one has no part in what was asked for.
+		 */
+		if (wanted.count == 0) {
+			idlist_free(&wanted);
+			CFRelease(root);
+			return 2;
+		}
+	} else if (opts->scheme != NULL) {
 		char **names = NULL;
-		int n = project_scheme_targets(project, opts->scheme, &names);
+		int n = project_scheme_targets(project, opts->scheme, &names,
+		    NULL);
 		int k;
 
 		for (k = 0; k < n; k++) {
@@ -3744,7 +3770,7 @@ int build_run(const char *project, settings_table *t,
 	 */
 	for (k = 0; k < wanted.count && rc == 0; k++)
 		rc = order_targets(objects, project_obj, wanted.ids[k], &order,
-		    &stack, &foreign, opts->scheme != NULL);
+		    &stack, &foreign, opts->scheme != NULL || only != NULL);
 
 	if (rc == 0 && foreign > 0)
 		fprintf(stderr, "xcodebuild: warning: %d dependenc%s on a"
@@ -3777,7 +3803,8 @@ int build_run(const char *project, settings_table *t,
 		 * asked for; a dependency needs its own.
 		 */
 		if (strcmp(order.ids[k], chosen_id) != 0 && name != NULL) {
-			ts = xbuild_settings_for_target(opts, devpath, name);
+			ts = xbuild_settings_for_target(opts, devpath, name,
+			    project);
 			if (ts == NULL) {
 				fprintf(stderr, "xcodebuild: error: cannot"
 				    " resolve the settings of '%s'\n", name);
@@ -3793,10 +3820,16 @@ int build_run(const char *project, settings_table *t,
 			settings_destroy(ts);
 	}
 
-	if (rc == 0)
-		printf("\n** BUILD SUCCEEDED **\n\n");
-	else
-		printf("\n** BUILD FAILED **\n\n");
+	/*
+	 * Whoever asked for several projects says how it went once, at
+	 * the end, rather than once for each of them.
+	 */
+	if (only == NULL) {
+		if (rc == 0)
+			printf("\n** BUILD SUCCEEDED **\n\n");
+		else
+			printf("\n** BUILD FAILED **\n\n");
+	}
 
 	idlist_free(&order);
 	idlist_free(&stack);

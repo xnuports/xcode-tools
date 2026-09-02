@@ -98,6 +98,7 @@ typedef struct {
 	/* project/workspace/scheme/target */
 	char *project;
 	char *workspace;
+	char *build_root;	/* set for a workspace: one place for products */
 	char *scheme;
 	char *target;
 	char *configuration;
@@ -163,10 +164,14 @@ const char *xbuild_resolve_toolchain_name(const xcodebuild_opts *opts, const cha
 
 /* build.c -- compile and link a target's sources. */
 settings_table *xbuild_settings_for_target(const xcodebuild_opts *opts,
-    const char *devpath, const char *target);
+    const char *devpath, const char *target, const char *project);
 
+/* Build a project.  `only` names the targets outright when the caller
+   has already worked them out, as a workspace does; NULL means take
+   them from the scheme or target on the command line. */
 int build_run(const char *project, settings_table *t,
-              const xcodebuild_opts *opts, const char *devpath);
+              const xcodebuild_opts *opts, const char *devpath,
+              char **only, int nonly);
 void build_apply_product_settings(settings_table *t, const char *product_type);
 
 #endif /* __XCODEBUILD_H__ */

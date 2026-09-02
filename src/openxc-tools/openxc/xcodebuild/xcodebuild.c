@@ -137,7 +137,8 @@ void xbuild_opts_free(xcodebuild_opts *o)
 {
 	if (o == NULL)
 		return;
-	free(o->project); free(o->workspace); free(o->scheme);
+	free(o->project); free(o->workspace); free(o->build_root);
+	free(o->scheme);
 	free(o->target); free(o->configuration); free(o->sdk);
 	free(o->arch); free(o->toolchain); free(o->destination);
 	free(o->xcconfig); free(o->derived_data_path);
@@ -472,14 +473,16 @@ static char *detect_project(const xcodebuild_opts *opts, const char *project_dir
  * turn, and what a target produces and what it is called are its own.
  */
 static settings_table *settings_for(const xcodebuild_opts *opts,
-                                    const char *devpath, const char *target)
+                                    const char *devpath, const char *target,
+                                    const char *project_override)
 {
 	const char *sdkname = xbuild_resolve_sdk_name(opts, devpath);
 	const char *tcname = xbuild_resolve_toolchain_name(opts, devpath, sdkname);
 	const char *configuration = opts->configuration ? opts->configuration : "Debug";
 	const char *arch = opts->arch;
 
-	char *project = detect_project(opts, opts->project_dir);
+	char *project = (project_override != NULL) ? strdup(project_override) :
+	                detect_project(opts, opts->project_dir);
 
 	settings_table *t = settings_create();
 	if (t == NULL)
@@ -534,8 +537,14 @@ static settings_table *settings_for(const xcodebuild_opts *opts,
 				{
 					char bd[PATH_MAX];
 
-					snprintf(bd, sizeof(bd), "%s/build/%s",
-					         sr, configuration);
+					if (opts->build_root != NULL)
+						snprintf(bd, sizeof(bd), "%s/%s",
+						         opts->build_root,
+						         configuration);
+					else
+						snprintf(bd, sizeof(bd),
+						         "%s/build/%s", sr,
+						         configuration);
 					settings_set(t, "BUILT_PRODUCTS_DIR", bd);
 					settings_set(t, "CONFIGURATION_BUILD_DIR", bd);
 					settings_set(t, "TARGET_BUILD_DIR", bd);
@@ -571,8 +580,14 @@ static settings_table *settings_for(const xcodebuild_opts *opts,
 					char proj_dir[PATH_MAX];
 					char cfg_dir[PATH_MAX];
 
-					snprintf(root_dir, sizeof(root_dir),
-					         "%s/build", sr);
+					if (opts->build_root != NULL)
+						snprintf(root_dir,
+						         sizeof(root_dir), "%s",
+						         opts->build_root);
+					else
+						snprintf(root_dir,
+						         sizeof(root_dir),
+						         "%s/build", sr);
 					settings_set(t, "SYMROOT", root_dir);
 					settings_set(t, "OBJROOT", root_dir);
 
@@ -756,14 +771,144 @@ static settings_table *settings_for(const xcodebuild_opts *opts,
 static settings_table *resolve_settings(const xcodebuild_opts *opts,
                                         const char *devpath)
 {
-	return settings_for(opts, devpath, opts->target);
+	return settings_for(opts, devpath, opts->target, NULL);
 }
 
 settings_table *xbuild_settings_for_target(const xcodebuild_opts *opts,
                                            const char *devpath,
-                                           const char *target)
+                                           const char *target,
+                                           const char *project)
 {
-	return settings_for(opts, devpath, target);
+	return settings_for(opts, devpath, target, project);
+}
+
+/*
+ * Build a workspace's scheme.
+ *
+ * A workspace has no targets of its own; it refers to projects, and a
+ * scheme names targets across them.  The scheme is looked for in the
+ * workspace first and then in each project, since a project's own
+ * schemes are part of a workspace too, and a name matching no file at
+ * all is the target of that name -- Xcode creates those on demand and
+ * writes nothing down.
+ *
+ * Every project builds into one directory rather than each into its
+ * own, which is the point of a workspace: a target in one project can
+ * link what a target in another has just built.
+ */
+static int
+workspace_build(xcodebuild_opts *opts, const char *devpath)
+{
+	char **projects = NULL, **names = NULL, **containers = NULL;
+	char root[PATH_MAX];
+	int nprojects, n = 0, i, j, rc = 0, built = 0;
+	const char *slash;
+
+	if (opts->scheme == NULL) {
+		fprintf(stderr, "xcodebuild: error: a workspace is built by"
+		    " scheme; pass -scheme\n");
+		return 1;
+	}
+
+	nprojects = workspace_projects(opts->workspace, &projects);
+	if (nprojects == 0) {
+		fprintf(stderr, "xcodebuild: error: the workspace '%s' refers"
+		    " to no projects\n", opts->workspace);
+		return 1;
+	}
+
+	/* One build directory beside the workspace, shared by them all. */
+	snprintf(root, sizeof(root), "%s", opts->workspace);
+	if ((slash = strrchr(root, '/')) != NULL)
+		*(char *)slash = '\0';
+	strlcat(root, "/build", sizeof(root));
+	opts->build_root = strdup(root);
+
+	/* The scheme: the workspace's own, then any project's. */
+	n = project_scheme_targets(opts->workspace, opts->scheme, &names,
+	    &containers);
+
+	for (i = 0; n == 0 && i < nprojects; i++)
+		n = project_scheme_targets(projects[i], opts->scheme, &names,
+		    &containers);
+
+	for (i = 0; i < nprojects && rc == 0; i++) {
+		char *only[64];
+		int nonly = 0;
+		settings_table *t;
+
+		if (n > 0) {
+			/*
+			 * The entries naming this project.  A container is
+			 * written relative to the workspace, so the tail of
+			 * the path is what identifies it.
+			 */
+			for (j = 0; j < n && nonly < 64; j++) {
+				const char *c = (containers != NULL) ?
+				    containers[j] : NULL;
+				const char *tail;
+
+				if (c == NULL || *c == '\0')
+					continue;
+				if ((tail = strchr(c, ':')) != NULL)
+					tail++;
+				else
+					tail = c;
+
+				if (strlen(projects[i]) >= strlen(tail) &&
+				    strcmp(projects[i] + strlen(projects[i]) -
+				    strlen(tail), tail) == 0)
+					only[nonly++] = names[j];
+			}
+		} else {
+			/* No scheme file: the name is a target's. */
+			only[nonly++] = opts->scheme;
+		}
+
+		if (nonly == 0)
+			continue;
+
+		t = xbuild_settings_for_target(opts, devpath, only[0],
+		                               projects[i]);
+		if (t == NULL) {
+			rc = 1;
+			break;
+		}
+
+		rc = build_run(projects[i], t, opts, devpath, only, nonly);
+		settings_destroy(t);
+
+		/* 2 means the project had no part in this scheme. */
+		if (rc == 2)
+			rc = 0;
+		else if (rc == 0)
+			built++;
+	}
+
+	if (rc == 0 && built == 0) {
+		fprintf(stderr, "xcodebuild: error: scheme '%s' not found in"
+		    " the workspace\n", opts->scheme);
+		rc = 1;
+	}
+
+	if (rc == 0)
+		printf("\n** BUILD SUCCEEDED **\n\n");
+	else
+		printf("\n** BUILD FAILED **\n\n");
+
+	for (i = 0; i < n; i++) {
+		free(names[i]);
+		if (containers != NULL)
+			free(containers[i]);
+	}
+	free(names);
+	free(containers);
+
+	for (i = 0; i < nprojects; i++)
+		free(projects[i]);
+	free(projects);
+
+	return rc;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1251,10 +1396,12 @@ int main(int argc, char **argv)
 	 * "build" went there too and was looked up as though it were a
 	 * tool of that name, so nothing was ever built.
 	 */
-	if (strcmp(action, "build") == 0) {
+	if (strcmp(action, "build") == 0 && opts->workspace != NULL) {
+		r = workspace_build(opts, devpath);
+	} else if (strcmp(action, "build") == 0) {
 		char *project = detect_project(opts, opts->project_dir);
 
-		r = build_run(project, t, opts, devpath);
+		r = build_run(project, t, opts, devpath, NULL, 0);
 		free(project);
 	} else {
 		r = exec_build_action(opts, devpath, sdkname, tcname, t, action);
