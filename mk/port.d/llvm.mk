@@ -111,6 +111,7 @@ P_MAKE_ARGS=	clang llvm-nm llvm-otool llvm-objdump llvm-size \
 		llvm-profdata libtapi \
 		lld llvm-ar llvm-objcopy llvm-readobj \
 		llvm-libraries clang-libraries \
+		LTO libclang \
 		runtimes
 
 # clang's resource directory -- its own stdarg.h, stddef.h and the rest.
@@ -120,9 +121,18 @@ P_MAKE_ARGS=	clang llvm-nm llvm-otool llvm-objdump llvm-size \
 CLANG_RESOURCE_VER!=	ls ${P_WORKDIR}/build/lib/clang 2>/dev/null | head -1
 P_TREES=	lib/clang/${CLANG_RESOURCE_VER}
 
-# libtapi is a library, not a program, and ld64 links against it.  It is
-# staged into the toolchain's usr/lib rather than usr/bin.
-P_LIBS=		lib/libtapi.dylib
+# The libraries, staged into the toolchain's usr/lib rather than usr/bin.
+#
+# ld64 links libtapi.  The other two are what Apple's toolchain carries
+# and this one did not: libLTO is the library a linker dlopens to do
+# link time optimisation -- without it -flto has nothing to call -- and
+# libclang is the C interface to clang that editors, indexers and
+# anything else that wants to parse C without being a compiler links
+# against.  Both are ordinary targets of the LLVM build; they were
+# simply never asked for.
+P_LIBS=		lib/libtapi.dylib \
+		lib/libLTO.dylib \
+		lib/libclang.dylib
 
 #
 # Only the real binaries are listed.  The alias names beside them in the
