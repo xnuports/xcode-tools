@@ -114,3 +114,6 @@
 [submodule "src/apple-oss-distributions/Security"]
 	path = src/apple-oss-distributions/Security
 	url = https://github.com/apple-oss-distributions/Security.git
+[submodule "src/extras/arm64th"]
+	path = src/extras/arm64th
+	url = https://github.com/erik/arm64th
