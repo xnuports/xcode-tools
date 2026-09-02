@@ -919,6 +919,455 @@ mkdirs(const char *path)
 	return (mkdir(buf, 0777) == 0 || errno == EEXIST) ? 0 : -1;
 }
 
+/* ------------------------------------------------------------------ */
+/* what still needs doing                                               */
+/*                                                                      */
+/* A thing is out of date when something it was made from is newer than */
+/* it is.  Timestamps are compared to the nanosecond: a build writes    */
+/* many files in the same second and a whole-second comparison would    */
+/* call some of them unchanged.                                         */
+/* ------------------------------------------------------------------ */
+
+static int
+mtime_of(const char *path, struct timespec *ts)
+{
+	struct stat st;
+
+	if (stat(path, &st) != 0)
+		return 0;
+
+	*ts = st.st_mtimespec;
+	return 1;
+}
+
+static int
+newer_than(const struct timespec *a, const struct timespec *b)
+{
+	if (a->tv_sec != b->tv_sec)
+		return a->tv_sec > b->tv_sec;
+
+	return a->tv_nsec > b->tv_nsec;
+}
+
+/* Is `out` missing, or older than `in`?  A missing input counts too, so
+   the tool that needs it runs and says so itself. */
+static int
+out_of_date(const char *out, const char *in)
+{
+	struct timespec o, i;
+
+	if (!mtime_of(out, &o) || !mtime_of(in, &i))
+		return 1;
+
+	return newer_than(&i, &o);
+}
+
+/*
+ * The command that produced a file, kept beside it.
+ *
+ * A source that has not changed still has to be compiled again when
+ * the command does -- another -D, a different SDK, a new warning flag
+ * -- and no timestamp can see that.  So the command is written out and
+ * compared with the one about to run.
+ */
+static int
+command_changed(const char *stamp, char *const argv[])
+{
+	char *want, *have;
+	size_t len = 1;
+	long size;
+	FILE *fp;
+	int differs = 1, i;
+
+	for (i = 0; argv[i] != NULL; i++)
+		len += strlen(argv[i]) + 1;
+
+	if ((want = malloc(len)) == NULL)
+		return 1;
+
+	want[0] = '\0';
+	for (i = 0; argv[i] != NULL; i++) {
+		strlcat(want, argv[i], len);
+		strlcat(want, "\n", len);
+	}
+
+	if ((fp = fopen(stamp, "rb")) != NULL) {
+		if (fseek(fp, 0, SEEK_END) == 0 && (size = ftell(fp)) >= 0 &&
+		    (size_t)size == strlen(want) &&
+		    (have = malloc((size_t)size + 1)) != NULL) {
+			rewind(fp);
+
+			if (fread(have, 1, (size_t)size, fp) == (size_t)size) {
+				have[size] = '\0';
+				differs = (strcmp(have, want) != 0);
+			}
+
+			free(have);
+		}
+
+		fclose(fp);
+	}
+
+	free(want);
+	return differs;
+}
+
+static void
+record_command(const char *stamp, char *const argv[])
+{
+	FILE *fp;
+	int i;
+
+	if ((fp = fopen(stamp, "wb")) == NULL)
+		return;
+
+	for (i = 0; argv[i] != NULL; i++)
+		fprintf(fp, "%s\n", argv[i]);
+
+	fclose(fp);
+}
+
+/*
+ * The headers an object was built from.
+ *
+ * clang writes them as a make rule -- the object, a colon, then every
+ * file it read, long lists broken with a trailing backslash and a
+ * space in a name escaped by one.  Editing a header has to rebuild
+ * whatever included it, and nothing but this knows what did.
+ */
+static int
+depfile_out_of_date(const char *depfile, const struct timespec *obj)
+{
+	char *text, word[PATH_MAX];
+	size_t n = 0;
+	long len, i;
+	FILE *fp;
+	int stale = 0, past_target = 0;
+
+	if ((fp = fopen(depfile, "rb")) == NULL)
+		return 1;
+
+	if (fseek(fp, 0, SEEK_END) != 0 || (len = ftell(fp)) < 0) {
+		fclose(fp);
+		return 1;
+	}
+	rewind(fp);
+
+	if ((text = malloc((size_t)len + 1)) == NULL) {
+		fclose(fp);
+		return 1;
+	}
+
+	if (len > 0 && fread(text, 1, (size_t)len, fp) != (size_t)len) {
+		free(text);
+		fclose(fp);
+		return 1;
+	}
+	text[len] = '\0';
+	fclose(fp);
+
+	for (i = 0; i <= len && !stale; i++) {
+		char c = text[i];
+
+		if (c == '\\' && (text[i + 1] == ' ' || text[i + 1] == '\n')) {
+			if (text[i + 1] == ' ' && n + 1 < sizeof(word))
+				word[n++] = ' ';
+			i++;
+			continue;
+		}
+
+		if (c != '\0' && c != ' ' && c != '\t' && c != '\n' &&
+		    c != '\r') {
+			if (n + 1 < sizeof(word))
+				word[n++] = c;
+			continue;
+		}
+
+		if (n == 0)
+			continue;
+
+		word[n] = '\0';
+		n = 0;
+
+		if (!past_target) {
+			if (word[strlen(word) - 1] == ':')
+				past_target = 1;
+			continue;
+		}
+
+		{
+			struct timespec dep;
+
+			if (!mtime_of(word, &dep) || newer_than(&dep, obj))
+				stale = 1;
+		}
+	}
+
+	free(text);
+	return stale;
+}
+
+/*
+ * Does this source still need compiling?
+ *
+ * Everything has to line up: the object is there, the source has not
+ * changed since it was made, none of the headers it included have
+ * changed, and the command is the one that made it.
+ */
+static int
+source_up_to_date(const char *obj, const char *src, const char *dep,
+    const char *cmd, char *const argv[])
+{
+	struct timespec o;
+
+	if (!mtime_of(obj, &o))
+		return 0;
+	if (out_of_date(obj, src))
+		return 0;
+	if (command_changed(cmd, argv))
+		return 0;
+
+	return !depfile_out_of_date(dep, &o);
+}
+
+/*
+ * Does the product still need linking?
+ *
+ * Every path on the link line that names a file is an input, which
+ * covers the objects, the archives and the stubs.  A framework is
+ * named rather than given as a path, so the -F directories are
+ * gathered and the binary looked for in each.
+ */
+static int
+link_up_to_date(const char *product, char *const argv[], const char *cmd)
+{
+	struct timespec prod, in;
+	int i, j;
+
+	if (!mtime_of(product, &prod))
+		return 0;
+	if (command_changed(cmd, argv))
+		return 0;
+
+	for (i = 0; argv[i] != NULL; i++) {
+		if (strcmp(argv[i], "-framework") == 0 ||
+		    strcmp(argv[i], "-weak_framework") == 0) {
+			if (argv[i + 1] == NULL)
+				break;
+
+			for (j = 0; argv[j] != NULL; j++) {
+				char path[PATH_MAX];
+
+				if (strcmp(argv[j], "-F") != 0 ||
+				    argv[j + 1] == NULL)
+					continue;
+
+				snprintf(path, sizeof(path),
+				    "%s/%s.framework/%s", argv[j + 1],
+				    argv[i + 1], argv[i + 1]);
+
+				if (mtime_of(path, &in) &&
+				    newer_than(&in, &prod))
+					return 0;
+			}
+
+			i++;
+			continue;
+		}
+
+		if (argv[i][0] == '-')
+			continue;
+
+		if (mtime_of(argv[i], &in) && newer_than(&in, &prod))
+			return 0;
+	}
+
+	return 1;
+}
+
+/* The newest modification time anywhere under a path. */
+static void
+newest_mtime(const char *path, struct timespec *out)
+{
+	struct timespec ts;
+	struct dirent *e;
+	struct stat st;
+	DIR *d;
+
+	if (lstat(path, &st) != 0)
+		return;
+
+	ts = st.st_mtimespec;
+	if (newer_than(&ts, out))
+		*out = ts;
+
+	if (!S_ISDIR(st.st_mode) || (d = opendir(path)) == NULL)
+		return;
+
+	while ((e = readdir(d)) != NULL) {
+		char sub[PATH_MAX];
+
+		if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0)
+			continue;
+
+		snprintf(sub, sizeof(sub), "%s/%s", path, e->d_name);
+		newest_mtime(sub, out);
+	}
+
+	closedir(d);
+}
+
+/*
+ * Is anything under `src` missing from `dst` or newer than its
+ * counterpart there?  A tree is copied whole or not at all, so one
+ * file is enough to settle it.
+ */
+static int
+tree_out_of_date(const char *src, const char *dst)
+{
+	struct stat st;
+	struct dirent *e;
+	DIR *d;
+	int stale = 0;
+
+	if (lstat(src, &st) != 0)
+		return 0;
+
+	if (!S_ISDIR(st.st_mode))
+		return out_of_date(dst, src);
+
+	if (lstat(dst, &st) != 0)
+		return 1;
+
+	if ((d = opendir(src)) == NULL)
+		return 1;
+
+	while (!stale && (e = readdir(d)) != NULL) {
+		char a[PATH_MAX], b[PATH_MAX];
+
+		if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0)
+			continue;
+
+		snprintf(a, sizeof(a), "%s/%s", src, e->d_name);
+		snprintf(b, sizeof(b), "%s/%s", dst, e->d_name);
+		stale = tree_out_of_date(a, b);
+	}
+
+	closedir(d);
+	return stale;
+}
+
+/*
+ * Write a file only where its contents would differ.
+ *
+ * A generated file rewritten identically still gets a new timestamp,
+ * and everything made from it would then be made again for nothing --
+ * a framework's headers reinstalled each time is enough to recompile
+ * everything that includes them, and to relink and re-embed after.
+ */
+static int
+write_if_changed(const char *path, const void *data, size_t len)
+{
+	struct stat st;
+	FILE *fp;
+	int same = 0;
+
+	if (stat(path, &st) == 0 && (size_t)st.st_size == len &&
+	    (fp = fopen(path, "rb")) != NULL) {
+		char *have = malloc(len + 1);
+
+		if (have != NULL) {
+			if (fread(have, 1, len, fp) == len)
+				same = (len == 0 ||
+				    memcmp(have, data, len) == 0);
+			free(have);
+		}
+
+		fclose(fp);
+	}
+
+	if (same)
+		return 0;
+
+	if ((fp = fopen(path, "wb")) == NULL) {
+		fprintf(stderr, "xcodebuild: error: cannot write %s\n", path);
+		return -1;
+	}
+
+	if (len > 0)
+		fwrite(data, 1, len, fp);
+
+	fclose(fp);
+	return 0;
+}
+
+/*
+ * Does this script phase need running?
+ *
+ * A phase that declares no outputs has nothing to compare and runs
+ * every time, which is what Xcode does with it; alwaysOutOfDate says
+ * so outright.  Otherwise every output has to be there and be newer
+ * than every input.
+ */
+static int
+script_up_to_date(CFTypeRef phase, const settings_table *t)
+{
+	CFTypeRef outs = bget(phase, "outputPaths");
+	CFTypeRef ins = bget(phase, "inputPaths");
+	struct timespec oldest;
+	CFIndex i;
+	int have = 0;
+
+	if (bint(bget(phase, "alwaysOutOfDate"), 0) != 0)
+		return 0;
+
+	if (bcount(outs) == 0)
+		return 0;
+
+	for (i = 0; i < bcount(outs); i++) {
+		char buf[PATH_MAX];
+		const char *v = bstr(bat(outs, i), buf, sizeof(buf));
+		struct timespec ts;
+		char *expanded;
+		int ok;
+
+		if (v == NULL)
+			return 0;
+
+		expanded = settings_expand(t, v);
+		ok = mtime_of((expanded != NULL) ? expanded : v, &ts);
+		free(expanded);
+
+		if (!ok)
+			return 0;
+
+		if (!have || newer_than(&oldest, &ts)) {
+			oldest = ts;
+			have = 1;
+		}
+	}
+
+	for (i = 0; i < bcount(ins); i++) {
+		char buf[PATH_MAX];
+		const char *v = bstr(bat(ins, i), buf, sizeof(buf));
+		struct timespec ts;
+		char *expanded;
+		int ok;
+
+		if (v == NULL)
+			continue;
+
+		expanded = settings_expand(t, v);
+		ok = mtime_of((expanded != NULL) ? expanded : v, &ts);
+		free(expanded);
+
+		if (!ok || newer_than(&ts, &oldest))
+			return 0;
+	}
+
+	return 1;
+}
+
 static int
 is_swift(const char *path)
 {
@@ -978,7 +1427,6 @@ write_bundle_infoplist(const char *path, const char *exe_name,
 	char buf[PATH_MAX];
 	const char *region;
 	CFDataRef data;
-	FILE *fp;
 	int rc = 0;
 
 	if (path == NULL || exe_name == NULL)
@@ -1021,13 +1469,9 @@ write_bundle_infoplist(const char *path, const char *exe_name,
 	if (data == NULL)
 		return 1;
 
-	if ((fp = fopen(path, "wb")) == NULL) {
-		fprintf(stderr, "xcodebuild: error: cannot write %s\n", path);
+	if (write_if_changed(path, CFDataGetBytePtr(data),
+	    (size_t)CFDataGetLength(data)) != 0)
 		rc = 1;
-	} else {
-		fwrite(CFDataGetBytePtr(data), 1, (size_t)CFDataGetLength(data), fp);
-		fclose(fp);
-	}
 
 	CFRelease(data);
 	return rc;
@@ -1323,6 +1767,11 @@ install_one_resource(const struct pathmap *map, const char *ref,
 	snprintf(dst, sizeof(dst), "%s/%s", dir, base);
 
 	if (!S_ISDIR(st.st_mode) && has_ext(src, ".strings")) {
+		if (!out_of_date(dst, src)) {
+			(*ncopied)++;
+			return 0;
+		}
+
 		if (copy_strings_file(src, dst, t) != 0) {
 			fprintf(stderr, "xcodebuild: error: cannot convert"
 			    " %s\n", src);
@@ -1333,7 +1782,7 @@ install_one_resource(const struct pathmap *map, const char *ref,
 		return 0;
 	}
 
-	if (copy_tree(src, dst) != 0) {
+	if (tree_out_of_date(src, dst) && copy_tree(src, dst) != 0) {
 		fprintf(stderr, "xcodebuild: error: cannot copy %s\n", src);
 		return -1;
 	}
@@ -1649,9 +2098,10 @@ static int
 install_copy_files(CFTypeRef objects, CFTypeRef phase,
     const struct pathmap *map, const char *build_dir, const char *sdkroot,
     const char *devpath, const char *bundle, const char *contents,
-    int is_framework, settings_table *t)
+    const char *obj_dir, int is_framework, settings_table *t)
 {
-	char dstbuf[PATH_MAX], dir[PATH_MAX];
+	char dstbuf[PATH_MAX], dir[PATH_MAX], stamp[PATH_MAX];
+	struct timespec newest, stamped;
 	CFTypeRef files;
 	const char *dst_path;
 	CFIndex f;
@@ -1700,6 +2150,21 @@ install_copy_files(CFTypeRef objects, CFTypeRef phase,
 		base = (base != NULL) ? base + 1 : src;
 		snprintf(dst, sizeof(dst), "%s/%s", dir, base);
 
+		/*
+		 * Taking the headers out of the copy makes it differ from
+		 * its source for ever after, so comparing the two would
+		 * copy it again every time.  A stamp records when it was
+		 * last copied, and the newest thing in the source decides.
+		 */
+		memset(&newest, 0, sizeof(newest));
+		newest_mtime(src, &newest);
+
+		snprintf(stamp, sizeof(stamp), "%s/copy-%d-%s.stamp", obj_dir,
+		    spec, base);
+
+		if (mtime_of(stamp, &stamped) && !newer_than(&newest, &stamped))
+			continue;
+
 		printf("CpResource %s\n", dst);
 
 		if (copy_tree(src, dst) != 0) {
@@ -1712,18 +2177,41 @@ install_copy_files(CFTypeRef objects, CFTypeRef phase,
 		if (build_file_has_attr(bf, "RemoveHeadersOnCopy") &&
 		    has_ext(dst, ".framework"))
 			strip_embedded_headers(dst);
+
+		{
+			FILE *fp = fopen(stamp, "wb");
+
+			if (fp != NULL)
+				fclose(fp);
+		}
 	}
 
 	return rc;
 }
 
-/* A symlink inside a bundle, replaced if one is already there. */
+/*
+ * A symlink inside a bundle, replaced if one is already there.
+ *
+ * One that already points where it should is left alone.  Recreating
+ * it would give it a new timestamp on every build, and whatever copies
+ * this bundle -- an application embedding the framework -- would copy
+ * the whole of it again each time for nothing.
+ */
 static int
 relink(const char *dir, const char *name, const char *target)
 {
-	char path[PATH_MAX];
+	char path[PATH_MAX], have[PATH_MAX];
+	ssize_t n;
 
 	snprintf(path, sizeof(path), "%s/%s", dir, name);
+
+	if ((n = readlink(path, have, sizeof(have) - 1)) >= 0) {
+		have[n] = '\0';
+
+		if (strcmp(have, target) == 0)
+			return 0;
+	}
+
 	unlink(path);
 
 	return symlink(target, path);
@@ -1782,7 +2270,7 @@ install_framework_headers(CFTypeRef objects, CFTypeRef phase,
 		base = (base != NULL) ? base + 1 : src;
 		snprintf(dst, sizeof(dst), "%s/%s", dir, base);
 
-		if (copy_file(src, dst) != 0) {
+		if (out_of_date(dst, src) && copy_file(src, dst) != 0) {
 			fprintf(stderr, "xcodebuild: error: cannot"
 			    " install the header %s\n", src);
 			rc = -1;
@@ -1863,21 +2351,14 @@ write_pkginfo(const char *dst, const char *package_type, settings_table *t)
 {
 	char buf[64];
 	const char *gen;
-	FILE *fp;
 
 	gen = setting(t, "GENERATE_PKGINFO_FILE", buf, sizeof(buf));
 	if (gen != NULL && strcasecmp(gen, "NO") == 0)
 		return 0;
 
-	if ((fp = fopen(dst, "wb")) == NULL) {
-		fprintf(stderr, "xcodebuild: error: cannot write %s\n", dst);
-		return 1;
-	}
+	snprintf(buf, sizeof(buf), "%s????", package_type);
 
-	fprintf(fp, "%s????", package_type);
-	fclose(fp);
-
-	return 0;
+	return (write_if_changed(dst, buf, strlen(buf)) == 0) ? 0 : 1;
 }
 
 /*
@@ -2247,8 +2728,9 @@ build_one_target(CFTypeRef objects, CFTypeRef chosen, const char *source_root,
 				continue;
 
 			if (strcmp(isa, "PBXShellScriptBuildPhase") == 0) {
-				rc = run_script_phase(phase, t, srcroot,
-				    obj_dir, (int)p, opts->verbose);
+				if (!script_up_to_date(phase, t))
+					rc = run_script_phase(phase, t, srcroot,
+					    obj_dir, (int)p, opts->verbose);
 				continue;
 			}
 
@@ -2272,7 +2754,7 @@ build_one_target(CFTypeRef objects, CFTypeRef chosen, const char *source_root,
 			if (strcmp(isa, "PBXCopyFilesBuildPhase") == 0) {
 				if (install_copy_files(objects, phase, map,
 				    build_dir, sdkroot, devpath, bp, cp,
-				    is_framework, t) != 0)
+				    obj_dir, is_framework, t) != 0)
 					rc = 1;
 				continue;
 			}
@@ -2290,6 +2772,7 @@ build_one_target(CFTypeRef objects, CFTypeRef chosen, const char *source_root,
 				    refbuf, sizeof(refbuf));
 				const char *src;
 				char obj[PATH_MAX], *argv[256];
+				char dep[PATH_MAX], cmdstamp[PATH_MAX];
 				const char *base;
 				int a = 0;
 
@@ -2339,10 +2822,31 @@ build_one_target(CFTypeRef objects, CFTypeRef chosen, const char *source_root,
 				    settings_get(t, "GCC_PREPROCESSOR_DEFINITIONS"),
 				    "-D", NULL);
 
+				/*
+				 * Ask for the header list while compiling:
+				 * it costs nothing here, and it is the only
+				 * record of what this object was built from.
+				 */
+				snprintf(dep, sizeof(dep), "%s.d", obj);
+				snprintf(cmdstamp, sizeof(cmdstamp), "%s.cmd",
+				    obj);
+
+				argv[a++] = (char *)"-MMD";
+				argv[a++] = (char *)"-MF";
+				argv[a++] = dep;
 				argv[a++] = (char *)"-o";
 				argv[a++] = obj;
 				argv[a++] = (char *)src;
 				argv[a] = NULL;
+
+				if (source_up_to_date(obj, src, dep, cmdstamp,
+				    argv)) {
+					if (nobjs < (int)(sizeof(objs) /
+					    sizeof(objs[0])))
+						objs[nobjs++] = strdup(obj);
+					nsources++;
+					continue;
+				}
 
 				printf("CompileC %s\n", src);
 				if (run(argv, opts->verbose) != 0) {
@@ -2351,6 +2855,8 @@ build_one_target(CFTypeRef objects, CFTypeRef chosen, const char *source_root,
 					rc = 1;
 					break;
 				}
+
+				record_command(cmdstamp, argv);
 
 				if (nobjs < (int)(sizeof(objs) / sizeof(objs[0])))
 					objs[nobjs++] = strdup(obj);
@@ -2366,9 +2872,11 @@ build_one_target(CFTypeRef objects, CFTypeRef chosen, const char *source_root,
 			 */
 			if (rc == 0 && nswift > 0) {
 				char swiftc[PATH_MAX], obj[PATH_MAX], modbuf[256];
+				char swstamp[PATH_MAX];
 				char *argv[280];
+				struct timespec objtime;
 				const char *module;
-				int a = 0, j;
+				int a = 0, j, fresh;
 
 				snprintf(swiftc, sizeof(swiftc),
 				    "%s/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
@@ -2403,23 +2911,58 @@ build_one_target(CFTypeRef objects, CFTypeRef chosen, const char *source_root,
 						argv[a++] = swifts[j];
 					argv[a] = NULL;
 
-					printf("CompileSwift %s (%d file%s)\n", module,
-					    nswift, (nswift == 1) ? "" : "s");
-					if (run(argv, opts->verbose) != 0) {
-						fprintf(stderr, "xcodebuild: error:"
-						    " failed to compile the Swift"
-						    " sources of %s\n", module);
-						rc = 1;
-					} else if (nobjs < (int)(sizeof(objs) /
-					    sizeof(objs[0]))) {
-						objs[nobjs++] = strdup(obj);
+					/*
+					 * A Swift module is compiled whole,
+					 * so any one of its sources being
+					 * newer than the object rebuilds all
+					 * of it.  There is no header list to
+					 * consult here: the sources are the
+					 * dependencies.
+					 */
+					snprintf(swstamp, sizeof(swstamp),
+					    "%s.cmd", obj);
+					fresh = mtime_of(obj, &objtime) &&
+					    !command_changed(swstamp, argv);
+
+					for (j = 0; fresh && j < nswift; j++)
+						if (out_of_date(obj, swifts[j]))
+							fresh = 0;
+
+					if (fresh) {
+						if (nobjs < (int)(sizeof(objs) /
+						    sizeof(objs[0])))
+							objs[nobjs++] =
+							    strdup(obj);
+					} else {
+						printf("CompileSwift %s (%d"
+						    " file%s)\n", module,
+						    nswift,
+						    (nswift == 1) ? "" : "s");
+
+						if (run(argv, opts->verbose) != 0) {
+							fprintf(stderr,
+							    "xcodebuild: error:"
+							    " failed to compile"
+							    " the Swift sources"
+							    " of %s\n", module);
+							rc = 1;
+						} else {
+							record_command(swstamp,
+							    argv);
+
+							if (nobjs < (int)(sizeof(objs) /
+							    sizeof(objs[0])))
+								objs[nobjs++] =
+								    strdup(obj);
+						}
 					}
 				}
 			}
 
 			if (rc == 0 && nobjs > 0) {
-				char *argv[512];
-				char libtool[PATH_MAX];
+				char *argv[512], stamp[PATH_MAX];
+				char libtool[PATH_MAX], swiftc[PATH_MAX];
+				const char *verb = "Ld";
 				int a = 0, j;
 
 				/* A bundle's binary sits in a directory of its own. */
@@ -2454,16 +2997,20 @@ build_one_target(CFTypeRef objects, CFTypeRef chosen, const char *source_root,
 						argv[a++] = objs[j];
 					argv[a] = NULL;
 
-					printf("Libtool %s\n", product);
+					verb = "Libtool";
 				} else if (rc == 0) {
 					/*
 					 * A target with Swift in it is linked by
 					 * swiftc, which knows to bring in the Swift
 					 * runtime and the standard library; clang
 					 * would leave those symbols undefined.
+					 *
+					 * swiftc is declared with the rest of
+					 * the link: argv keeps a pointer to
+					 * it until the command runs, and a
+					 * buffer scoped to this branch would
+					 * be gone by then.
 					 */
-					char swiftc[PATH_MAX];
-
 					if (nswift > 0) {
 						snprintf(swiftc, sizeof(swiftc),
 						    "%s/Toolchains/XcodeDefault"
@@ -2521,12 +3068,28 @@ have_linker:
 
 					argv[a] = NULL;
 
-					printf("Ld %s\n", product);
+					verb = "Ld";
 				}
 
-				if (rc == 0 && run(argv, opts->verbose) != 0) {
-					fprintf(stderr, "xcodebuild: error: link failed\n");
-					rc = 1;
+				/*
+				 * Relink only when something on the line is
+				 * newer than the product, or the line itself
+				 * has changed.
+				 */
+				snprintf(stamp, sizeof(stamp), "%s/%s.linked",
+				    obj_dir, product_name);
+
+				if (rc == 0 && !link_up_to_date(product, argv,
+				    stamp)) {
+					printf("%s %s\n", verb, product);
+
+					if (run(argv, opts->verbose) != 0) {
+						fprintf(stderr, "xcodebuild:"
+						    " error: link failed\n");
+						rc = 1;
+					} else {
+						record_command(stamp, argv);
+					}
 				}
 
 			}
