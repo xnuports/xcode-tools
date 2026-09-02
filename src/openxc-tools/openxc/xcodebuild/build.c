@@ -276,6 +276,26 @@ walk_group(CFTypeRef objects, CFTypeRef group, const char *prefix,
 	}
 }
 
+/* An integer setting.  An OpenStep plist has no numbers, only text. */
+static int
+bint(CFTypeRef v, int fallback)
+{
+	char buf[32];
+	const char *str = bstr(v, buf, sizeof(buf));
+
+	if (str != NULL)
+		return atoi(str);
+
+	if (v != NULL && CFGetTypeID(v) == CFNumberGetTypeID()) {
+		int n = 0;
+
+		if (CFNumberGetValue((CFNumberRef)v, kCFNumberIntType, &n))
+			return n;
+	}
+
+	return fallback;
+}
+
 /* ------------------------------------------------------------------ */
 /* targets, and the order to build them in                              */
 /* ------------------------------------------------------------------ */
@@ -1021,7 +1041,47 @@ copy_file(const char *src, const char *dst)
 	return rc;
 }
 
-/* A file, or a directory and everything under it. */
+/* A directory and everything under it, removed. */
+static int
+remove_tree(const char *path)
+{
+	struct stat st;
+	struct dirent *e;
+	DIR *d;
+	int rc = 0;
+
+	if (lstat(path, &st) != 0)
+		return 0;
+
+	if (!S_ISDIR(st.st_mode) || S_ISLNK(st.st_mode))
+		return (unlink(path) == 0) ? 0 : -1;
+
+	if ((d = opendir(path)) == NULL)
+		return -1;
+
+	while (rc == 0 && (e = readdir(d)) != NULL) {
+		char sub[PATH_MAX];
+
+		if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0)
+			continue;
+
+		snprintf(sub, sizeof(sub), "%s/%s", path, e->d_name);
+		rc = remove_tree(sub);
+	}
+
+	closedir(d);
+
+	return (rc == 0 && rmdir(path) == 0) ? 0 : -1;
+}
+
+/*
+ * A file, or a directory and everything under it.
+ *
+ * A symlink is copied as a symlink.  Following one would turn a
+ * framework's Versions/Current into a second copy of the version it
+ * points at, and the binary at the top of the bundle into a third:
+ * the links are what make it one framework rather than three.
+ */
 static int
 copy_tree(const char *src, const char *dst)
 {
@@ -1030,8 +1090,21 @@ copy_tree(const char *src, const char *dst)
 	DIR *d;
 	int rc = 0;
 
-	if (stat(src, &st) != 0)
+	if (lstat(src, &st) != 0)
 		return -1;
+
+	if (S_ISLNK(st.st_mode)) {
+		char target[PATH_MAX];
+		ssize_t n = readlink(src, target, sizeof(target) - 1);
+
+		if (n < 0)
+			return -1;
+
+		target[n] = '\0';
+		unlink(dst);
+
+		return (symlink(target, dst) == 0) ? 0 : -1;
+	}
 
 	if (!S_ISDIR(st.st_mode))
 		return copy_file(src, dst);
@@ -1309,6 +1382,204 @@ install_bundle_resources(CFTypeRef objects, CFTypeRef target,
 
 			rc = install_one_resource(map, ref, build_dir, sdkroot,
 			    devpath, res_dir, t, ncopied);
+		}
+	}
+
+	return rc;
+}
+
+/*
+ * Where a copy files phase puts what it copies.
+ *
+ * dstSubfolderSpec is a number naming a place in the product and
+ * dstPath is appended to it.  The numbers were read back from Apple
+ * building a phase for each of them: 0 is an absolute path given in
+ * dstPath, 1 the wrapper itself, 6 the executables, 7 the resources,
+ * 10 frameworks, 11 shared frameworks, 12 shared support, 13 plugins,
+ * and 16 the directory the products are built into.
+ *
+ * A target with no wrapper -- a tool -- has nowhere inside itself to
+ * put anything, and everything named relative to one lands in the
+ * products directory, which is what Apple does with it.
+ */
+static int
+copy_phase_dir(int spec, const char *dst_path, const char *bundle,
+    const char *contents, const char *build_dir, int is_framework, char *out,
+    size_t len)
+{
+	char base[PATH_MAX];
+
+	if (spec == 0) {
+		if (dst_path == NULL || dst_path[0] != '/')
+			return -1;
+		snprintf(out, len, "%s", dst_path);
+		return 0;
+	}
+
+	switch (spec) {
+	case 1: case 6: case 7: case 10: case 11: case 12: case 13: case 16:
+		break;
+	default:
+		return -1;
+	}
+
+	if (spec == 16 || bundle == NULL) {
+		snprintf(base, sizeof(base), "%s", build_dir);
+	} else {
+		switch (spec) {
+		case 1:
+			snprintf(base, sizeof(base), "%s", bundle);
+			break;
+		case 6:
+			/* A framework keeps its binary in the version
+			   directory itself, an application in MacOS. */
+			if (is_framework)
+				snprintf(base, sizeof(base), "%s", contents);
+			else
+				snprintf(base, sizeof(base), "%s/MacOS",
+				    contents);
+			break;
+		case 7:
+			snprintf(base, sizeof(base), "%s/Resources", contents);
+			break;
+		case 10:
+			snprintf(base, sizeof(base), "%s/Frameworks", contents);
+			break;
+		case 11:
+			snprintf(base, sizeof(base), "%s/SharedFrameworks",
+			    contents);
+			break;
+		case 12:
+			snprintf(base, sizeof(base), "%s/SharedSupport",
+			    contents);
+			break;
+		default:
+			snprintf(base, sizeof(base), "%s/PlugIns", contents);
+			break;
+		}
+	}
+
+	if (dst_path != NULL && *dst_path != '\0' && dst_path[0] != '/')
+		snprintf(out, len, "%s/%s", base, dst_path);
+	else
+		snprintf(out, len, "%s", base);
+
+	return 0;
+}
+
+/*
+ * The headers an embedded framework does not need.
+ *
+ * A framework inside an application is there to be loaded, not built
+ * against, so Xcode strips what only a build would use when the phase
+ * says RemoveHeadersOnCopy.  The links at the top of the bundle go
+ * with the directories they point at, or they dangle.
+ */
+static void
+strip_embedded_headers(const char *bundle)
+{
+	static const char *const gone[] = {
+		"Headers", "PrivateHeaders", "Modules",
+		"Versions/Current/Headers", "Versions/Current/PrivateHeaders",
+		"Versions/Current/Modules"
+	};
+	size_t i;
+
+	for (i = 0; i < sizeof(gone) / sizeof(gone[0]); i++) {
+		char path[PATH_MAX];
+
+		snprintf(path, sizeof(path), "%s/%s", bundle, gone[i]);
+		remove_tree(path);
+	}
+}
+
+/*
+ * The copy files phases of a target.
+ *
+ * Any target may have them: an application embeds the frameworks it
+ * links so they travel with it, and a tool copies whatever it wants
+ * beside its product.  Unlike the resources phase this preserves the
+ * name it is given and nothing else -- there is no flattening and no
+ * .lproj to keep, because the phase says exactly where each file goes.
+ */
+static int
+install_copy_files(CFTypeRef objects, CFTypeRef target,
+    const struct pathmap *map, const char *build_dir, const char *sdkroot,
+    const char *devpath, const char *bundle, const char *contents,
+    int is_framework, settings_table *t)
+{
+	CFTypeRef phases = bget(target, "buildPhases");
+	CFIndex p;
+	int rc = 0;
+
+	for (p = 0; p < bcount(phases) && rc == 0; p++) {
+		CFTypeRef phase = bderef(objects, bat(phases, p));
+		char isabuf[64], dstbuf[PATH_MAX], dir[PATH_MAX];
+		const char *isa = bstr(bget(phase, "isa"), isabuf,
+		    sizeof(isabuf));
+		const char *dst_path;
+		CFTypeRef files;
+		CFIndex f;
+		int spec;
+
+		if (isa == NULL || strcmp(isa, "PBXCopyFilesBuildPhase") != 0)
+			continue;
+
+		spec = bint(bget(phase, "dstSubfolderSpec"), -1);
+		dst_path = bstr(bget(phase, "dstPath"), dstbuf, sizeof(dstbuf));
+
+		if (copy_phase_dir(spec, dst_path, bundle, contents, build_dir,
+		    is_framework, dir, sizeof(dir)) != 0) {
+			fprintf(stderr, "xcodebuild: error: a copy files phase"
+			    " names a destination this does not know (%d)\n",
+			    spec);
+			rc = 1;
+			break;
+		}
+
+		files = bget(phase, "files");
+		for (f = 0; f < bcount(files) && rc == 0; f++) {
+			CFTypeRef bf = bderef(objects, bat(files, f));
+			char refbuf[512], resbuf[PATH_MAX], dst[PATH_MAX];
+			const char *ref = bstr(bget(bf, "fileRef"), refbuf,
+			    sizeof(refbuf));
+			const char *src, *base;
+
+			if (ref == NULL)
+				continue;
+
+			src = pathmap_resolve(map, ref, build_dir, sdkroot,
+			    devpath, resbuf, sizeof(resbuf));
+			if (src == NULL) {
+				fprintf(stderr, "xcodebuild: error: cannot find"
+				    " '%s' to copy\n", ref);
+				rc = 1;
+				break;
+			}
+
+			if (mkdirs(dir) != 0) {
+				fprintf(stderr, "xcodebuild: error: cannot"
+				    " create %s\n", dir);
+				rc = 1;
+				break;
+			}
+
+			base = strrchr(src, '/');
+			base = (base != NULL) ? base + 1 : src;
+			snprintf(dst, sizeof(dst), "%s/%s", dir, base);
+
+			printf("CpResource %s\n", dst);
+
+			if (copy_tree(src, dst) != 0) {
+				fprintf(stderr, "xcodebuild: error: cannot copy"
+				    " %s\n", src);
+				rc = 1;
+				break;
+			}
+
+			if (build_file_has_attr(bf, "RemoveHeadersOnCopy") &&
+			    has_ext(dst, ".framework"))
+				strip_embedded_headers(dst);
 		}
 	}
 
@@ -2166,6 +2437,41 @@ have_linker:
 					    devpath, res, t, &nres) != 0)
 						rc = 1;
 				}
+			}
+
+			/*
+			 * Copy files phases, which any target may have: an
+			 * application embeds the frameworks it links so they
+			 * travel with it, and a tool copies what it wants
+			 * beside its product.
+			 */
+			if (rc == 0) {
+				char bundle[PATH_MAX], contents[PATH_MAX];
+				const char *bp = NULL, *cp = NULL;
+
+				if (prod.kind == PRODUCT_BUNDLE &&
+				    prod.wrapper != NULL) {
+					snprintf(bundle, sizeof(bundle),
+					    "%s/%s", build_dir, full);
+
+					if (is_framework)
+						snprintf(contents,
+						    sizeof(contents),
+						    "%s/Versions/%s", bundle,
+						    fw_version);
+					else
+						snprintf(contents,
+						    sizeof(contents),
+						    "%s/Contents", bundle);
+
+					bp = bundle;
+					cp = contents;
+				}
+
+				if (install_copy_files(objects, chosen, map,
+				    build_dir, sdkroot, devpath, bp, cp,
+				    is_framework, t) != 0)
+					rc = 1;
 			}
 		}
 
