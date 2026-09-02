@@ -41,9 +41,26 @@ P_CONFIGURE_ARGS=	\
 # swiftc are symlinks onto swift-frontend, which is what the configure
 # reports when no separate driver is built -- so the frontend is the
 # compiler here, not just a component of it.
-P_MAKE_ARGS=	swift-frontend swift-stdlib-macosx-arm64
+P_MAKE_ARGS=	swift-frontend swift-stdlib-macosx-arm64 \
+		libswiftDemangle.dylib
 
 P_NOSTAGE=	yes
+
+# libswiftDemangle is the C interface to Swift's demangler -- what a
+# debugger or a crash reporter calls to turn $s11SwiftDriver... back
+# into something a person can read.  Apple's toolchain carries it; this
+# one did not, and it is an ordinary target of the swift build.
+P_LIBS=		lib/libswiftDemangle.dylib
+
+# It is built against the libc++ the LLVM port builds and finds it
+# through an rpath of /usr/lib/swift, where nothing puts it -- so as
+# built the library does not load at all.  Apple's links the platform's
+# own /usr/lib/libc++.1.dylib, which is what a library shipped in a
+# toolchain should depend on: libc++ is ABI-stable on macOS and the
+# system always has one, whereas this toolchain ships none and Apple's
+# does not either.  Point it at the same one Apple points at.
+P_POST_BUILD=	install_name_tool -change @rpath/libc++.1.dylib \
+		    /usr/lib/libc++.1.dylib lib/libswiftDemangle.dylib
 
 P_PROGS=	bin/swift-frontend
 

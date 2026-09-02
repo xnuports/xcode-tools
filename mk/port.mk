@@ -55,6 +55,11 @@
 #			copying and before configure -- the ports-style
 #			post-extract step.  Requires P_COPY (the default),
 #			since it modifies the tree.
+#	P_POST_BUILD	shell command run inside the build directory after
+#			the port's build step and before anything is copied
+#			out of it.  P_POST_STAGE is the equivalent for ports
+#			that stage; a port with P_NOSTAGE has no stage step
+#			for it to run in, and this is where it goes instead.
 #	P_POST_STAGE	shell command run inside the source tree after
 #			the port's install step completes.  The staged
 #			prefix is at ${P_STAGEDIR}${P_PREFIX}.  Use this
@@ -216,6 +221,10 @@ ${P_WORKDIR}/.built: ${P_WORKDIR}/.configured
 	cd ${P_OBJDIR} && ${P_MAKE} ${P_MAKE_ARGS} > ${P_WORKDIR}/build.log 2>&1 || \
 		{ ${ECHO} "port: ${P_NAME}: build failed, see ${P_WORKDIR}/build.log"; \
 		  tail -20 ${P_WORKDIR}/build.log; exit 1; }
+.if defined(P_POST_BUILD)
+	@${ECHO} "port: post-build ${P_NAME}"
+	@cd ${P_OBJDIR} && ${P_POST_BUILD}
+.endif
 	@touch ${.TARGET}
 
 # --- stage ------------------------------------------------------------
