@@ -18,6 +18,7 @@
 
 #include <CoreFoundation/CoreFoundation.h>
 
+#include <dirent.h>
 #include <errno.h>
 #include <limits.h>
 #include <stdio.h>
@@ -1020,6 +1021,300 @@ copy_file(const char *src, const char *dst)
 	return rc;
 }
 
+/* A file, or a directory and everything under it. */
+static int
+copy_tree(const char *src, const char *dst)
+{
+	struct stat st;
+	struct dirent *e;
+	DIR *d;
+	int rc = 0;
+
+	if (stat(src, &st) != 0)
+		return -1;
+
+	if (!S_ISDIR(st.st_mode))
+		return copy_file(src, dst);
+
+	if (mkdirs(dst) != 0)
+		return -1;
+
+	if ((d = opendir(src)) == NULL)
+		return -1;
+
+	while (rc == 0 && (e = readdir(d)) != NULL) {
+		char s[PATH_MAX], t[PATH_MAX];
+
+		if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0)
+			continue;
+
+		snprintf(s, sizeof(s), "%s/%s", src, e->d_name);
+		snprintf(t, sizeof(t), "%s/%s", dst, e->d_name);
+		rc = copy_tree(s, t);
+	}
+
+	closedir(d);
+	return rc;
+}
+
+/*
+ * A .strings file, in the encoding a bundle expects.
+ *
+ * These are converted rather than copied.
+ * STRINGS_FILE_OUTPUT_ENCODING says to what, and has been UTF-16 for
+ * as long as anyone has been writing them: little-endian, with a byte
+ * order mark, which is what Apple emits and what CFBundle reads back.
+ * A file that already has a mark is already UTF-16 and is read as
+ * such; anything else is read as UTF-8.
+ */
+static int
+copy_strings_file(const char *src, const char *dst, settings_table *t)
+{
+	char encbuf[64];
+	const char *want = setting(t, "STRINGS_FILE_OUTPUT_ENCODING", encbuf,
+	    sizeof(encbuf));
+	CFStringEncoding in = kCFStringEncodingUTF8;
+	CFDataRef data, out;
+	CFStringRef str;
+	unsigned char *buf;
+	long len;
+	FILE *fp;
+	int utf8, rc = 0;
+
+	if ((fp = fopen(src, "rb")) == NULL)
+		return -1;
+
+	if (fseek(fp, 0, SEEK_END) != 0 || (len = ftell(fp)) < 0) {
+		fclose(fp);
+		return -1;
+	}
+	rewind(fp);
+
+	if ((buf = malloc((size_t)len + 1)) == NULL) {
+		fclose(fp);
+		return -1;
+	}
+	if (len > 0 && fread(buf, 1, (size_t)len, fp) != (size_t)len) {
+		free(buf);
+		fclose(fp);
+		return -1;
+	}
+	fclose(fp);
+
+	if (len >= 2 && ((buf[0] == 0xff && buf[1] == 0xfe) ||
+	    (buf[0] == 0xfe && buf[1] == 0xff)))
+		in = kCFStringEncodingUnicode;
+
+	data = CFDataCreate(NULL, buf, (CFIndex)len);
+	free(buf);
+	if (data == NULL)
+		return -1;
+
+	str = CFStringCreateFromExternalRepresentation(NULL, data, in);
+	CFRelease(data);
+	if (str == NULL) {
+		fprintf(stderr, "xcodebuild: error: cannot read %s as text\n",
+		    src);
+		return -1;
+	}
+
+	utf8 = (want != NULL && strcasecmp(want, "UTF-8") == 0);
+	out = CFStringCreateExternalRepresentation(NULL, str,
+	    utf8 ? kCFStringEncodingUTF8 : kCFStringEncodingUTF16LE, 0);
+	CFRelease(str);
+	if (out == NULL)
+		return -1;
+
+	if ((fp = fopen(dst, "wb")) == NULL) {
+		rc = -1;
+	} else {
+		if (!utf8)
+			fwrite("\xff\xfe", 1, 2, fp);
+		fwrite(CFDataGetBytePtr(out), 1, (size_t)CFDataGetLength(out),
+		    fp);
+		fclose(fp);
+	}
+
+	CFRelease(out);
+	return rc;
+}
+
+/*
+ * A resource that is built rather than copied.
+ *
+ * An interface file, an asset catalogue and a data model are compiled
+ * by tools this tree does not have.  Copying one in uncompiled would
+ * produce a bundle that looks built and does not work, so the build
+ * stops and says which tool is missing.
+ */
+static const char *
+resource_needs_tool(const char *path)
+{
+	if (has_ext(path, ".xib") || has_ext(path, ".storyboard"))
+		return "ibtool";
+	if (has_ext(path, ".xcassets"))
+		return "actool";
+	if (has_ext(path, ".xcdatamodel") || has_ext(path, ".xcdatamodeld"))
+		return "momc";
+	if (has_ext(path, ".intentdefinition"))
+		return "intentbuilderc";
+
+	return NULL;
+}
+
+/*
+ * Install one resource.
+ *
+ * Resources are flattened into one directory: a project's groups are
+ * a way of organising the navigator and are not reproduced in the
+ * bundle.  A .lproj directory is the exception -- it names the
+ * language a resource is for, and the bundle finds it by that name --
+ * and a reference to a directory is copied whole.
+ */
+static int
+install_one_resource(const struct pathmap *map, const char *ref,
+    const char *build_dir, const char *sdkroot, const char *devpath,
+    const char *res_dir, settings_table *t, int *ncopied)
+{
+	char resbuf[PATH_MAX], dir[PATH_MAX], dst[PATH_MAX];
+	const char *src, *base, *tool;
+	struct stat st;
+
+	src = pathmap_resolve(map, ref, build_dir, sdkroot, devpath, resbuf,
+	    sizeof(resbuf));
+	if (src == NULL) {
+		fprintf(stderr, "xcodebuild: error: cannot find the resource"
+		    " '%s'\n", ref);
+		return -1;
+	}
+
+	if ((tool = resource_needs_tool(src)) != NULL) {
+		fprintf(stderr, "xcodebuild: error: %s has to be compiled by"
+		    " %s, which this tree does not build yet\n", src, tool);
+		return -1;
+	}
+
+	if (stat(src, &st) != 0) {
+		fprintf(stderr, "xcodebuild: error: no resource at %s\n", src);
+		return -1;
+	}
+
+	base = strrchr(src, '/');
+	base = (base != NULL) ? base + 1 : src;
+
+	/* Keep the .lproj a resource sits in, and nothing above it. */
+	snprintf(dir, sizeof(dir), "%s", res_dir);
+	if (base > src) {
+		char parent[PATH_MAX];
+		const char *pbase;
+
+		snprintf(parent, sizeof(parent), "%.*s",
+		    (int)(base - src - 1), src);
+		pbase = strrchr(parent, '/');
+		pbase = (pbase != NULL) ? pbase + 1 : parent;
+
+		if (has_ext(pbase, ".lproj"))
+			snprintf(dir, sizeof(dir), "%s/%s", res_dir, pbase);
+	}
+
+	if (mkdirs(dir) != 0) {
+		fprintf(stderr, "xcodebuild: error: cannot create %s\n", dir);
+		return -1;
+	}
+
+	snprintf(dst, sizeof(dst), "%s/%s", dir, base);
+
+	if (!S_ISDIR(st.st_mode) && has_ext(src, ".strings")) {
+		if (copy_strings_file(src, dst, t) != 0) {
+			fprintf(stderr, "xcodebuild: error: cannot convert"
+			    " %s\n", src);
+			return -1;
+		}
+
+		(*ncopied)++;
+		return 0;
+	}
+
+	if (copy_tree(src, dst) != 0) {
+		fprintf(stderr, "xcodebuild: error: cannot copy %s\n", src);
+		return -1;
+	}
+
+	(*ncopied)++;
+	return 0;
+}
+
+/*
+ * What a bundle carries besides its binary.
+ *
+ * A variant group stands for one resource in several languages, and
+ * holds a file per language; the phase names the group, so each of its
+ * children is installed in turn.
+ */
+static int
+install_bundle_resources(CFTypeRef objects, CFTypeRef target,
+    const struct pathmap *map, const char *build_dir, const char *sdkroot,
+    const char *devpath, const char *res_dir, settings_table *t,
+    int *ncopied)
+{
+	CFTypeRef phases = bget(target, "buildPhases");
+	CFIndex p;
+	int rc = 0;
+
+	*ncopied = 0;
+
+	for (p = 0; p < bcount(phases) && rc == 0; p++) {
+		CFTypeRef phase = bderef(objects, bat(phases, p));
+		char isabuf[64];
+		const char *isa = bstr(bget(phase, "isa"), isabuf,
+		    sizeof(isabuf));
+		CFTypeRef files;
+		CFIndex f;
+
+		if (isa == NULL || strcmp(isa, "PBXResourcesBuildPhase") != 0)
+			continue;
+
+		files = bget(phase, "files");
+		for (f = 0; f < bcount(files) && rc == 0; f++) {
+			CFTypeRef bf = bderef(objects, bat(files, f));
+			CFTypeRef fref;
+			char refbuf[512], rabuf[64];
+			const char *ref = bstr(bget(bf, "fileRef"), refbuf,
+			    sizeof(refbuf));
+			const char *rasa;
+
+			if (ref == NULL)
+				continue;
+
+			fref = bget(objects, ref);
+			rasa = bstr(bget(fref, "isa"), rabuf, sizeof(rabuf));
+
+			if (rasa != NULL && strstr(rasa, "Group") != NULL) {
+				CFTypeRef kids = bget(fref, "children");
+				CFIndex k;
+
+				for (k = 0; k < bcount(kids) && rc == 0; k++) {
+					char kb[512];
+					const char *kid = bstr(bat(kids, k), kb,
+					    sizeof(kb));
+
+					if (kid != NULL)
+						rc = install_one_resource(map,
+						    kid, build_dir, sdkroot,
+						    devpath, res_dir, t,
+						    ncopied);
+				}
+				continue;
+			}
+
+			rc = install_one_resource(map, ref, build_dir, sdkroot,
+			    devpath, res_dir, t, ncopied);
+		}
+	}
+
+	return rc;
+}
+
 /* A symlink inside a bundle, replaced if one is already there. */
 static int
 relink(const char *dir, const char *name, const char *target)
@@ -1150,6 +1445,37 @@ framework_finalize(const char *bundle, const char *version,
 	    relink(bundle, "PrivateHeaders",
 	    "Versions/Current/PrivateHeaders") != 0)
 		return -1;
+
+	return 0;
+}
+
+/*
+ * The eight bytes an application carries beside its Info.plist: its
+ * package type and its creator signature, written without a newline.
+ *
+ * A creator code is four characters registered with Apple in an
+ * arrangement that has not meant anything for years, so "????" -- the
+ * "no creator" value, and what Apple writes -- stands unless the
+ * project's own Info.plist names one.  A framework gets no PkgInfo.
+ */
+static int
+write_pkginfo(const char *dst, const char *package_type, settings_table *t)
+{
+	char buf[64];
+	const char *gen;
+	FILE *fp;
+
+	gen = setting(t, "GENERATE_PKGINFO_FILE", buf, sizeof(buf));
+	if (gen != NULL && strcasecmp(gen, "NO") == 0)
+		return 0;
+
+	if ((fp = fopen(dst, "wb")) == NULL) {
+		fprintf(stderr, "xcodebuild: error: cannot write %s\n", dst);
+		return 1;
+	}
+
+	fprintf(fp, "%s????", package_type);
+	fclose(fp);
 
 	return 0;
 }
@@ -1755,17 +2081,16 @@ have_linker:
 
 				if (is_framework) {
 					char vdir[PATH_MAX], res[PATH_MAX];
-					int npub = 0, npriv = 0;
+					int npub = 0, npriv = 0, nres = 0;
 					int want = infoplist_wanted(t);
 
 					snprintf(vdir, sizeof(vdir),
 					    "%s/Versions/%s", bundle,
 					    fw_version);
+					snprintf(res, sizeof(res),
+					    "%s/Resources", vdir);
 
 					if (want) {
-						snprintf(res, sizeof(res),
-						    "%s/Resources", vdir);
-
 						if (mkdirs(res) != 0) {
 							fprintf(stderr,
 							    "xcodebuild: error:"
@@ -1788,6 +2113,12 @@ have_linker:
 					}
 
 					if (rc == 0 &&
+					    install_bundle_resources(objects,
+					    chosen, map, build_dir, sdkroot,
+					    devpath, res, t, &nres) != 0)
+						rc = 1;
+
+					if (rc == 0 &&
 					    install_framework_headers(objects,
 					    chosen, map, build_dir, sdkroot,
 					    devpath, vdir, &npub,
@@ -1796,18 +2127,44 @@ have_linker:
 
 					if (rc == 0 && framework_finalize(
 					    bundle, fw_version, product_name,
-					    npub > 0, npriv > 0, want) != 0) {
+					    npub > 0, npriv > 0,
+					    want || nres > 0) != 0) {
 						fprintf(stderr, "xcodebuild:"
 						    " error: cannot assemble"
 						    " %s\n", bundle);
 						rc = 1;
 					}
-				} else if (strcmp(prod.wrapper, "app") == 0 &&
-				    infoplist_wanted(t)) {
-					snprintf(plist, sizeof(plist),
-					    "%s/Contents/Info.plist", bundle);
-					rc = install_infoplist(plist,
-					    product_name, "APPL", t, srcroot);
+				} else if (strcmp(prod.wrapper, "app") == 0) {
+					char res[PATH_MAX];
+					int nres = 0;
+
+					if (infoplist_wanted(t)) {
+						snprintf(plist, sizeof(plist),
+						    "%s/Contents/Info.plist",
+						    bundle);
+						rc = install_infoplist(plist,
+						    product_name, "APPL", t,
+						    srcroot);
+					}
+
+					if (rc == 0) {
+						char pkg[PATH_MAX];
+
+						snprintf(pkg, sizeof(pkg),
+						    "%s/Contents/PkgInfo",
+						    bundle);
+						rc = write_pkginfo(pkg, "APPL",
+						    t);
+					}
+
+					snprintf(res, sizeof(res),
+					    "%s/Contents/Resources", bundle);
+
+					if (rc == 0 &&
+					    install_bundle_resources(objects,
+					    chosen, map, build_dir, sdkroot,
+					    devpath, res, t, &nres) != 0)
+						rc = 1;
 				}
 			}
 		}
