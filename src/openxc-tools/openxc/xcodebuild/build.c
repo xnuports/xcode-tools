@@ -1716,7 +1716,8 @@ resource_needs_tool(const char *path)
 static int
 install_one_resource(const struct pathmap *map, const char *ref,
     const char *build_dir, const char *sdkroot, const char *devpath,
-    const char *res_dir, settings_table *t, int *ncopied)
+    const char *res_dir, settings_table *t, struct idlist *made,
+    int *ncopied)
 {
 	char resbuf[PATH_MAX], dir[PATH_MAX], dst[PATH_MAX];
 	const char *src, *base, *tool;
@@ -1765,6 +1766,7 @@ install_one_resource(const struct pathmap *map, const char *ref,
 	}
 
 	snprintf(dst, sizeof(dst), "%s/%s", dir, base);
+	idlist_add(made, dst);
 
 	if (!S_ISDIR(st.st_mode) && has_ext(src, ".strings")) {
 		if (!out_of_date(dst, src)) {
@@ -1802,7 +1804,7 @@ static int
 install_bundle_resources(CFTypeRef objects, CFTypeRef phase,
     const struct pathmap *map, const char *build_dir, const char *sdkroot,
     const char *devpath, const char *res_dir, settings_table *t,
-    int *ncopied)
+    struct idlist *made, int *ncopied)
 {
 	CFTypeRef files = bget(phase, "files");
 	CFIndex f;
@@ -1837,14 +1839,14 @@ install_bundle_resources(CFTypeRef objects, CFTypeRef phase,
 				if (kid != NULL)
 					rc = install_one_resource(map,
 					    kid, build_dir, sdkroot,
-					    devpath, res_dir, t,
+					    devpath, res_dir, t, made,
 					    ncopied);
 			}
 			continue;
 		}
 
 		rc = install_one_resource(map, ref, build_dir, sdkroot,
-		    devpath, res_dir, t, ncopied);
+		    devpath, res_dir, t, made, ncopied);
 	}
 
 	return rc;
@@ -1980,6 +1982,71 @@ run_script_phase(CFTypeRef phase, settings_table *t, const char *srcroot,
 	return 0;
 }
 
+/* Remove the directories a swept file leaves empty behind it. */
+static void
+prune_empty_dirs(const char *path, const char *stop)
+{
+	char dir[PATH_MAX];
+	char *slash;
+
+	snprintf(dir, sizeof(dir), "%s", path);
+
+	while ((slash = strrchr(dir, '/')) != NULL && slash != dir) {
+		*slash = '\0';
+
+		if (stop != NULL && strcmp(dir, stop) == 0)
+			return;
+
+		/* rmdir refuses a directory with anything in it, which is
+		   what stops this walking up out of the build. */
+		if (rmdir(dir) != 0)
+			return;
+	}
+}
+
+/*
+ * Whatever the last build put in the product and this one did not.
+ *
+ * A file taken out of a project otherwise stays in the bundle for
+ * ever: nothing refers to it any more and it still ships.  Only paths
+ * a previous build recorded making are removed, so this can never
+ * reach anything it did not put there itself.
+ */
+static void
+sweep_stale(const char *manifest, const struct idlist *made, const char *stop)
+{
+	char line[PATH_MAX];
+	FILE *fp;
+	size_t i;
+
+	if ((fp = fopen(manifest, "r")) != NULL) {
+		while (fgets(line, sizeof(line), fp) != NULL) {
+			size_t n = strlen(line);
+
+			while (n > 0 && (line[n - 1] == '\n' ||
+			    line[n - 1] == '\r'))
+				line[--n] = '\0';
+
+			if (n == 0 || idlist_has(made, line))
+				continue;
+
+			printf("RemoveStale %s\n", line);
+			remove_tree(line);
+			prune_empty_dirs(line, stop);
+		}
+
+		fclose(fp);
+	}
+
+	if ((fp = fopen(manifest, "w")) == NULL)
+		return;
+
+	for (i = 0; i < made->count; i++)
+		fprintf(fp, "%s\n", made->ids[i]);
+
+	fclose(fp);
+}
+
 /*
  * Where a copy files phase puts what it copies.
  *
@@ -2098,7 +2165,8 @@ static int
 install_copy_files(CFTypeRef objects, CFTypeRef phase,
     const struct pathmap *map, const char *build_dir, const char *sdkroot,
     const char *devpath, const char *bundle, const char *contents,
-    const char *obj_dir, int is_framework, settings_table *t)
+    const char *obj_dir, int is_framework, settings_table *t,
+    struct idlist *made)
 {
 	char dstbuf[PATH_MAX], dir[PATH_MAX], stamp[PATH_MAX];
 	struct timespec newest, stamped;
@@ -2149,6 +2217,7 @@ install_copy_files(CFTypeRef objects, CFTypeRef phase,
 		base = strrchr(src, '/');
 		base = (base != NULL) ? base + 1 : src;
 		snprintf(dst, sizeof(dst), "%s/%s", dir, base);
+		idlist_add(made, dst);
 
 		/*
 		 * Taking the headers out of the copy makes it differ from
@@ -2227,7 +2296,8 @@ relink(const char *dir, const char *name, const char *target)
 static int
 install_framework_headers(CFTypeRef objects, CFTypeRef phase,
     const struct pathmap *map, const char *build_dir, const char *sdkroot,
-    const char *devpath, const char *version_dir, int *npublic, int *nprivate)
+    const char *devpath, const char *version_dir, struct idlist *made,
+    int *npublic, int *nprivate)
 {
 	CFTypeRef files = bget(phase, "files");
 	CFIndex f;
@@ -2269,6 +2339,8 @@ install_framework_headers(CFTypeRef objects, CFTypeRef phase,
 		base = strrchr(src, '/');
 		base = (base != NULL) ? base + 1 : src;
 		snprintf(dst, sizeof(dst), "%s/%s", dir, base);
+
+		idlist_add(made, dst);
 
 		if (out_of_date(dst, src) && copy_file(src, dst) != 0) {
 			fprintf(stderr, "xcodebuild: error: cannot"
@@ -2326,8 +2398,21 @@ framework_finalize(const char *bundle, const char *version,
 		snprintf(dir, sizeof(dir), "%s/Versions/%s/%s", bundle,
 		    version, linked[i]);
 
-		if (stat(dir, &st) != 0 || !S_ISDIR(st.st_mode))
+		/*
+		 * A directory the version no longer has takes its link
+		 * with it: one left pointing at nothing is worse than
+		 * none, since a bundle is read by following them.
+		 */
+		if (stat(dir, &st) != 0 || !S_ISDIR(st.st_mode)) {
+			char top[PATH_MAX];
+
+			snprintf(top, sizeof(top), "%s/%s", bundle, linked[i]);
+
+			if (lstat(top, &st) == 0 && S_ISLNK(st.st_mode))
+				unlink(top);
+
 			continue;
+		}
 
 		snprintf(rel, sizeof(rel), "Versions/Current/%s", linked[i]);
 		if (relink(bundle, linked[i], rel) != 0)
@@ -2685,9 +2770,15 @@ build_one_target(CFTypeRef objects, CFTypeRef chosen, const char *source_root,
 		char *objs[256];
 		char *swifts[256];
 		char bundle[PATH_MAX], contents[PATH_MAX], res_dir[PATH_MAX];
+		char manifest[PATH_MAX];
 		const char *bp = NULL, *cp = NULL;
+		struct idlist made;
 		int nobjs = 0, nswift = 0;
 		CFIndex p;
+
+		/* Everything this build puts into the product, so that
+		   whatever the last one left behind can go. */
+		memset(&made, 0, sizeof(made));
 
 		/*
 		 * A bundle's shape, settled before anything runs: a phase
@@ -2737,7 +2828,7 @@ build_one_target(CFTypeRef objects, CFTypeRef chosen, const char *source_root,
 			if (strcmp(isa, "PBXResourcesBuildPhase") == 0) {
 				if (install_bundle_resources(objects, phase,
 				    map, build_dir, sdkroot, devpath, res_dir,
-				    t, &n) != 0)
+				    t, &made, &n) != 0)
 					rc = 1;
 				continue;
 			}
@@ -2746,7 +2837,7 @@ build_one_target(CFTypeRef objects, CFTypeRef chosen, const char *source_root,
 				if (is_framework &&
 				    install_framework_headers(objects, phase,
 				    map, build_dir, sdkroot, devpath, contents,
-				    &n, &n2) != 0)
+				    &made, &n, &n2) != 0)
 					rc = 1;
 				continue;
 			}
@@ -2754,7 +2845,7 @@ build_one_target(CFTypeRef objects, CFTypeRef chosen, const char *source_root,
 			if (strcmp(isa, "PBXCopyFilesBuildPhase") == 0) {
 				if (install_copy_files(objects, phase, map,
 				    build_dir, sdkroot, devpath, bp, cp,
-				    obj_dir, is_framework, t) != 0)
+				    obj_dir, is_framework, t, &made) != 0)
 					rc = 1;
 				continue;
 			}
@@ -3079,6 +3170,8 @@ have_linker:
 				snprintf(stamp, sizeof(stamp), "%s/%s.linked",
 				    obj_dir, product_name);
 
+				idlist_add(&made, product);
+
 				if (rc == 0 && !link_up_to_date(product, argv,
 				    stamp)) {
 					printf("%s %s\n", verb, product);
@@ -3114,6 +3207,7 @@ have_linker:
 					snprintf(plist, sizeof(plist),
 					    "%s/Info.plist",
 					    is_framework ? res_dir : contents);
+					idlist_add(&made, plist);
 					rc = install_infoplist(plist,
 					    product_name,
 					    is_framework ? "FMWK" : "APPL", t,
@@ -3127,6 +3221,7 @@ have_linker:
 
 				snprintf(pkg, sizeof(pkg), "%s/PkgInfo",
 				    contents);
+				idlist_add(&made, pkg);
 				rc = write_pkginfo(pkg, "APPL", t);
 			}
 		}
@@ -3141,6 +3236,19 @@ have_linker:
 			    " %s\n", bundle);
 			rc = 1;
 		}
+
+		/*
+		 * What the last build put in the product and this one did
+		 * not.  Only after every phase, so nothing still to be
+		 * made is mistaken for something abandoned.
+		 */
+		if (rc == 0) {
+			snprintf(manifest, sizeof(manifest), "%s/%s.manifest",
+			    obj_dir, product_name);
+			sweep_stale(manifest, &made, build_dir);
+		}
+
+		idlist_free(&made);
 
 		for (i = 0; i < nobjs; i++)
 			free(objs[i]);
