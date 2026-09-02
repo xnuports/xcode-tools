@@ -108,3 +108,6 @@
 [submodule "tools/darwin-webkit-build"]
 	path = tools/darwin-webkit-build
 	url = https://github.com/blacktop/darwin-webkit-build
+[submodule "src/extras/llvm-cbe"]
+	path = src/extras/llvm-cbe
+	url = https://github.com/JuliaHubOSS/llvm-cbe.git
