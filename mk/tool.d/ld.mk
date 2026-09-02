@@ -13,6 +13,21 @@ T_SRCS!=	cd ${TOP} && ls src/apple-oss-distributions/distribution-Developer_Tool
 		    src/apple-oss-distributions/distribution-Developer_Tools/ld64/src/ld/*.c 2>/dev/null
 T_SRCS+=	build/gen/ld64/version.c
 
+# libcodedirectory is a library of ld64's, not a part of ld.
+#
+# Apple builds it as libcodedirectory.dylib and has ld link it -- the
+# linker ad-hoc signs what it produces, and this is what builds the
+# code directory it signs with.  Compiled into ld instead, as it was
+# here, the toolchain is missing a library Apple ships and anything
+# else wanting to build a code directory has nothing to link.
+#
+# So it comes out of ld's own sources and is built beside it.
+LIBCD_SRC=	${LD64_SRC}/ld/libcodedirectory.c
+LIBCD=		${TOP}/build/release/${XCTOOLCHAIN}/usr/lib/libcodedirectory.dylib
+
+T_SRCS:=	${T_SRCS:N*libcodedirectory.c}
+T_LDADD+=	${LIBCD}
+
 # --- generated headers ------------------------------------------------
 #
 # ld64.xcodeproj produces these with script phases; we reproduce them.
@@ -120,3 +135,18 @@ ${T_OBJDIR}/${s:T:R}.o: ${LD64_GEN}/version.c ${LD64_GEN}/configure.h ${LD64_GEN
 			${LD64_GEN}/osshim/os/lock_private.h \
 			${LD64_GEN}/tapi/Version.inc
 .endfor
+
+# --- libcodedirectory --------------------------------------------------
+#
+# Its own dylib, named the way Apple names it so that an ld linked
+# against it finds it through the rpath the toolchain already sets.
+${LIBCD}: ${LIBCD_SRC} ${LD64_GEN}/configure.h
+	@mkdir -p ${:!dirname ${LIBCD}!}
+	@${ECHO} "  libcodedirectory.dylib"
+	@${CC} -dynamiclib -fPIC -O2 ${T_CFLAGS} \
+		-install_name @rpath/libcodedirectory.dylib \
+		-compatibility_version 1.0.0 -current_version 1.0.0 \
+		${LIBCD_SRC} -o ${LIBCD}
+
+# ld cannot link against it until it exists.
+${T_TARGET}: ${LIBCD}

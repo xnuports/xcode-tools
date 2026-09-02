@@ -111,7 +111,7 @@ P_MAKE_ARGS=	clang llvm-nm llvm-otool llvm-objdump llvm-size \
 		llvm-profdata libtapi \
 		lld llvm-ar llvm-objcopy llvm-readobj \
 		llvm-libraries clang-libraries \
-		LTO libclang \
+		LTO libclang libIndexStore.dylib \
 		runtimes
 
 # clang's resource directory -- its own stdarg.h, stddef.h and the rest.
@@ -132,7 +132,8 @@ P_TREES=	lib/clang/${CLANG_RESOURCE_VER}
 # simply never asked for.
 P_LIBS=		lib/libtapi.dylib \
 		lib/libLTO.dylib \
-		lib/libclang.dylib
+		lib/libclang.dylib \
+		lib/libIndexStore.dylib
 
 #
 # Only the real binaries are listed.  The alias names beside them in the
