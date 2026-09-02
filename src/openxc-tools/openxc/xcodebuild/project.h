@@ -71,6 +71,12 @@ void project_display_name(const char *path, char *buf, size_t len);
 CFTypeRef project_get_project_object(CFTypeRef root);
 
 /* Print the "xcodebuild -list" summary for the given project/workspace. */
+/* The targets a scheme's build action names, in order.  0 when the
+   scheme has no file of its own: Xcode creates one per target on
+   demand, so the name is then simply the target's. */
+int project_scheme_targets(const char *project, const char *scheme,
+    char ***names);
+
 int project_list(const char *project, const char *workspace, const xcodebuild_opts *opts);
 
 /* Print available SDKs and toolchains from the developer directory. */

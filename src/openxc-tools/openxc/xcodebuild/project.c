@@ -35,6 +35,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 #include <dirent.h>
 #include <sys/stat.h>
 #include <limits.h>
@@ -569,6 +570,203 @@ void project_target_product_type(CFTypeRef root, const char *target,
 			buf[0] = '\0';
 		return;
 	}
+}
+
+/* ------------------------------------------------------------------ */
+/* schemes                                                              */
+/* ------------------------------------------------------------------ */
+
+/*
+ * The value of an XML attribute, between `from` and `to`.
+ *
+ * A scheme is XML rather than a property list, so CoreFoundation is no
+ * help here.  Only attributes are needed, and Xcode writes them one to
+ * a line as `Name = "value"`, so this looks for the name and takes what
+ * is inside the quotes after it.
+ */
+static const char *
+xml_attr(const char *from, const char *to, const char *name, char *buf,
+    size_t len)
+{
+	size_t nlen = strlen(name);
+	const char *p = from;
+
+	while (p != NULL && p < to && (p = strstr(p, name)) != NULL && p < to) {
+		const char *q = p + nlen;
+		size_t n = 0;
+
+		/* Only a whole attribute name, not the tail of a longer one. */
+		if (p > from && (isalnum((unsigned char)p[-1]) || p[-1] == '_')) {
+			p = q;
+			continue;
+		}
+
+		while (q < to && (*q == ' ' || *q == '\t'))
+			q++;
+		if (q >= to || *q != '=') {
+			p = q;
+			continue;
+		}
+		q++;
+		while (q < to && (*q == ' ' || *q == '\t'))
+			q++;
+		if (q >= to || *q != '"') {
+			p = q;
+			continue;
+		}
+		q++;
+
+		while (q < to && *q != '"' && n + 1 < len)
+			buf[n++] = *q++;
+		buf[n] = '\0';
+
+		return buf;
+	}
+
+	return NULL;
+}
+
+/* Where a scheme of this name lives, shared or belonging to a user. */
+static int
+scheme_file(const char *project, const char *scheme, char *out, size_t len)
+{
+	char dir[PATH_MAX];
+	struct dirent *e;
+	struct stat st;
+	DIR *d;
+
+	snprintf(out, len, "%s/xcshareddata/xcschemes/%s.xcscheme", project,
+	    scheme);
+	if (stat(out, &st) == 0)
+		return 1;
+
+	snprintf(dir, sizeof(dir), "%s/xcuserdata", project);
+	if ((d = opendir(dir)) == NULL)
+		return 0;
+
+	while ((e = readdir(d)) != NULL) {
+		if (e->d_name[0] == '.')
+			continue;
+
+		snprintf(out, len, "%s/%s/xcschemes/%s.xcscheme", dir,
+		    e->d_name, scheme);
+
+		if (stat(out, &st) == 0) {
+			closedir(d);
+			return 1;
+		}
+	}
+
+	closedir(d);
+	return 0;
+}
+
+/*
+ * The targets a scheme builds, in the order it lists them.
+ *
+ * Only the build action counts: the other actions name what to run and
+ * what to test, and a scheme's Testables are not built by `xcodebuild
+ * build`.  An entry every buildFor... says NO to is skipped, as Xcode
+ * skips it.
+ *
+ * Returns the number of names, or 0 when the scheme has no file --
+ * Xcode creates one per target on demand and writes nothing to disk,
+ * so a name with no file is simply the target of that name, which the
+ * caller resolves.
+ */
+int
+project_scheme_targets(const char *project, const char *scheme, char ***names)
+{
+	char path[PATH_MAX];
+	char *text, **list = NULL;
+	const char *action, *action_end, *p;
+	long len;
+	FILE *fp;
+	int count = 0;
+
+	*names = NULL;
+
+	if (project == NULL || scheme == NULL)
+		return 0;
+	if (!scheme_file(project, scheme, path, sizeof(path)))
+		return 0;
+	if ((fp = fopen(path, "rb")) == NULL)
+		return 0;
+
+	if (fseek(fp, 0, SEEK_END) != 0 || (len = ftell(fp)) < 0) {
+		fclose(fp);
+		return 0;
+	}
+	rewind(fp);
+
+	if ((text = malloc((size_t)len + 1)) == NULL) {
+		fclose(fp);
+		return 0;
+	}
+	if (len > 0 && fread(text, 1, (size_t)len, fp) != (size_t)len) {
+		free(text);
+		fclose(fp);
+		return 0;
+	}
+	text[len] = '\0';
+	fclose(fp);
+
+	if ((action = strstr(text, "<BuildAction")) == NULL ||
+	    (action_end = strstr(action, "</BuildAction>")) == NULL) {
+		free(text);
+		return 0;
+	}
+
+	for (p = action; (p = strstr(p, "<BuildActionEntry")) != NULL &&
+	    p < action_end; ) {
+		const char *entry_end = strstr(p, "</BuildActionEntry>");
+		char buf[512];
+		const char *name;
+		char **grown;
+
+		if (entry_end == NULL || entry_end > action_end)
+			break;
+
+		/* An entry no action builds is not built. */
+		if (xml_attr(p, entry_end, "buildForRunning", buf,
+		    sizeof(buf)) == NULL || strcmp(buf, "YES") != 0) {
+			int wanted = 0;
+			static const char *const also[] = {
+				"buildForTesting", "buildForProfiling",
+				"buildForArchiving", "buildForAnalyzing"
+			};
+			size_t i;
+
+			for (i = 0; i < sizeof(also) / sizeof(also[0]); i++)
+				if (xml_attr(p, entry_end, also[i], buf,
+				    sizeof(buf)) != NULL &&
+				    strcmp(buf, "YES") == 0)
+					wanted = 1;
+
+			if (!wanted) {
+				p = entry_end;
+				continue;
+			}
+		}
+
+		name = xml_attr(p, entry_end, "BlueprintName", buf,
+		    sizeof(buf));
+
+		if (name != NULL && *name != '\0' &&
+		    (grown = realloc(list, (size_t)(count + 1) *
+		    sizeof(*list))) != NULL) {
+			list = grown;
+			if ((list[count] = strdup(name)) != NULL)
+				count++;
+		}
+
+		p = entry_end;
+	}
+
+	free(text);
+	*names = list;
+
+	return count;
 }
 
 /*

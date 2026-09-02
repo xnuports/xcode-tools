@@ -399,6 +399,26 @@ target_id_for_product(CFTypeRef objects, CFTypeRef targets, const char *ref,
 	return NULL;
 }
 
+/* The id of the target with this name, if the project has one. */
+static const char *
+target_id_by_name(CFTypeRef objects, CFTypeRef targets, const char *name,
+    char *buf, size_t len)
+{
+	CFIndex i;
+
+	for (i = 0; i < bcount(targets); i++) {
+		CFTypeRef tid = bat(targets, i);
+		char nbuf[512];
+		const char *tn = bstr(bget(bderef(objects, tid), "name"), nbuf,
+		    sizeof(nbuf));
+
+		if (tn != NULL && strcmp(tn, name) == 0)
+			return bstr(tid, buf, len);
+	}
+
+	return NULL;
+}
+
 /*
  * The targets a target depends on.
  *
@@ -3582,13 +3602,11 @@ int build_run(const char *project, settings_table *t,
     const xcodebuild_opts *opts, const char *devpath)
 {
 	CFTypeRef root, objects = NULL, root_id = NULL, project_obj, targets;
-	CFTypeRef chosen = NULL;
 	struct pathmap map;
-	struct idlist order, stack;
+	struct idlist order, stack, wanted;
 	char source_root[PATH_MAX], chosen_id[512] = "";
 	const char *slash;
 	char name_buf[512];
-	CFIndex i;
 	size_t k;
 	int rc = 0, foreign = 0;
 
@@ -3606,6 +3624,7 @@ int build_run(const char *project, settings_table *t,
 	memset(&map, 0, sizeof(map));
 	memset(&order, 0, sizeof(order));
 	memset(&stack, 0, sizeof(stack));
+	memset(&wanted, 0, sizeof(wanted));
 
 	/* Paths in a project are relative to the directory holding it. */
 	snprintf(source_root, sizeof(source_root), "%s", project);
@@ -3617,31 +3636,75 @@ int build_run(const char *project, settings_table *t,
 	project_obj = bderef(objects, root_id);
 	targets = bget(project_obj, "targets");
 
-	/* The named target, or the first one, as everywhere else. */
-	for (i = 0; i < bcount(targets); i++) {
-		CFTypeRef tid = bat(targets, i);
-		CFTypeRef tobj = bderef(objects, tid);
-		const char *name = bstr(bget(tobj, "name"), name_buf,
-		    sizeof(name_buf));
+	/*
+	 * What the command line asked to build.
+	 *
+	 * A scheme names its own targets and may name several; -target
+	 * names one; with neither, the first target of the project, as
+	 * everywhere else in this tool.
+	 */
+	if (opts->scheme != NULL) {
+		char **names = NULL;
+		int n = project_scheme_targets(project, opts->scheme, &names);
+		int k;
 
-		if (opts->target != NULL && name != NULL &&
-		    strcmp(name, opts->target) == 0) {
-			chosen = tobj;
-			bstr(tid, chosen_id, sizeof(chosen_id));
-			break;
+		for (k = 0; k < n; k++) {
+			if (target_id_by_name(objects, targets, names[k],
+			    chosen_id, sizeof(chosen_id)) != NULL)
+				idlist_add(&wanted, chosen_id);
+			else
+				fprintf(stderr, "xcodebuild: warning: the"
+				    " scheme '%s' builds '%s', which this"
+				    " project does not have\n", opts->scheme,
+				    names[k]);
+			free(names[k]);
 		}
-		if (opts->target == NULL && chosen == NULL) {
-			chosen = tobj;
-			bstr(tid, chosen_id, sizeof(chosen_id));
+		free(names);
+
+		/*
+		 * A scheme with no file of its own is one Xcode creates
+		 * for a target on demand and never writes down, so the
+		 * name is the target's.
+		 */
+		if (n == 0 && target_id_by_name(objects, targets,
+		    opts->scheme, chosen_id, sizeof(chosen_id)) != NULL)
+			idlist_add(&wanted, chosen_id);
+
+		if (wanted.count == 0) {
+			fprintf(stderr, "xcodebuild: error: scheme '%s' not"
+			    " found\n", opts->scheme);
+			idlist_free(&wanted);
+			CFRelease(root);
+			return 1;
 		}
+	} else if (opts->target != NULL) {
+		if (target_id_by_name(objects, targets, opts->target,
+		    chosen_id, sizeof(chosen_id)) == NULL) {
+			fprintf(stderr, "xcodebuild: error: target '%s' not"
+			    " found\n", opts->target);
+			CFRelease(root);
+			return 1;
+		}
+		idlist_add(&wanted, chosen_id);
+	} else if (bcount(targets) > 0) {
+		bstr(bat(targets, 0), chosen_id, sizeof(chosen_id));
+		idlist_add(&wanted, chosen_id);
 	}
 
-	if (chosen == NULL) {
-		fprintf(stderr, "xcodebuild: error: target '%s' not found\n",
-		    (opts->target != NULL) ? opts->target : "(default)");
+	if (wanted.count == 0) {
+		fprintf(stderr, "xcodebuild: error: target '(default)' not"
+		    " found\n");
 		CFRelease(root);
 		return 1;
 	}
+
+	/*
+	 * The settings in hand were resolved for the target the command
+	 * line named.  A scheme names its own, so each of those gets
+	 * settings of its own rather than borrowing these.
+	 */
+	if (opts->scheme != NULL)
+		chosen_id[0] = '\0';
 
 	walk_group(objects, bderef(objects, bget(project_obj, "mainGroup")),
 	    source_root, source_root, &map);
@@ -3651,8 +3714,9 @@ int build_run(const char *project, settings_table *t,
 	 * for them is a scheme's, and xcodebuild does not apply it to a
 	 * target built by name.
 	 */
-	rc = order_targets(objects, project_obj, chosen_id, &order, &stack,
-	    &foreign, opts->scheme != NULL);
+	for (k = 0; k < wanted.count && rc == 0; k++)
+		rc = order_targets(objects, project_obj, wanted.ids[k], &order,
+		    &stack, &foreign, opts->scheme != NULL);
 
 	if (rc == 0 && foreign > 0)
 		fprintf(stderr, "xcodebuild: warning: %d dependenc%s on a"
@@ -3708,6 +3772,7 @@ int build_run(const char *project, settings_table *t,
 
 	idlist_free(&order);
 	idlist_free(&stack);
+	idlist_free(&wanted);
 	pathmap_free(&map);
 	CFRelease(root);
 	return rc;
