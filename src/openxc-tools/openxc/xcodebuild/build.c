@@ -895,17 +895,42 @@ is_compilable(const char *path)
 	    strcmp(dot, ".s") == 0 || strcmp(dot, ".S") == 0;
 }
 
+/* A string into a property list, left out entirely when there is none. */
+static void
+plist_set_str(CFMutableDictionaryRef d, CFStringRef key, const char *value)
+{
+	CFStringRef v;
+
+	if (value == NULL || *value == '\0')
+		return;
+
+	v = CFStringCreateWithCString(NULL, value, kCFStringEncodingUTF8);
+	if (v != NULL) {
+		CFDictionarySetValue(d, key, v);
+		CFRelease(v);
+	}
+}
+
 /*
- * The minimum a bundle needs to be one: the name of its executable and
- * an identifier.  Written with CoreFoundation, as every property list
- * this tree emits now is.
+ * An Info.plist built from the settings.
+ *
+ * Only what the settings actually say.  Apple's generated plist also
+ * carries the build's provenance -- DTXcode, the SDK's build number
+ * and so on -- which this leaves out rather than claiming to be a
+ * version of Xcode it is not.  A key the project has not set is
+ * omitted, the identifier above all: a bundle identifier is identity,
+ * and inventing one from the target name gives the bundle a name
+ * nothing agreed to, which anything looking a bundle up by identifier
+ * would then believe.
  */
 static int
 write_bundle_infoplist(const char *path, const char *exe_name,
     const char *package_type, settings_table *t)
 {
 	CFMutableDictionaryRef info;
-	const char *bundle_id;
+	CFMutableArrayRef platforms;
+	char buf[PATH_MAX];
+	const char *region;
 	CFDataRef data;
 	FILE *fp;
 	int rc = 0;
@@ -918,32 +943,30 @@ write_bundle_infoplist(const char *path, const char *exe_name,
 	if (info == NULL)
 		return 1;
 
-	bundle_id = settings_get(t, "PRODUCT_BUNDLE_IDENTIFIER");
-	if (bundle_id == NULL || *bundle_id == '\0')
-		bundle_id = exe_name;
+	plist_set_str(info, CFSTR("CFBundleExecutable"), exe_name);
+	plist_set_str(info, CFSTR("CFBundleName"), exe_name);
+	plist_set_str(info, CFSTR("CFBundlePackageType"), package_type);
+	CFDictionarySetValue(info, CFSTR("CFBundleInfoDictionaryVersion"),
+	    CFSTR("6.0"));
 
-	{
-		CFStringRef k, v;
+	plist_set_str(info, CFSTR("CFBundleIdentifier"),
+	    setting(t, "PRODUCT_BUNDLE_IDENTIFIER", buf, sizeof(buf)));
 
-		k = CFSTR("CFBundleExecutable");
-		v = CFStringCreateWithCString(NULL, exe_name, kCFStringEncodingUTF8);
-		if (v != NULL) { CFDictionarySetValue(info, k, v); CFRelease(v); }
+	if ((region = setting(t, "DEVELOPMENT_LANGUAGE", buf, sizeof(buf)))
+	    == NULL)
+		region = "en";
+	plist_set_str(info, CFSTR("CFBundleDevelopmentRegion"), region);
 
-		k = CFSTR("CFBundleIdentifier");
-		v = CFStringCreateWithCString(NULL, bundle_id, kCFStringEncodingUTF8);
-		if (v != NULL) { CFDictionarySetValue(info, k, v); CFRelease(v); }
+	plist_set_str(info, CFSTR("LSMinimumSystemVersion"),
+	    setting(t, "MACOSX_DEPLOYMENT_TARGET", buf, sizeof(buf)));
 
-		k = CFSTR("CFBundleName");
-		v = CFStringCreateWithCString(NULL, exe_name, kCFStringEncodingUTF8);
-		if (v != NULL) { CFDictionarySetValue(info, k, v); CFRelease(v); }
-
-		k = CFSTR("CFBundlePackageType");
-		v = CFStringCreateWithCString(NULL, package_type,
-		    kCFStringEncodingUTF8);
-		if (v != NULL) { CFDictionarySetValue(info, k, v); CFRelease(v); }
-
-		CFDictionarySetValue(info, CFSTR("CFBundleInfoDictionaryVersion"),
-		    CFSTR("6.0"));
+	/* This tree builds for macOS, and says so rather than guessing. */
+	platforms = CFArrayCreateMutable(NULL, 1, &kCFTypeArrayCallBacks);
+	if (platforms != NULL) {
+		CFArrayAppendValue(platforms, CFSTR("MacOSX"));
+		CFDictionarySetValue(info, CFSTR("CFBundleSupportedPlatforms"),
+		    platforms);
+		CFRelease(platforms);
 	}
 
 	data = CFPropertyListCreateData(NULL, info, kCFPropertyListXMLFormat_v1_0,
@@ -1101,7 +1124,8 @@ install_framework_headers(CFTypeRef objects, CFTypeRef target,
  */
 static int
 framework_finalize(const char *bundle, const char *version,
-    const char *exe_name, int have_headers, int have_private)
+    const char *exe_name, int have_headers, int have_private,
+    int have_resources)
 {
 	char versions[PATH_MAX], target[PATH_MAX];
 
@@ -1114,7 +1138,8 @@ framework_finalize(const char *bundle, const char *version,
 	if (relink(bundle, exe_name, target) != 0)
 		return -1;
 
-	if (relink(bundle, "Resources", "Versions/Current/Resources") != 0)
+	if (have_resources &&
+	    relink(bundle, "Resources", "Versions/Current/Resources") != 0)
 		return -1;
 
 	if (have_headers &&
@@ -1127,6 +1152,29 @@ framework_finalize(const char *bundle, const char *version,
 		return -1;
 
 	return 0;
+}
+
+/*
+ * Whether the bundle gets an Info.plist at all.
+ *
+ * A project supplies one with INFOPLIST_FILE, or asks for one to be
+ * written with GENERATE_INFOPLIST_FILE.  With neither, none is: a
+ * bundle built here has what the project asked for and nothing else.
+ * Apple refuses to code sign a bundle without one, which is a matter
+ * for whatever signs it rather than a reason to invent the file.
+ */
+static int
+infoplist_wanted(settings_table *t)
+{
+	char buf[PATH_MAX];
+	const char *gen;
+
+	if (setting(t, "INFOPLIST_FILE", buf, sizeof(buf)) != NULL)
+		return 1;
+
+	gen = setting(t, "GENERATE_INFOPLIST_FILE", buf, sizeof(buf));
+
+	return gen != NULL && strcasecmp(gen, "YES") == 0;
 }
 
 /*
@@ -1708,26 +1756,35 @@ have_linker:
 				if (is_framework) {
 					char vdir[PATH_MAX], res[PATH_MAX];
 					int npub = 0, npriv = 0;
+					int want = infoplist_wanted(t);
 
 					snprintf(vdir, sizeof(vdir),
 					    "%s/Versions/%s", bundle,
 					    fw_version);
-					snprintf(res, sizeof(res),
-					    "%s/Resources", vdir);
 
-					if (mkdirs(res) != 0) {
-						fprintf(stderr, "xcodebuild:"
-						    " error: cannot create"
-						    " %s\n", res);
-						rc = 1;
-					}
+					if (want) {
+						snprintf(res, sizeof(res),
+						    "%s/Resources", vdir);
 
-					if (rc == 0) {
-						snprintf(plist, sizeof(plist),
-						    "%s/Info.plist", res);
-						rc = install_infoplist(plist,
-						    product_name, "FMWK", t,
-						    srcroot);
+						if (mkdirs(res) != 0) {
+							fprintf(stderr,
+							    "xcodebuild: error:"
+							    " cannot create"
+							    " %s\n", res);
+							rc = 1;
+						}
+
+						if (rc == 0) {
+							snprintf(plist,
+							    sizeof(plist),
+							    "%s/Info.plist",
+							    res);
+							rc = install_infoplist(
+							    plist,
+							    product_name,
+							    "FMWK", t,
+							    srcroot);
+						}
 					}
 
 					if (rc == 0 &&
@@ -1739,13 +1796,14 @@ have_linker:
 
 					if (rc == 0 && framework_finalize(
 					    bundle, fw_version, product_name,
-					    npub > 0, npriv > 0) != 0) {
+					    npub > 0, npriv > 0, want) != 0) {
 						fprintf(stderr, "xcodebuild:"
 						    " error: cannot assemble"
 						    " %s\n", bundle);
 						rc = 1;
 					}
-				} else if (strcmp(prod.wrapper, "app") == 0) {
+				} else if (strcmp(prod.wrapper, "app") == 0 &&
+				    infoplist_wanted(t)) {
 					snprintf(plist, sizeof(plist),
 					    "%s/Contents/Info.plist", bundle);
 					rc = install_infoplist(plist,
