@@ -111,3 +111,6 @@
 [submodule "src/extras/llvm-cbe"]
 	path = src/extras/llvm-cbe
 	url = https://github.com/JuliaHubOSS/llvm-cbe.git
+[submodule "src/apple-oss-distributions/Security"]
+	path = src/apple-oss-distributions/Security
+	url = https://github.com/apple-oss-distributions/Security.git
