@@ -153,3 +153,6 @@
 [submodule "src/extras/dyld-cache-dump"]
 	path = src/extras/dyld-cache-dump
 	url = https://github.com/macmade/dyld-cache-dump.git
+[submodule "src/extras/ipsw"]
+	path = src/extras/ipsw
+	url = https://github.com/blacktop/ipsw.git
