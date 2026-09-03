@@ -43,6 +43,9 @@ LIBDISPATCH=	${TOP}/lib/libdispatch
 LLVM_BUILD=	${TOP}/build/ports/llvm/build
 MSUN=		${TOP}/lib/msun
 DYLD=		${TOP}/lib/dyld
+SWIFT_LIB=	${TOP}/build/ports/swift/build/lib/swift/macosx
+SWIFT_SHIMS=	${TOP}/build/ports/swift/build/lib/swift/shims
+SDK_SWIFT=	${SDK_ROOT}/usr/lib/swift
 
 sdk-headers:
 	@${ECHO} "sdk: installing headers into MacOSX.sdk/usr/include"
@@ -345,6 +348,31 @@ sdk-stubs:
 xnu-headers:
 	@${TOP}/mk/scripts/xnu-headers.sh
 
-sdk: sdk-headers sdk-stubs
+# The Swift standard library.
+#
+# On Darwin the stdlib is not part of the toolchain, it is part of the
+# SDK: swiftc resolves Swift.swiftmodule through -sdk, so an SDK
+# without one cannot compile a line of Swift.  That is what "unable to
+# load standard library" means, and it is not a toolchain fault.
+#
+# Two things are needed and both come out of the swift port.  The
+# .swiftmodule directories carry the interfaces, and shims/ is the
+# Clang module the stdlib's own interfaces import as SwiftShims -- with
+# the modules alone the stdlib resolves and then fails to typecheck.
+#
+# The port is behind MK_PORTS, so this installs what is there and says
+# what is not.
+sdk-swift:
+.if exists(${SWIFT_LIB}/Swift.swiftmodule)
+	@${ECHO} "sdk: installing the Swift standard library"
+	@mkdir -p ${SDK_SWIFT}
+	@cp -Rf ${SWIFT_LIB}/*.swiftmodule ${SDK_SWIFT}/ 2>/dev/null || true
+	@cp -Rf ${SWIFT_SHIMS} ${SDK_SWIFT}/ 2>/dev/null || true
+.else
+	@${ECHO} "sdk: no swift port built; the SDK will not compile Swift"
+	@${ECHO} "sdk:   build it with: bmake MK_PORTS=yes"
+.endif
 
-.PHONY: sdk sdk-headers sdk-stubs xnu-headers
+sdk: sdk-headers sdk-stubs sdk-swift
+
+.PHONY: sdk sdk-headers sdk-stubs sdk-swift xnu-headers
