@@ -156,3 +156,6 @@
 [submodule "src/extras/ipsw"]
 	path = src/extras/ipsw
 	url = https://github.com/blacktop/ipsw.git
+[submodule "src/extras/libplist"]
+	path = src/extras/libplist
+	url = https://github.com/libimobiledevice/libplist.git
