@@ -477,6 +477,7 @@ sdk-modulemap: sdk-headers
 	@{ ${ECHO} "// The SDK's Clang modules.  Apple splits these across a"; \
 	   ${ECHO} "// dozen files; ours has the one that matters so far."; \
 	   ${ECHO} 'extern module Darwin "Darwin.modulemap"'; \
+	   ${ECHO} 'extern module os "Darwin.modulemap"'; \
 	 } > ${SDK_INC}/module.modulemap
 
 sdk: sdk-headers sdk-modulemap sdk-stubs sdk-swift

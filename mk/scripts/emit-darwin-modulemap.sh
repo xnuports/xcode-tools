@@ -327,15 +327,55 @@ builtin_shadowed() {
 	return 1
 }
 
+# One layer's module.
+#
+# Headers come in families and have to be declared as one.  Apple's
+# _string is the example: string.h is a *textual* header there, the
+# module's real content is _string.h, and xlocale/_string.h is a
+# submodule beside it.  Split into three sibling modules instead --
+# which is the obvious reading of the header list -- and a program that
+# includes <string.h> gets the module owning string.h and not the one
+# owning xlocale/_string.h, so strncasecmp_l is declared and invisible
+# at the same time.  swift-foundation's string_shims.c stops exactly
+# there.
+#
+# So each _X.h takes X.h with it as a textual header and xlocale/_X.h
+# as a submodule, and neither is declared again on its own.
 emit_layer() {  # $1 module name, $2 header list
+	consumed="${TMPDIR:-/tmp}/darwinmap-used.$$"
+	: > "${consumed}"
+	printf '%s\n' "$2" | while read -r h; do
+		case "${h}" in _*.h) ;; *) continue;; esac
+		base="${h#_}"
+		[ -f "${INC}/${base}" ] && echo "${base}" >> "${consumed}"
+		[ -f "${INC}/xlocale/${h}" ] && echo "xlocale/${h}" >> "${consumed}"
+	done
+
 	printf 'module %s [system] {\n' "$1"
 	printf '%s\n' "$2" | while read -r h; do
 		[ -n "${h}" ] || continue
 		[ -f "${INC}/${h}" ] || continue
 		builtin_shadowed "${h}" && continue
-		printf '  module %s { header "%s" export * }\n' \
-		    "$(modname "${h}")" "${h}"
+		grep -qxF "${h}" "${consumed}" 2>/dev/null && continue
+		case "${h}" in
+		_*.h)
+			base="${h#_}"
+			printf '  module %s {\n' "$(modname "${h}")"
+			[ -f "${INC}/${base}" ] &&
+			    printf '    textual header "%s"\n' "${base}"
+			printf '    header "%s"\n' "${h}"
+			if [ -f "${INC}/xlocale/${h}" ]; then
+				printf '    module xlocale { header "xlocale/%s" export * }\n' "${h}"
+			fi
+			printf '    export *\n  }\n'
+			;;
+		*)
+			printf '  module %s { header "%s" export * }\n' \
+			    "$(modname "${h}")" "${h}"
+			;;
+		esac
 	done
+	rm -f "${consumed}"
 	printf '}\n\n'
 }
 
@@ -452,7 +492,6 @@ dirgroup '' arpa arpa
 dirgroup '' bsm bsm
 dirgroup '' malloc malloc
 dirgroup '' uuid uuid
-dirgroup '' os os
 dirgroup '' libkern libkern
 dirgroup '' architecture architecture
 dirgroup '' xlocale xlocale
@@ -473,4 +512,27 @@ if [ -f "${INC}/Block.h" ]; then
 	printf '  module block {\n    requires blocks\n    header "Block.h"\n    export *\n  }\n'
 fi
 
+echo '}'
+
+# os, at the top level.
+#
+# Apple keeps this out of Darwin, in its own os.modulemap named by
+# three extern-module lines.  It has to be top-level: `import os'
+# resolves a module called os, and nesting it as Darwin.os satisfies
+# only `import Darwin.os'.  swift-foundation writes `internal import
+# os', which is why the whole build stopped here.
+#
+# It stays in this one file rather than a second, and module.modulemap
+# names it with its own extern line beside Darwin's.  os depends on the
+# foundation layer through <stdint.h> and the like, and nothing in it
+# reaches back into Darwin, so it sits beside Darwin without a cycle.
+echo ''
+echo 'module os [system] {'
+echo '  export _DarwinFoundation1'
+echo '  export _DarwinFoundation2'
+echo '  export _DarwinFoundation3'
+for h in $(ls "${INC}/os" 2>/dev/null | grep '[.]h$' | sort); do
+	compiles "os/${h}" || continue
+	printf '  module %s { header "os/%s" export * }\n' "$(modname "${h}")" "${h}"
+done
 echo '}'
