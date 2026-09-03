@@ -132,3 +132,6 @@
 [submodule "src/swiftlang-llvm/swift-foundation"]
 	path = src/swiftlang-llvm/swift-foundation
 	url = https://github.com/swiftlang/swift-foundation
+[submodule "src/apple-oss-distributions/CF"]
+	path = src/apple-oss-distributions/CF
+	url = https://github.com/apple-oss-distributions/CF.git
