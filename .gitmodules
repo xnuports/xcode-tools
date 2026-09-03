@@ -144,3 +144,12 @@
 [submodule "src/apple-oss-distributions/pyobjc"]
 	path = src/apple-oss-distributions/pyobjc
 	url = https://github.com/apple-oss-distributions/pyobjc
+[submodule "src/extras/ldid"]
+	path = src/extras/ldid
+	url = https://github.com/ProcursusTeam/ldid
+[submodule "src/extras/bldd"]
+	path = src/extras/bldd
+	url = https://github.com/peplxx/bldd.git
+[submodule "src/extras/dyld-cache-dump"]
+	path = src/extras/dyld-cache-dump
+	url = https://github.com/macmade/dyld-cache-dump.git
