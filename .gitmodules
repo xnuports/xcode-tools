@@ -177,3 +177,6 @@
 [submodule "src/extras/bsdiff"]
 	path = src/extras/bsdiff
 	url = https://github.com/mendsley/bsdiff.git
+[submodule "src/extras/macho"]
+	path = src/extras/macho
+	url = https://github.com/macmade/macho.git
