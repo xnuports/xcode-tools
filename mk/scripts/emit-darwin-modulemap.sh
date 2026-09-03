@@ -464,7 +464,7 @@ for e in \
 	signal:signal.h stdio:stdio.h stdlib:stdlib.h string:string.h \
 	time:time.h wchar:wchar.h wctype:wctype.h ucontext:ucontext.h \
 	copyfile:copyfile.h err:err.h readpassphrase:readpassphrase.h \
-	xattr_flags:xattr_flags.h
+	util:util.h xattr_flags:xattr_flags.h
 do
 	mod '  ' "${e%%:*}" "${e#*:}"
 done
@@ -511,10 +511,20 @@ dirgroup '' libkern libkern
 	# module 'Darwin': Darwin -> os -> Darwin".  Giving os its own
 	# base.h leaves the dependency running one way only.
 	body=""
-	for h in lock.h; do
+	for h in lock.h base.h clock.h proc.h; do
 		[ -f "${INC}/os/${h}" ] || continue
 		compiles "os/${h}" || continue
-		body="${body}    module $(modname "${h}") { header \"os/${h}\" export * }
+		# A wrapper apiece, pointing at the header the top-level os
+		# module owns.  Both spellings have to resolve --
+		# Observation says Darwin.os.lock and swift-foundation says
+		# `import os' then os_unfair_lock -- and only one module can
+		# own a header.  Pointing this way keeps the dependency
+		# running Darwin -> os, which is the direction it already
+		# runs: mach/message.h and sys/dtrace.h include os headers.
+		w="_modules/_darwin_os_${h}"
+		mkdir -p "${INC}/_modules"
+		printf '#include <os/%s>\n' "${h}" > "${INC}/${w}"
+		body="${body}    module $(modname "${h}") { header \"${w}\" export * }
 "
 	done
 	if [ -n "${body}" ]; then
@@ -563,7 +573,13 @@ echo '  export _DarwinFoundation3'
 for h in $(ls "${INC}/os" 2>/dev/null | grep '[.]h$' | sort); do
 	# lock.h belongs to Darwin.os above, and the foundation layers own
 	# availability.h -- a header cannot be in two modules at once.
-	case "${h}" in lock.h) continue;; esac
+	# os.lock is still reachable, through the wrapper written below,
+	# which is how Apple does it: os.modulemap declares its lock
+	# submodule over _modules/_os_lock.h and marks it deprecated in
+	# favour of Darwin.os.lock.  Both spellings have to work --
+	# swift-foundation says `import os' and then os_unfair_lock.
+	# os owns every os/ header; Darwin reaches lock and base through
+	# the wrappers written above.
 	is_foundation "os/${h}" && continue
 	# The SPI headers are installed for ld64's sake and Apple's SDK
 	# ships none of them.  They also reach back into Darwin --

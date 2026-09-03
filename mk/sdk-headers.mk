@@ -33,6 +33,7 @@ XNU_FAKEROOT=	${TOP}/tools/darwin-xnu-build/fakeroot
 LIBC=		${TOP}/lib/libc
 LIBC_EXTRA=	${TOP}/lib/libc-extra
 OBJC4=		${TOP}/src/apple-oss-distributions/objc4
+LIBINFO=	${TOP}/src/apple-oss-distributions/libinfo
 XNU=		${TOP}/src/apple-oss-distributions/xnu
 LIBPTHREAD=	${TOP}/lib/libpthread
 LIBMALLOC=	${TOP}/lib/libmalloc
@@ -47,6 +48,16 @@ MSUN=		${TOP}/lib/msun
 DYLD=		${TOP}/lib/dyld
 SWIFT_LIB=	${TOP}/build/ports/swift/build/lib/swift/macosx
 SWIFT_SHIMS=	${TOP}/build/ports/swift/build/lib/swift/shims
+SWIFTC=		${TOP}/build/ports/swift/build/bin/swiftc
+GYB=		${TOP}/src/swiftlang-llvm/swift/utils/gyb
+DARWIN_OVERLAY=	${TOP}/lib/swift-darwin-overlay
+OVERLAY_OBJ=	${TOP}/build/obj/swift-darwin-overlay
+# The deployment target for the overlay's triple.  bundle.mk derives
+# the same value the same way; it is not in xcodetools.sys.mk, so
+# asking for it here without this gets an empty string and a triple
+# of "arm64-apple-macosx", which swiftc rejects.
+XT_SDK_VERSION!=	xcrun --show-sdk-version 2>/dev/null || echo 0.0
+XT_DEPLOYMENT_TARGET?=	${XT_SDK_VERSION}
 SDK_SWIFT=	${SDK_ROOT}/usr/lib/swift
 
 sdk-headers:
@@ -93,10 +104,21 @@ sdk-headers:
 	# every other header composes itself from, and without them
 	# stdio.h has no definition of va_list.
 	@cp -f ${LIBC}/include/*.h ${SDK_INC}/ 2>/dev/null || true
-	# Public Libc headers Apple omits from its open-source drop, ours,
-	# from lib/libc-extra.  sysdir.h is the one FileManager needs; the
-	# submodule cannot be edited to add it.
+	# Public headers Apple omits from its open-source drops, ours,
+	# from lib/libc-extra.  sysdir.h is the one FileManager needs and
+	# MacTypes.h is what OSStatus lives in; neither submodule can be
+	# edited to add them.
 	@cp -f ${LIBC_EXTRA}/*.h ${SDK_INC}/ 2>/dev/null || true
+
+	# Libinfo's public headers.  The user and group database, the
+	# resolver and the interface-address walker all live here rather
+	# than in Libc, and the SDK had none of them -- FileManager and
+	# anything calling getpwuid stopped at "cannot find 'passwd'".
+.for h in lookup.subproj/pwd.h lookup.subproj/grp.h \
+	  lookup.subproj/netdb.h lookup.subproj/aliasdb.h \
+	  lookup.subproj/bootparams.h gen.subproj/ifaddrs.h
+	@cp -f ${LIBINFO}/${h} ${SDK_INC}/ 2>/dev/null || true
+.endfor
 
 	# The Objective-C runtime's public headers.  os/object.h includes
 	# objc/NSObject.h once OS_OBJECT_USE_OBJC is on, which is what the
@@ -557,6 +579,59 @@ sdk-modulemap: sdk-headers
 	   ${ECHO} 'extern module MachO "Darwin.modulemap"'; \
 	 } > ${SDK_INC}/module.modulemap
 
-sdk: sdk-headers sdk-modulemap sdk-stubs sdk-swift
+# The Swift overlay for Darwin.
+#
+# `import Darwin' is a Clang module and a Swift overlay stacked together.
+# The module map above declares the first; this builds the second, which
+# is where POSIXErrorCode lives and where open, openat and fcntl get the
+# non-variadic forms Swift can call.  Without it Swift can name the C
+# library and use almost none of it.
+#
+# Apple ships it prebuilt and stopped building it from source in May
+# 2025; lib/swift-darwin-overlay holds the sources from just before that
+# commit, and its README says why.  Darwin.swift.gyb is a template, run
+# through the swift tree's own gyb first.
+#
+# A .swiftinterface is emitted beside the binary module, and it is the
+# one that matters.  A binary .swiftmodule is tied to the compiler that
+# wrote it -- built by the swift port and read by Xcode's swiftc it says
+# only "compiled module was created by an older version of the
+# compiler" -- while the interface is text any compiler can rebuild
+# from.  It is what Apple ships in the SDK for the same reason, and it
+# needs library evolution to be emitted at all.
+#
+# It needs the compiler the swift port builds, so like sdk-swift it does
+# what it can and says what it cannot.
+sdk-overlay:
+.if exists(${SWIFTC}) && exists(${DARWIN_OVERLAY}/Platform.swift)
+	@${ECHO} "sdk: building the Darwin Swift overlay"
+	@mkdir -p ${OVERLAY_OBJ} ${SDK_SWIFT}/Darwin.swiftmodule
+	@python3 ${GYB} -o ${OVERLAY_OBJ}/Darwin.swift \
+	    ${DARWIN_OVERLAY}/Darwin.swift.gyb
+.for f in Platform.swift POSIXError.swift MachError.swift
+	@cp -f ${DARWIN_OVERLAY}/${f} ${OVERLAY_OBJ}/
+.endfor
+.for a in arm64 x86_64
+	@${SWIFTC} -sdk ${SDK_ROOT} -target ${a}-apple-macosx${XT_DEPLOYMENT_TARGET} \
+	    -module-name Darwin -parse-as-library \
+	    -enable-library-evolution -swift-version 5 \
+	    -emit-module-interface-path \
+	    ${SDK_SWIFT}/Darwin.swiftmodule/${a}-apple-macos.swiftinterface \
+	    -emit-module -emit-module-path \
+	    ${SDK_SWIFT}/Darwin.swiftmodule/${a}-apple-macos.swiftmodule \
+	    ${OVERLAY_OBJ}/*.swift 2>/dev/null || \
+	    ${ECHO} "sdk: the ${a} Darwin overlay did not build"
+	# The binary module goes again once the interface is written.
+	# Apple's SDK carries interfaces and docs and no .swiftmodule at
+	# all, for the reason above: leaving ours behind means a compiler
+	# that is not the one that wrote it picks the binary, refuses it,
+	# and never looks at the interface next to it.
+	@rm -f ${SDK_SWIFT}/Darwin.swiftmodule/${a}-apple-macos.swiftmodule
+.endfor
+.else
+	@${ECHO} "sdk: no swift port built; the SDK will have no Darwin overlay"
+.endif
 
-.PHONY: sdk sdk-headers sdk-modulemap sdk-stubs sdk-swift xnu-headers
+sdk: sdk-headers sdk-modulemap sdk-stubs sdk-swift sdk-overlay
+
+.PHONY: sdk sdk-headers sdk-modulemap sdk-stubs sdk-swift sdk-overlay xnu-headers
