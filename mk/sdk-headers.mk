@@ -246,6 +246,12 @@ sdk-headers:
 	@mkdir -p ${SDK_INC}/msun
 	@cp -f ${MSUN}/math.h ${SDK_INC}/msun/ 2>/dev/null || true
 	@cp -f ${MSUN}/math-darwin.h ${SDK_INC}/math.h 2>/dev/null || true
+	# complex.h likewise.  clang's own tgmath.h includes it with no
+	# guard, so its absence stopped anything reaching <tgmath.h> --
+	# swift-foundation's _CStdlib.h among them -- not just code
+	# using complex arithmetic.
+	@cp -f ${MSUN}/complex.h ${SDK_INC}/msun/ 2>/dev/null || true
+	@cp -f ${MSUN}/complex-darwin.h ${SDK_INC}/complex.h 2>/dev/null || true
 
 	# Select the platform in sys/cdefs.h.
 	#
