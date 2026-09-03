@@ -438,6 +438,10 @@ dirgroup() {
 	body=""
 	for h in $(ls "${INC}/$3" 2>/dev/null | grep '[.]h$' | sort); do
 		is_foundation "$3/${h}" && continue
+		# Headers claimed by a top-level module of their own.
+		if [ "$4" = MACHO_TOPLEVEL ]; then
+			case "${h}" in dyld.h|utils.h) continue;; esac
+		fi
 		compiles "$3/${h}" || continue
 		body="${body}$1    module $(modname "${h}") { header \"$3/${h}\" export * }
 "
@@ -520,7 +524,7 @@ dirgroup '' libkern libkern
 	fi
 dirgroup '' architecture architecture
 dirgroup '' xlocale xlocale
-dirgroup '' mach_o mach-o
+dirgroup '' mach_o mach-o MACHO_TOPLEVEL
 
 for e in \
 	ar:ar.h AssertMacros:AssertMacros.h \
@@ -557,10 +561,38 @@ echo '  export _DarwinFoundation1'
 echo '  export _DarwinFoundation2'
 echo '  export _DarwinFoundation3'
 for h in $(ls "${INC}/os" 2>/dev/null | grep '[.]h$' | sort); do
-	# These four belong to Darwin.os above; a header cannot be in two
-	# modules at once.
+	# lock.h belongs to Darwin.os above, and the foundation layers own
+	# availability.h -- a header cannot be in two modules at once.
 	case "${h}" in lock.h) continue;; esac
+	is_foundation "os/${h}" && continue
+	# The SPI headers are installed for ld64's sake and Apple's SDK
+	# ships none of them.  They also reach back into Darwin --
+	# eventlink_private.h pulls mach/ -- and Darwin already depends on
+	# os through mach/vm_statistics.h, so declaring them here is a
+	# cycle: "os -> Darwin -> os".  They stay installed and undeclared.
+	case "${h}" in *_private.h) continue;; esac
 	compiles "os/${h}" || continue
 	printf '  module %s { header "os/%s" export * }\n' "$(modname "${h}")" "${h}"
+done
+echo '}'
+
+# MachO, at the top level.
+#
+# Apple declares this in DarwinBasic.modulemap, named by its own extern
+# line, holding mach-o/dyld.h and mach-o/utils.h.  swift-foundation
+# writes `import MachO.dyld', which resolves a top-level MachO and not
+# Darwin.mach_o.
+#
+# The rest of mach-o/ -- loader.h, nlist.h and the others -- stays in
+# Darwin, and these two include loader.h, so MachO depends on Darwin.
+# That runs one way only: the single Darwin header that reaches back
+# for dyld.h is sys/linker_set.h, which does not compile outside the
+# kernel and is already left out of the map.
+echo ''
+echo 'module MachO [system] {'
+for h in dyld.h utils.h; do
+	[ -f "${INC}/mach-o/${h}" ] || continue
+	compiles "mach-o/${h}" || continue
+	printf '  module %s { header "mach-o/%s" export * }\n' "$(modname "${h}")" "${h}"
 done
 echo '}'

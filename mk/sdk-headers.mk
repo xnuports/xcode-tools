@@ -32,6 +32,7 @@ XNU_FAKEROOT=	${TOP}/tools/darwin-xnu-build/fakeroot
 
 LIBC=		${TOP}/lib/libc
 LIBC_EXTRA=	${TOP}/lib/libc-extra
+OBJC4=		${TOP}/src/apple-oss-distributions/objc4
 XNU=		${TOP}/src/apple-oss-distributions/xnu
 LIBPTHREAD=	${TOP}/lib/libpthread
 LIBMALLOC=	${TOP}/lib/libmalloc
@@ -79,6 +80,13 @@ sdk-headers:
 	@cp -f ${XNU_FAKEROOT}/usr/include/${h} ${SDK_INC}/ 2>/dev/null || true
 .endfor
 .endif
+	# xnu's Availability headers name five platforms -- ios, macos,
+	# macosx, tvos and watchos -- and headers here annotate for more:
+	# mach-o/dyld.h says __API_UNAVAILABLE(bridgeos) and will not
+	# compile without it.  The rest are appended to the installed
+	# AvailabilityInternal.h, which is where they have to be, since
+	# dyld.h includes <Availability.h> and nothing else.
+	@cat ${LIBC_EXTRA}/availability-platforms.h >> ${SDK_INC}/AvailabilityInternal.h 2>/dev/null || true
 
 	# The C library itself.  The subdirectories matter as much as the
 	# top level: sys/_types holds the one-type-per-file headers that
@@ -89,6 +97,19 @@ sdk-headers:
 	# from lib/libc-extra.  sysdir.h is the one FileManager needs; the
 	# submodule cannot be edited to add it.
 	@cp -f ${LIBC_EXTRA}/*.h ${SDK_INC}/ 2>/dev/null || true
+
+	# The Objective-C runtime's public headers.  os/object.h includes
+	# objc/NSObject.h once OS_OBJECT_USE_OBJC is on, which is what the
+	# os module now reaches, and the SDK had no objc/ at all.  objc4's
+	# runtime/ carries sixteen of the seventeen Apple ships; List.h is
+	# a legacy header that is not in the open-source drop.
+	@mkdir -p ${SDK_INC}/objc
+.for h in NSObjCRuntime.h NSObject.h Object.h Protocol.h hashtable.h \
+	  hashtable2.h message.h objc-api.h objc-auto.h objc-class.h \
+	  objc-exception.h objc-load.h objc-runtime.h objc-sync.h \
+	  objc.h runtime.h
+	@cp -f ${OBJC4}/runtime/${h} ${SDK_INC}/objc/ 2>/dev/null || true
+.endfor
 
 	# Kernel.framework, which is what a kext compiles against and what
 	# IOKit headers are found through.  Its headers are not a copy of
@@ -134,8 +155,13 @@ sdk-headers:
 	# macros -- API_AVAILABLE and friends -- that os/object.h and thus
 	# os/log.h include.  It is not in xnu's libkern/os; it comes out of
 	# the fakeroot, so it is taken from there when there is one.
+	# os/availability.h is ours, from lib/libc-extra: it defines the
+	# public API_* spellings over the __API_* forms the source tree's
+	# Availability headers provide.  The fakeroot has one, but it is
+	# written against the fakeroot's Availability generation, which
+	# cannot be installed here without breaking sys/qos.h.
+	@cp -f ${LIBC_EXTRA}/os/availability.h ${SDK_INC}/os/ 2>/dev/null || true
 .if exists(${XNU_FAKEROOT}/usr/include/os/availability.h)
-	@cp -f ${XNU_FAKEROOT}/usr/include/os/availability.h ${SDK_INC}/os/ 2>/dev/null || true
 	# base.h, atomic.h and overflow.h from xnu's libkern above are the
 	# kernel's, and the kernel's base.h does not pull in API_AVAILABLE
 	# -- os/object.h uses it and does not compile against it.  The
@@ -181,6 +207,18 @@ sdk-headers:
 .for h in dyld.h dyld_images.h fixup-chains.h utils.h
 	@cp -f ${DYLD}/include/mach-o/${h} ${SDK_INC}/mach-o/ 2>/dev/null || true
 .endfor
+	# dyld.h uses DYLD_EXCLAVEKIT_UNAVAILABLE thirty-eight times and
+	# never defines it.  Apple's copy defines it, empty, inside an
+	# "#ifndef __OPEN_SOURCE__" block -- and the open-source drop
+	# strips that block while keeping every use, so the header as
+	# published does not compile.  Apple's expansion is nothing, so
+	# that is what goes in, ahead of the first use.
+	@if ! grep -q 'define DYLD_EXCLAVEKIT_UNAVAILABLE' ${SDK_INC}/mach-o/dyld.h 2>/dev/null; then \
+	    { ${ECHO} '/* Supplied by sdk-headers: stripped from the open-source drop. */'; \
+	      ${ECHO} '#define DYLD_EXCLAVEKIT_UNAVAILABLE'; \
+	      cat ${SDK_INC}/mach-o/dyld.h; } > ${SDK_INC}/mach-o/dyld.h.new && \
+	    mv -f ${SDK_INC}/mach-o/dyld.h.new ${SDK_INC}/mach-o/dyld.h; \
+	fi
 
 	# The kernel's user-facing interfaces.
 	@cp -f ${XNU}/bsd/sys/*.h ${SDK_INC}/sys/ 2>/dev/null || true
@@ -516,6 +554,7 @@ sdk-modulemap: sdk-headers
 	   ${ECHO} "// dozen files; ours has the one that matters so far."; \
 	   ${ECHO} 'extern module Darwin "Darwin.modulemap"'; \
 	   ${ECHO} 'extern module os "Darwin.modulemap"'; \
+	   ${ECHO} 'extern module MachO "Darwin.modulemap"'; \
 	 } > ${SDK_INC}/module.modulemap
 
 sdk: sdk-headers sdk-modulemap sdk-stubs sdk-swift
