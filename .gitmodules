@@ -120,3 +120,9 @@
 [submodule "src/swiftlang-llvm/swift-driver"]
 	path = src/swiftlang-llvm/swift-driver
 	url = https://github.com/swiftlang/swift-driver
+[submodule "src/swiftlang-llvm/swift-llbuild"]
+	path = src/swiftlang-llvm/swift-llbuild
+	url = https://github.com/swiftlang/swift-llbuild.git
+[submodule "src/swiftlang-llvm/swift-argument-parser"]
+	path = src/swiftlang-llvm/swift-argument-parser
+	url = https://github.com/apple/swift-argument-parser.git
