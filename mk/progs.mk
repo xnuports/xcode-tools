@@ -65,6 +65,13 @@ PROGS+=	apple-oss-distributions/distribution-Developer_Tools/cctools/misc vtool 
 PROGS+=	apple-oss-distributions/distribution-Developer_Tools/cctools/ar ar ${XCTOOLCHAIN}/usr/bin
 PROGS+=	apple-oss-distributions/distribution-Developer_Tools/cctools/otool otool-classic ${XCTOOLCHAIN}/usr/bin
 
+# mig and migcom, from bootstrap_cmds.  Most of an SDK's mach/ headers
+# are mig's output rather than files anyone wrote, so these come before
+# anything that wants them.  migcom goes in libexec because that is
+# where the mig script looks for it.
+PROGS+=	apple-oss-distributions/distribution-Developer_Tools/bootstrap_cmds/migcom.tproj migcom ${XCTOOLCHAIN}/usr/libexec
+PROGS+=	apple-oss-distributions/distribution-Developer_Tools/bootstrap_cmds/migcom.tproj mig ${XCTOOLCHAIN}/usr/bin
+
 # ld64 -- the linker.  Needs libtapi, which the llvm port stages, so it
 # only builds with MK_PORTS=yes; without it the link fails on tapi::*.
 .if ${MK_PORTS:tl} == "yes"
