@@ -43,6 +43,20 @@ PORTS+=	swiftlang-llvm/swift swift ${XCTOOLCHAIN}/usr/bin
 PORTS+=	extras/llvm-cbe llvm-cbe ${XCTOOLCHAIN}/usr/bin
 
 # ------------------------------------------------------------------
+# src/extras.  Tools this tree carries that Apple does not publish,
+# sorted by what they are rather than where they came from: anything
+# that works on Mach-O or on a build goes to the toolchain beside
+# clang and ld, and the general utilities go to usr/local/bin, which
+# is the same reasoning bmake and bsdmake follow above.
+# ------------------------------------------------------------------
+PORTS+=	extras/ldid ldid ${XCTOOLCHAIN}/usr/bin
+PORTS+=	extras/snaputil snaputil usr/local/bin
+PORTS+=	extras/bldd bldd ${XCTOOLCHAIN}/usr/bin
+PORTS+=	extras/arm64th forth usr/local/bin
+PORTS+=	extras/zsign zsign usr/local/bin
+PORTS+=	extras/bsdiff bsdiff usr/local/bin
+
+# ------------------------------------------------------------------
 # bsdmake -- Apple's BSD make, carried as a submodule at src/extras/bsdmake/.
 # Built via mk/tool.mk (not mk/port.mk) because its Makefile depends
 # on <bsd.prog.mk> and friends, which are the very files it ships.

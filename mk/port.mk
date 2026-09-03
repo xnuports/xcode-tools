@@ -35,7 +35,8 @@
 #			<dest> relative to build/release.  For a port that
 #			installs runtime data outside the toolchain --
 #			bmake's mk fragments, for instance.
-#	P_BUILDSYS	"autoconf" (default) or "cmake"
+#	P_BUILDSYS	"autoconf" (default), "cmake", or "make" for a
+#			project that ships a Makefile and no configure step
 #	P_CONFIGURE	configure script, relative to the source dir
 #			(autoconf only; default: configure)
 #	P_CONFIGURE_ARGS  extra arguments to configure / cmake
@@ -208,7 +209,13 @@ ${P_WORKDIR}/.copied:
 ${P_WORKDIR}/.configured: ${P_CONFDEP}
 	@mkdir -p ${P_OBJDIR}
 	@${ECHO} "port: configuring ${P_NAME}"
-.if ${P_BUILDSYS:tl} == "cmake"
+.if ${P_BUILDSYS:tl} == "make"
+	# Nothing to configure: the project ships a Makefile and is driven
+	# straight through it.  Several of the tools in src/extras are
+	# this shape, and giving them a configure step to skip is simpler
+	# than pretending they have one.
+	@${ECHO} "port: ${P_NAME}: no configure step (Makefile only)"
+.elif ${P_BUILDSYS:tl} == "cmake"
 	cd ${P_OBJDIR} && cmake -G Ninja ${P_BUILDSRC}/${P_CMAKE_SRC} \
 		-DCMAKE_INSTALL_PREFIX=${P_PREFIX} \
 		-DCMAKE_BUILD_TYPE=Release \
