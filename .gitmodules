@@ -174,3 +174,6 @@
 [submodule "src/extras/patchelf"]
 	path = src/extras/patchelf
 	url = https://github.com/NixOS/patchelf.git
+[submodule "src/extras/bsdiff"]
+	path = src/extras/bsdiff
+	url = https://github.com/mendsley/bsdiff.git
