@@ -194,3 +194,12 @@
 	path = src/apple/libiconv
 	url = https://github.com/apple-oss-distributions/libiconv
 	branch = rel/libiconv-115
+[submodule "src/apple/zlib"]
+	path = src/apple/zlib
+	url = https://github.com/apple-oss-distributions/zlib
+[submodule "src/apple/curl"]
+	path = src/apple/curl
+	url = https://github.com/apple-oss-distributions/curl
+[submodule "src/apple/libedit"]
+	path = src/apple/libedit
+	url = https://github.com/apple-oss-distributions/libedit
