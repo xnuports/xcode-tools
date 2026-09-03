@@ -34,6 +34,7 @@ XNU_FAKEROOT=	${TOP}/tools/darwin-xnu-build/fakeroot
 
 LIBC=		${TOP}/src/apple/libc
 LIBC_EXTRA=	${TOP}/lib/libc-extra
+XPC_HEADERS=	${TOP}/lib/xpc
 OBJC4=		${TOP}/src/apple/objc4
 LIBINFO=	${TOP}/src/apple/libinfo
 XNU=		${TOP}/src/apple/xnu
@@ -113,6 +114,14 @@ sdk-headers:
 	# MacTypes.h is what OSStatus lives in; neither submodule can be
 	# edited to add them.
 	@cp -f ${LIBC_EXTRA}/*.h ${SDK_INC}/ 2>/dev/null || true
+
+	# XPC's public headers.  Apple publishes no source for libxpc and
+	# no open-source release of its headers, but the implementation is
+	# in libSystem -- 547 exported symbols -- so what is missing is
+	# only the declarations.  lib/xpc says why they are written rather
+	# than taken from one of the reimplementations.
+	@mkdir -p ${SDK_INC}/xpc
+	@cp -f ${XPC_HEADERS}/xpc/*.h ${SDK_INC}/xpc/ 2>/dev/null || true
 
 	# Swift's API notes.  These are what rename the C spellings to the
 	# ones Swift code actually writes -- os_log_type_t becomes

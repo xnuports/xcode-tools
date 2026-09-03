@@ -100,4 +100,26 @@
 #define API_TO_BE_DEPRECATED_DRIVERKIT  __API_TO_BE_DEPRECATED
 
 
+
+/*
+ * The SPI spellings.
+ *
+ * Headers that declare private interfaces annotate them with these
+ * rather than the API_* forms -- os/workgroup_object.h alone uses
+ * SPI_AVAILABLE fifty-nine times -- and without them nothing that
+ * reaches <dispatch/dispatch.h> compiles.  Apple defines them to
+ * nothing: an SPI annotation records that a declaration is private and
+ * emits no attribute, so there is nothing to map onto the __API_*
+ * forms.
+ */
+#define SPI_AVAILABLE(...)
+#define SPI_AVAILABLE_BEGIN(...)
+#define SPI_AVAILABLE_END
+#define SPI_DEPRECATED(...)
+#define SPI_DEPRECATED_BEGIN(...)
+#define SPI_DEPRECATED_END
+#define SPI_DEPRECATED_WITH_REPLACEMENT(...)
+#define SPI_DEPRECATED_WITH_REPLACEMENT_BEGIN(...)
+#define SPI_DEPRECATED_WITH_REPLACEMENT_END
+
 #endif /* __OS_AVAILABILITY__ */
