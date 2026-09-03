@@ -168,7 +168,8 @@ ${PLATFORM_DIR}/Info.plist:
 
 # --- sdk --------------------------------------------------------------
 
-bundle-sdk: ${SDK_DIR}/SDKSettings.plist ${INTERNAL_SDK_DIR}/SDKSettings.plist
+bundle-sdk: ${SDK_DIR}/SDKSettings.plist ${INTERNAL_SDK_DIR}/SDKSettings.plist \
+	${SDK_DIR}/SDKSettings.json ${INTERNAL_SDK_DIR}/SDKSettings.json
 
 # Both bundles come out of one emitter so their contents cannot drift
 # apart; what differs is the identity passed to it.
@@ -186,6 +187,16 @@ ${INTERNAL_SDK_DIR}/SDKSettings.plist: ${SDKSETTINGS}
 	    "macOS ${XT_SDK_VERSION} Internal" \
 	    ${XT_SDK_VERSION} ${XT_DEPLOYMENT_TARGET} "${XT_SDK_ARCHS}" \
 	    > ${.TARGET}
+
+# Apple ships the same settings twice, as a plist and as JSON, and
+# different readers reach for different ones: swiftc looks only for
+# SDKSettings.json and warns on every invocation when it is absent.
+# Converting rather than emitting it a second time keeps the two from
+# saying different things.
+.for d in ${SDK_DIR} ${INTERNAL_SDK_DIR}
+${d}/SDKSettings.json: ${d}/SDKSettings.plist
+	@plutil -convert json -o ${.TARGET} ${.ALLSRC}
+.endfor
 
 # --- toolchain shims --------------------------------------------------
 #
