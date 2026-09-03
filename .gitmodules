@@ -126,3 +126,6 @@
 [submodule "src/swiftlang-llvm/swift-argument-parser"]
 	path = src/swiftlang-llvm/swift-argument-parser
 	url = https://github.com/apple/swift-argument-parser.git
+[submodule "src/swiftlang-llvm/swift-tools-support-core"]
+	path = src/swiftlang-llvm/swift-tools-support-core
+	url = https://github.com/swiftlang/swift-tools-support-core.git
