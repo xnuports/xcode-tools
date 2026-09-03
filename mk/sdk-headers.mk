@@ -146,6 +146,20 @@ sdk-headers:
 
 	# The kernel's user-facing interfaces.
 	@cp -f ${XNU}/bsd/sys/*.h ${SDK_INC}/sys/ 2>/dev/null || true
+	# The audit interfaces.  bsm/audit.h reaches the SDK through
+	# sys/ types that several headers pull in, and swift-foundation's
+	# shims include it.  xnu carries nine of the twelve headers
+	# Apple's SDK has here; audit_filter.h, audit_session.h and
+	# libbsm.h come from the separate libbsm project, which is not in
+	# this tree.  audit_kernel.h is xnu's alone and Apple ships none
+	# of it, so the installed set is taken from the fakeroot below
+	# where there is one.
+	@mkdir -p ${SDK_INC}/bsm
+	@cp -f ${XNU}/bsd/bsm/*.h ${SDK_INC}/bsm/ 2>/dev/null || true
+	@rm -f ${SDK_INC}/bsm/audit_kernel.h
+.if exists(${XNU_FAKEROOT}/usr/include/bsm/audit.h)
+	@cp -Rf ${XNU_FAKEROOT}/usr/include/bsm/. ${SDK_INC}/bsm/ 2>/dev/null || true
+.endif
 	# The syscall wrappers' own headers, which unistd.h includes.
 	@cp -f ${XNU}/libsyscall/wrappers/*.h ${SDK_INC}/ 2>/dev/null || true
 	@mkdir -p ${SDK_INC}/sys/_types ${SDK_INC}/mach/machine
@@ -363,9 +377,24 @@ xnu-headers:
 # The port is behind MK_PORTS, so this installs what is there and says
 # what is not.
 sdk-swift:
+	# The runtime the modules are declared against.  These stub the
+	# system's Swift runtime out of the shared cache, exactly as the
+	# libSystem and libc++ stubs are made and for the same reason:
+	# the dylibs are not on disk to be copied, and an SDK ships stubs
+	# rather than libraries anyway.  Without them Swift compiles and
+	# then fails to link on _swift_willThrow and its neighbours.
+	#
+	# Cxx and CxxStdlib have no entry: they have no runtime dylib and
+	# Apple's SDK stubs neither.
+	@mkdir -p ${SDK_SWIFT}
+.for l in libswiftCore libswift_Concurrency libswiftSwiftOnoneSupport \
+	  libswift_Builtin_float libswift_StringProcessing
+	@${TOP}/mk/scripts/make-tbd.sh /usr/lib/swift/${l}.dylib \
+	    ${SDK_SWIFT}/${l}.tbd 2>/dev/null || true
+.endfor
+
 .if exists(${SWIFT_LIB}/Swift.swiftmodule)
 	@${ECHO} "sdk: installing the Swift standard library"
-	@mkdir -p ${SDK_SWIFT}
 	@cp -Rf ${SWIFT_LIB}/*.swiftmodule ${SDK_SWIFT}/ 2>/dev/null || true
 	@cp -Rf ${SWIFT_SHIMS} ${SDK_SWIFT}/ 2>/dev/null || true
 .else
