@@ -34,6 +34,15 @@
 #			prefixes -- usr/local/include, usr/local/lib -- where
 #			several ports each add a part and no one of them owns
 #			the directory.
+#	P_RELEASE_SYMLINK  pairs of <target> <linkname>, both relative to
+#			build/release: one relative symlink apiece.  For linking
+#			a whole directory, where P_RELEASE_LINKDIR links the
+#			files inside one.
+#	P_RELEASE_LINKDIR  pairs of <from> <to>, both relative to
+#			build/release: every file in <from> is symlinked into
+#			<to>, relatively.  For a library that installs its
+#			headers under a prefix of its own but wants them
+#			found under the name they are included by.
 #	P_RELEASE_TREES	directories to stage anywhere in the release
 #			tree, as alternating <src> <dest> words: <src>
 #			relative to the same place P_PROGS reads from,
@@ -200,6 +209,26 @@ all: ${P_WORKDIR}/.staged
 	@cp -R ${P_PROGSRC}/${src}/. ${TOP}/build/release/${dst}/
 	@${ECHO} "staged: ${dst}/ (merged)"
 .endfor
+.for tgt lnk in ${P_RELEASE_SYMLINK}
+	@mkdir -p ${TOP}/build/release/${lnk:H}
+	@rm -rf ${TOP}/build/release/${lnk}
+	@cd ${TOP}/build/release/${lnk:H} && \
+	    ln -s "$$(python3 -c 'import os,sys;print(os.path.relpath(sys.argv[1],sys.argv[2]))' \
+		${TOP}/build/release/${tgt} "$$PWD")" ${lnk:T}
+	@${ECHO} "linked: ${lnk} -> ${tgt}"
+.endfor
+.for from to in ${P_RELEASE_LINKDIR}
+	@mkdir -p ${TOP}/build/release/${to}
+	@cd ${TOP}/build/release/${to} && \
+	    for f in ${TOP}/build/release/${from}/*; do \
+		[ -e "$$f" ] || continue; \
+		b=$$(basename "$$f"); \
+		rm -f "$$b"; \
+		ln -s "$$(python3 -c 'import os,sys;print(os.path.relpath(sys.argv[1],sys.argv[2]))' \
+		    "$$f" "$$PWD")" "$$b"; \
+	    done
+	@${ECHO} "linked: ${to}/ -> ${from}/"
+.endfor
 
 # --- configure --------------------------------------------------------
 
@@ -308,6 +337,18 @@ check:
 # For a merged directory the destination existing proves nothing -- another
 # port may have made it -- so this asks whether what this port staged is
 # actually there.
+.for tgt lnk in ${P_RELEASE_SYMLINK}
+	@test -e ${TOP}/build/release/${lnk} || \
+		{ ${ECHO} "MISSING: ${lnk}  (port ${P_NAME})"; exit 1; }
+.endfor
+.for from to in ${P_RELEASE_LINKDIR}
+	@for f in ${TOP}/build/release/${from}/*; do \
+	    [ -e "$$f" ] || continue; \
+	    b=$$(basename "$$f"); \
+	    test -e ${TOP}/build/release/${to}/$$b || \
+		{ ${ECHO} "MISSING: ${to}/$$b  (port ${P_NAME})"; exit 1; }; \
+	done
+.endfor
 .for src dst in ${P_RELEASE_MERGE}
 	@test -n "$$(ls -A ${P_PROGSRC}/${src} 2>/dev/null)" || \
 		{ ${ECHO} "MISSING: ${P_NAME} staged no ${src}/  (see ${P_WORKDIR}/*.log)"; exit 1; }
