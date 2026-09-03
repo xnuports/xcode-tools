@@ -159,3 +159,6 @@
 [submodule "src/extras/libplist"]
 	path = src/extras/libplist
 	url = https://github.com/libimobiledevice/libplist.git
+[submodule "src/extras/openssl"]
+	path = src/extras/openssl
+	url = https://github.com/openssl/openssl.git
