@@ -26,6 +26,9 @@ TOP?=		${.CURDIR}
 RELEASE=	${TOP}/build/release
 SDK_ROOT=	${RELEASE}/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk
 SDK_INC=	${SDK_ROOT}/usr/include
+SDK_FRM=	${SDK_ROOT}/System/Library/Frameworks
+KERNEL_FW=	${SDK_FRM}/Kernel.framework
+XNU_FAKEROOT=	${TOP}/tools/darwin-xnu-build/fakeroot
 
 LIBC=		${TOP}/lib/libc
 XNU=		${TOP}/src/apple-oss-distributions/xnu
@@ -73,14 +76,35 @@ sdk-headers:
 	# the fakeroot is there its generated headers are taken, and if it
 	# is not, this says so and carries on.  To make one:
 	#
-	#   cd tools/darwin-xnu-build && MACOS_VERSION=26.5 ./build.sh
+	#   bmake xnu-headers
 	#
-.if exists(${TOP}/tools/darwin-xnu-build/fakeroot/usr/include/mach/clock.h)
+.if exists(${XNU_FAKEROOT}/usr/include/mach/clock.h)
 	@${ECHO} "sdk: taking xnu's generated headers from darwin-xnu-build"
-	@cp -Rf ${TOP}/tools/darwin-xnu-build/fakeroot/usr/include/mach/. \
+	@cp -Rf ${XNU_FAKEROOT}/usr/include/mach/. \
 	    ${SDK_INC}/mach/ 2>/dev/null || true
 .else
 	@${ECHO} "sdk: no xnu fakeroot; mach/ will lack its generated headers"
+.endif
+
+	# Kernel.framework, which is what a kext compiles against and what
+	# IOKit headers are found through.  Its headers are not a copy of
+	# anything in xnu's tree either: the build assembles them, so they
+	# come out of the same fakeroot.
+	#
+	# Apple's SDK carries Headers and nothing else -- no PrivateHeaders,
+	# no Resources, no binary -- under the ordinary versioned layout, so
+	# that is what gets installed.  Ours will be smaller than Apple's:
+	# theirs also carries the driver families that come from DriverKit
+	# and IOKitUser rather than from xnu.
+.if exists(${XNU_FAKEROOT}/System/Library/Frameworks/Kernel.framework/Versions/A/Headers)
+	@${ECHO} "sdk: installing Kernel.framework headers"
+	@mkdir -p ${KERNEL_FW}/Versions/A/Headers
+	@cp -Rf ${XNU_FAKEROOT}/System/Library/Frameworks/Kernel.framework/Versions/A/Headers/. \
+	    ${KERNEL_FW}/Versions/A/Headers/ 2>/dev/null || true
+	@ln -sfn A ${KERNEL_FW}/Versions/Current
+	@ln -sfn Versions/Current/Headers ${KERNEL_FW}/Headers
+.else
+	@${ECHO} "sdk: no xnu fakeroot; Kernel.framework not installed"
 .endif
 
 	# TargetConditionals.h says which Apple platform is being compiled
@@ -282,6 +306,13 @@ sdk-stubs:
 	@[ -f ${SDK_LIB}/libobjc.A.tbd ] && \
 	    ln -sfn libobjc.A.tbd ${SDK_LIB}/libobjc.tbd || true
 
+# Builds xnu far enough to generate the headers the two blocks above
+# take.  Kept out of sdk-headers because it wants the network, a Kernel
+# Debug Kit and the better part of an hour; run once, then sdk-headers
+# picks the results up on every build after.
+xnu-headers:
+	@${TOP}/mk/scripts/xnu-headers.sh
+
 sdk: sdk-headers sdk-stubs
 
-.PHONY: sdk sdk-headers sdk-stubs
+.PHONY: sdk sdk-headers sdk-stubs xnu-headers
