@@ -16,12 +16,12 @@
 # it, and `ld -v` says which it really is either way.
 T_LINKS+=	ld-classic
 
-T_SRCS!=	cd ${TOP} && ls src/apple-oss-distributions/distribution-Developer_Tools/ld64/src/ld/*.cpp \
-		    src/apple-oss-distributions/distribution-Developer_Tools/ld64/src/ld/parsers/*.cpp \
-		    src/apple-oss-distributions/distribution-Developer_Tools/ld64/src/ld/passes/*.cpp \
-		    src/apple-oss-distributions/distribution-Developer_Tools/ld64/src/ld/passes/stubs/*.cpp \
-		    src/apple-oss-distributions/distribution-Developer_Tools/ld64/src/mach_o/*.cpp \
-		    src/apple-oss-distributions/distribution-Developer_Tools/ld64/src/ld/*.c 2>/dev/null
+T_SRCS!=	cd ${TOP} && ls src/apple/distribution-Developer_Tools/ld64/src/ld/*.cpp \
+		    src/apple/distribution-Developer_Tools/ld64/src/ld/parsers/*.cpp \
+		    src/apple/distribution-Developer_Tools/ld64/src/ld/passes/*.cpp \
+		    src/apple/distribution-Developer_Tools/ld64/src/ld/passes/stubs/*.cpp \
+		    src/apple/distribution-Developer_Tools/ld64/src/mach_o/*.cpp \
+		    src/apple/distribution-Developer_Tools/ld64/src/ld/*.c 2>/dev/null
 T_SRCS+=	build/gen/ld64/version.c
 
 # libcodedirectory is a library of ld64's, not a part of ld.
@@ -88,7 +88,7 @@ ${LD64_GEN}/dyldshim/mach-o/dyld_priv.h:
 	    echo "#pragma push_macro(\"$$m\")"; \
 	    echo "#undef $$m"; echo "#define $$m(...)"; \
 	  done; \
-	  echo '#include "${TOP}/src/apple-oss-distributions/dyld/include/mach-o/dyld_priv.h"'; \
+	  echo '#include "${TOP}/src/apple/dyld/include/mach-o/dyld_priv.h"'; \
 	  for m in __API_AVAILABLE __API_DEPRECATED \
 		   __API_DEPRECATED_WITH_REPLACEMENT __API_UNAVAILABLE; do \
 	    echo "#pragma pop_macro(\"$$m\")"; \
@@ -107,7 +107,7 @@ ${LD64_GEN}/version.c:
 # Version.inc.in; ld64 reaches it through tapi/Version.h.  The version is
 # read out of tapi's own CMakeLists so it tracks the submodule.
 TAPI_FULL_VERSION!=	sed -n 's/^set(TAPI_FULL_VERSION "\([^"]*\)".*/\1/p' \
-			${TOP}/src/apple-oss-distributions/distribution-Developer_Tools/tapi/CMakeLists.txt 2>/dev/null || echo 2.0.0
+			${TOP}/src/apple/distribution-Developer_Tools/tapi/CMakeLists.txt 2>/dev/null || echo 2.0.0
 
 ${LD64_GEN}/tapi/Version.inc:
 	@mkdir -p ${LD64_GEN}/tapi
@@ -132,7 +132,7 @@ ${LD64_GEN}/osshim/os/lock_private.h:
 		   __API_DEPRECATED_WITH_REPLACEMENT __API_UNAVAILABLE; do \
 	    echo "#undef $$m"; echo "#define $$m(...)"; \
 	  done; \
-	  echo '#include "${TOP}/src/apple-oss-distributions/libplatform/private/os/lock_private.h"'; \
+	  echo '#include "${TOP}/src/apple/libplatform/private/os/lock_private.h"'; \
 	  for m in __API_UNAVAILABLE __API_DEPRECATED_WITH_REPLACEMENT \
 		   __API_DEPRECATED __API_AVAILABLE; do \
 	    echo "#pragma pop_macro(\"$$m\")"; \

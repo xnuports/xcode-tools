@@ -1,6 +1,6 @@
 # mk/with-ld64.mk
 #
-# Shared fragment for programs built out of src/apple-oss-distributions/distribution-Developer_Tools/ld64.
+# Shared fragment for programs built out of src/apple/distribution-Developer_Tools/ld64.
 # Translates ld64.xcodeproj's build settings, plus the generated headers
 # its Xcode script phases produce (see mk/tool.d/ld.mk).
 #
@@ -9,7 +9,7 @@
 .if !defined(_WITH_LD64_MK)
 _WITH_LD64_MK=	yes
 
-LD64=		${TOP}/src/apple-oss-distributions/distribution-Developer_Tools/ld64
+LD64=		${TOP}/src/apple/distribution-Developer_Tools/ld64
 LD64_SRC=	${LD64}/src
 LD64_GEN=	${TOP}/build/gen/ld64
 
@@ -31,7 +31,7 @@ T_CFLAGS+=	-I${LD64_SRC}/ld -I${LD64_SRC}/abstraction -I${LD64_SRC}/mach_o \
 		-I${LD64_SRC}/ld/code-sign-blobs
 
 # ld64's private-header dependencies, all carried as submodules:
-#   include/ld-internals   Apple linker internals (Atom.h, Options.h, ...)
+#   src/apple-internals/ld-internals  Apple linker internals (Atom.h, Options.h, ...)
 #   lib/libplatform        os/lock_private.h, for ld.cpp's assert lock
 #   lib/corecrypto         ccdigest/ccsha1/ccsha2, for code directories
 # ld-internals is reverse-engineered layout for Apple's linkers, ld-prime
@@ -42,8 +42,8 @@ T_CFLAGS+=	-I${LD64_SRC}/ld -I${LD64_SRC}/abstraction -I${LD64_SRC}/mach_o \
 # include "Options.h" unqualified, and whichever directory comes first
 # wins: put this one first and the linker silently compiles against a
 # description of a different linker's structures.
-T_CFLAGS+=	-I${TOP}/include/ld-internals
-T_CFLAGS+=	-I${TOP}/src/apple-oss-distributions/libplatform/private
+T_CFLAGS+=	-I${TOP}/src/apple-internals/ld-internals
+T_CFLAGS+=	-I${TOP}/src/apple/libplatform/private
 
 # lib/apple_internal_sdk carries the private headers that ship in neither
 # the public SDK nor any open-source drop:
@@ -56,7 +56,7 @@ T_CFLAGS+=	-I${TOP}/src/apple-oss-distributions/libplatform/private
 # usr/include/System is needed as well: the non-KERNEL_PRIVATE branch of
 # machine/cpu_capabilities.h reaches for <arm/cpu_capabilities.h>.
 # Private/ is kept separate so its CommonCrypto does not shadow the SDK's.
-AISDK=		${TOP}/src/xnuports/apple_internal_sdk/usr/include
+AISDK=		${TOP}/src/apple-internals/apple_internal_sdk/usr/include
 T_CFLAGS+=	-I${AISDK} -I${AISDK}/System -I${AISDK}/Private
 
 # corecrypto keeps its headers in a corecrypto/ directory under each
@@ -78,7 +78,7 @@ TAPI_LIB=	${TOP}/build/release/${XCTOOLCHAIN}/usr/lib/libtapi.dylib
 T_LDADD+=	${TAPI_LIB} -Wl,-rpath,@executable_path/../lib
 
 # libstuff and the cctools/tapi/llvm headers ld64 parses Mach-O with.
-T_CFLAGS+=	-I${TOP}/src/apple-oss-distributions/distribution-Developer_Tools/tapi/include
+T_CFLAGS+=	-I${TOP}/src/apple/distribution-Developer_Tools/tapi/include
 .include "${TOP}/mk/with-libstuff.mk"
 
 .endif # _WITH_LD64_MK

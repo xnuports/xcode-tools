@@ -1,7 +1,7 @@
 # mk/with-cctools.mk
 #
 # Shared fragment: include from any mk/tool.d/<prog>.mk built out of
-# src/apple-oss-distributions/distribution-Developer_Tools/cctools.  Supplies the include paths and defines
+# src/apple/distribution-Developer_Tools/cctools.  Supplies the include paths and defines
 # that Apple's cctools.xcconfig / public_tool.xcconfig set, translated
 # out of Xcode build settings.
 #
@@ -12,7 +12,7 @@
 .if !defined(_WITH_CCTOOLS_MK)
 _WITH_CCTOOLS_MK=	yes
 
-CCTOOLS=	${TOP}/src/apple-oss-distributions/distribution-Developer_Tools/cctools
+CCTOOLS=	${TOP}/src/apple/distribution-Developer_Tools/cctools
 
 # Xcode uses a recursive "include/**" header search.  Only the top level
 # and stuff/ are actually needed; adding the rest (mach/, mach-o/) would

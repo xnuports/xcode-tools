@@ -219,7 +219,7 @@ ${d}/SDKSettings.json: ${d}/SDKSettings.plist
 #
 # (bmake uses MAKESYSPATH for the same purpose; the two differ.)
 
-DEVTOOLS=	${TOP}/src/apple-oss-distributions/distribution-Developer_Tools
+DEVTOOLS=	${TOP}/src/apple/distribution-Developer_Tools
 UNIFDEF=	${TC_DIR}/usr/bin/unifdef
 
 bundle-makefiles: bundle-dirs

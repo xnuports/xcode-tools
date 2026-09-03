@@ -160,7 +160,7 @@ P_PROGS=	bin/clang \
 ${P_WORKDIR}/tapi-src/.patched:
 	@mkdir -p ${P_WORKDIR}
 	@rsync -a --delete --exclude '.git' \
-		${TOP}/src/apple-oss-distributions/distribution-Developer_Tools/tapi/ ${P_WORKDIR}/tapi-src/
+		${TOP}/src/apple/distribution-Developer_Tools/tapi/ ${P_WORKDIR}/tapi-src/
 	@cd ${P_WORKDIR}/tapi-src && ${TOP}/mk/scripts/tapi-shim-linker-flag.sh \
 		${TOP}/mk/scripts/tapi-linker-flag-shim.cmake
 	@cd ${P_WORKDIR}/tapi-src && ${TOP}/mk/scripts/tapi-fix-diagnostics.sh

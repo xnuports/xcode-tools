@@ -24,7 +24,7 @@ T_SRCS=		error.c global.c header.c lexxer.l mig.c parser.y \
 # The lexer and parser are generated into the object directory, so a
 # quoted #include in them no longer resolves beside the source it came
 # from.  Point the compiler back at it.
-T_CFLAGS+=	-I${TOP}/src/apple-oss-distributions/distribution-Developer_Tools/bootstrap_cmds/migcom.tproj
+T_CFLAGS+=	-I${TOP}/src/apple/distribution-Developer_Tools/bootstrap_cmds/migcom.tproj
 
 # The lexer includes y.tab.h, which is what yacc has always called its
 # token header.  This tree names it after the grammar -- parser.tab.h --
@@ -39,6 +39,6 @@ ${T_OBJDIR}/lexxer.l.lex.o: ${T_OBJDIR}/y.tab.h
 # file it generates.  Apple's build fills it from
 # RC_ProjectNameAndSourceVersion, which this tree has no equivalent of,
 # so it is taken from the name of the source drop being built.
-MIG_SRCVER!=	git -C ${TOP}/src/apple-oss-distributions/distribution-Developer_Tools/bootstrap_cmds \
+MIG_SRCVER!=	git -C ${TOP}/src/apple/distribution-Developer_Tools/bootstrap_cmds \
 		    describe --tags 2>/dev/null || echo bootstrap_cmds
 T_CFLAGS+=	-DMIG_VERSION=\"${MIG_SRCVER}\"

@@ -27,27 +27,27 @@ RELEASE=	${TOP}/build/release
 SDK_ROOT=	${RELEASE}/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk
 SDK_INC=	${SDK_ROOT}/usr/include
 INTERNAL_SDK=	${RELEASE}/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.Internal.sdk
-INTERNAL_SPI=	${TOP}/src/xnuports/apple_internal_sdk
+INTERNAL_SPI=	${TOP}/src/apple-internals/apple_internal_sdk
 SDK_FRM=	${SDK_ROOT}/System/Library/Frameworks
 KERNEL_FW=	${SDK_FRM}/Kernel.framework
 XNU_FAKEROOT=	${TOP}/tools/darwin-xnu-build/fakeroot
 
-LIBC=		${TOP}/src/apple-oss-distributions/libc
+LIBC=		${TOP}/src/apple/libc
 LIBC_EXTRA=	${TOP}/lib/libc-extra
-OBJC4=		${TOP}/src/apple-oss-distributions/objc4
-LIBINFO=	${TOP}/src/apple-oss-distributions/libinfo
-XNU=		${TOP}/src/apple-oss-distributions/xnu
-LIBPTHREAD=	${TOP}/src/apple-oss-distributions/libpthread
-LIBMALLOC=	${TOP}/src/apple-oss-distributions/libmalloc
-LIBCLOSURE=	${TOP}/src/apple-oss-distributions/libclosure
-LIBUTIL=	${TOP}/src/apple-oss-distributions/libutil
-COMMONCRYPTO=	${TOP}/src/apple-oss-distributions/commoncrypto
-COPYFILE=	${TOP}/src/apple-oss-distributions/copyfile
-REMOVEFILE=	${TOP}/src/apple-oss-distributions/removefile
-LIBDISPATCH=	${TOP}/src/apple-oss-distributions/libdispatch
+OBJC4=		${TOP}/src/apple/objc4
+LIBINFO=	${TOP}/src/apple/libinfo
+XNU=		${TOP}/src/apple/xnu
+LIBPTHREAD=	${TOP}/src/apple/libpthread
+LIBMALLOC=	${TOP}/src/apple/libmalloc
+LIBCLOSURE=	${TOP}/src/apple/libclosure
+LIBUTIL=	${TOP}/src/apple/libutil
+COMMONCRYPTO=	${TOP}/src/apple/commoncrypto
+COPYFILE=	${TOP}/src/apple/copyfile
+REMOVEFILE=	${TOP}/src/apple/removefile
+LIBDISPATCH=	${TOP}/src/apple/libdispatch
 LLVM_BUILD=	${TOP}/build/ports/llvm/build
 MSUN=		${TOP}/lib/msun
-DYLD=		${TOP}/src/apple-oss-distributions/dyld
+DYLD=		${TOP}/src/apple/dyld
 SWIFT_LIB=	${TOP}/build/ports/swift/build/lib/swift/macosx
 SWIFT_SHIMS=	${TOP}/build/ports/swift/build/lib/swift/shims
 SWIFTC=		${TOP}/build/ports/swift/build/bin/swiftc
@@ -183,7 +183,7 @@ sdk-headers:
 	# the rest of what the SDK carries: base.h above all, which every
 	# other os header includes for OS_ENUM and its neighbours.
 	@mkdir -p ${SDK_INC}/os
-	@cp -f ${TOP}/src/apple-oss-distributions/libplatform/include/os/lock.h ${SDK_INC}/os/ \
+	@cp -f ${TOP}/src/apple/libplatform/include/os/lock.h ${SDK_INC}/os/ \
 	    2>/dev/null || true
 .for h in base.h atomic.h overflow.h log.h trace.h object.h
 	@cp -f ${XNU}/libkern/os/${h} ${SDK_INC}/os/ 2>/dev/null || true
