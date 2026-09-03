@@ -31,6 +31,7 @@ KERNEL_FW=	${SDK_FRM}/Kernel.framework
 XNU_FAKEROOT=	${TOP}/tools/darwin-xnu-build/fakeroot
 
 LIBC=		${TOP}/lib/libc
+LIBC_EXTRA=	${TOP}/lib/libc-extra
 XNU=		${TOP}/src/apple-oss-distributions/xnu
 LIBPTHREAD=	${TOP}/lib/libpthread
 LIBMALLOC=	${TOP}/lib/libmalloc
@@ -60,12 +61,34 @@ sdk-headers:
 	# kernel -- laid down before the C library's, so that the one a
 	# user program includes is Libc's.
 	@cp -f ${XNU}/EXTERNAL_HEADERS/*.h ${SDK_INC}/ 2>/dev/null || true
+	# Two Availability headers are not in EXTERNAL_HEADERS at all:
+	# AvailabilityVersions.h is generated during the xnu build and
+	# AvailabilityInternalLegacy.h ships beside it.  They are added
+	# here; the three EXTERNAL_HEADERS does carry are left alone.
+	#
+	# Taking all five from the fakeroot instead does make
+	# os/availability.h's API_AVAILABLE(macos(...)) expand, and breaks
+	# sys/qos.h in exchange -- that header is xnu's own and is written
+	# against EXTERNAL_HEADERS' macros, so it stops compiling and
+	# Darwin stops building with it.  The two sets are not
+	# interchangeable and the fakeroot has no sys/qos.h to match.
+	# Until that is resolved coherently the source tree's three stay,
+	# which keeps Darwin building; os.log is what pays for it.
+.if exists(${XNU_FAKEROOT}/usr/include/AvailabilityVersions.h)
+.for h in AvailabilityVersions.h AvailabilityInternalLegacy.h
+	@cp -f ${XNU_FAKEROOT}/usr/include/${h} ${SDK_INC}/ 2>/dev/null || true
+.endfor
+.endif
 
 	# The C library itself.  The subdirectories matter as much as the
 	# top level: sys/_types holds the one-type-per-file headers that
 	# every other header composes itself from, and without them
 	# stdio.h has no definition of va_list.
 	@cp -f ${LIBC}/include/*.h ${SDK_INC}/ 2>/dev/null || true
+	# Public Libc headers Apple omits from its open-source drop, ours,
+	# from lib/libc-extra.  sysdir.h is the one FileManager needs; the
+	# submodule cannot be edited to add it.
+	@cp -f ${LIBC_EXTRA}/*.h ${SDK_INC}/ 2>/dev/null || true
 
 	# Kernel.framework, which is what a kext compiles against and what
 	# IOKit headers are found through.  Its headers are not a copy of
@@ -107,6 +130,21 @@ sdk-headers:
 .for h in base.h atomic.h overflow.h log.h trace.h object.h
 	@cp -f ${XNU}/libkern/os/${h} ${SDK_INC}/os/ 2>/dev/null || true
 .endfor
+	# os/availability.h is the os/-namespace half of the availability
+	# macros -- API_AVAILABLE and friends -- that os/object.h and thus
+	# os/log.h include.  It is not in xnu's libkern/os; it comes out of
+	# the fakeroot, so it is taken from there when there is one.
+.if exists(${XNU_FAKEROOT}/usr/include/os/availability.h)
+	@cp -f ${XNU_FAKEROOT}/usr/include/os/availability.h ${SDK_INC}/os/ 2>/dev/null || true
+	# base.h, atomic.h and overflow.h from xnu's libkern above are the
+	# kernel's, and the kernel's base.h does not pull in API_AVAILABLE
+	# -- os/object.h uses it and does not compile against it.  The
+	# fakeroot's are the userland versions, byte-identical to Apple's,
+	# so they replace the kernel copies.
+.for h in base.h atomic.h overflow.h
+	@cp -f ${XNU_FAKEROOT}/usr/include/os/${h} ${SDK_INC}/os/ 2>/dev/null || true
+.endfor
+.endif
 
 	# FreeBSD/ holds headers Libc took from there and installs flat.
 	# nl_types.h is the one that matters: libc++ reaches for it

@@ -493,6 +493,31 @@ dirgroup '' bsm bsm
 dirgroup '' malloc malloc
 dirgroup '' uuid uuid
 dirgroup '' libkern libkern
+	# Darwin.os, the low-level half.
+	#
+	# Apple splits os/ across two modules and both are needed.
+	# Observation asks for Darwin.os.lock by that name, and `import
+	# os' resolves the top-level module below.  A header belongs to
+	# exactly one module, so the two lists are disjoint.
+	#
+	# Darwin gets lock.h alone.  base.h has to go to the top-level os
+	# module rather than here, because os/atomic.h includes it: with
+	# base.h inside Darwin, os depends on Darwin, and Darwin already
+	# depends on os through sys/dtrace.h -- "cyclic dependency in
+	# module 'Darwin': Darwin -> os -> Darwin".  Giving os its own
+	# base.h leaves the dependency running one way only.
+	body=""
+	for h in lock.h; do
+		[ -f "${INC}/os/${h}" ] || continue
+		compiles "os/${h}" || continue
+		body="${body}    module $(modname "${h}") { header \"os/${h}\" export * }
+"
+	done
+	if [ -n "${body}" ]; then
+		printf '  module os {\n'
+		printf '%s' "${body}"
+		printf '  }\n'
+	fi
 dirgroup '' architecture architecture
 dirgroup '' xlocale xlocale
 dirgroup '' mach_o mach-o
@@ -532,6 +557,9 @@ echo '  export _DarwinFoundation1'
 echo '  export _DarwinFoundation2'
 echo '  export _DarwinFoundation3'
 for h in $(ls "${INC}/os" 2>/dev/null | grep '[.]h$' | sort); do
+	# These four belong to Darwin.os above; a header cannot be in two
+	# modules at once.
+	case "${h}" in lock.h) continue;; esac
 	compiles "os/${h}" || continue
 	printf '  module %s { header "os/%s" export * }\n' "$(modname "${h}")" "${h}"
 done
