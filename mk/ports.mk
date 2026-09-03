@@ -32,6 +32,14 @@ PORTS+=	git/git git usr/bin
 PORTS+=	python/cpython python3 usr/bin
 
 # ------------------------------------------------------------------
+# Go, and ipsw which is written in it.  Neither is something Xcode
+# ships, so both go to usr/local.  Go is pinned to a release tag --
+# see mk/port.d/go.mk for the bootstrap it needs.
+# ------------------------------------------------------------------
+PORTS+=	golang/go go usr/local/bin
+PORTS+=	extras/ipsw ipsw usr/local/bin
+
+# ------------------------------------------------------------------
 # LLVM and Clang.  By far the longest build in the tree -- most of an
 # hour on ten cores -- which is the main reason MK_PORTS is off by
 # default.  See mk/port.d/llvm.mk, including the notes on tapi.

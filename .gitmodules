@@ -189,3 +189,4 @@
 [submodule "src/golang/go"]
 	path = src/golang/go
 	url = https://github.com/golang/go
+	branch = go1.27.1
