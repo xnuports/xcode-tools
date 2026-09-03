@@ -171,3 +171,6 @@
 [submodule "src/extras/zsign"]
 	path = src/extras/zsign
 	url = https://github.com/zhlynn/zsign.git
+[submodule "src/extras/patchelf"]
+	path = src/extras/patchelf
+	url = https://github.com/NixOS/patchelf.git
