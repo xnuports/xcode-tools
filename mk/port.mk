@@ -29,6 +29,11 @@
 #			the reason this exists: without lib/clang/<ver>,
 #			clang cannot find its own stdarg.h and anything
 #			beyond trivial C fails to compile.
+#	P_RELEASE_MERGE	like P_RELEASE_TREES, but merged into the
+#			destination instead of replacing it.  For the shared
+#			prefixes -- usr/local/include, usr/local/lib -- where
+#			several ports each add a part and no one of them owns
+#			the directory.
 #	P_RELEASE_TREES	directories to stage anywhere in the release
 #			tree, as alternating <src> <dest> words: <src>
 #			relative to the same place P_PROGS reads from,
@@ -190,6 +195,11 @@ all: ${P_WORKDIR}/.staged
 	@cp -R ${P_PROGSRC}/${src} ${TOP}/build/release/${dst}
 	@${ECHO} "staged: ${dst}/"
 .endfor
+.for src dst in ${P_RELEASE_MERGE}
+	@mkdir -p ${TOP}/build/release/${dst}
+	@cp -R ${P_PROGSRC}/${src}/. ${TOP}/build/release/${dst}/
+	@${ECHO} "staged: ${dst}/ (merged)"
+.endfor
 
 # --- configure --------------------------------------------------------
 
@@ -249,10 +259,22 @@ ${P_WORKDIR}/.built: ${P_WORKDIR}/.configured
 
 ${P_WORKDIR}/.staged: ${P_WORKDIR}/.built
 	@${ECHO} "port: staging ${P_NAME}"
+	# DESTDIR goes in the environment for ninja and as an argument for
+	# make.  ninja takes everything after its flags as a target name,
+	# so "ninja install DESTDIR=..." asks for a target called
+	# DESTDIR=... and says it does not know it.  Every cmake port
+	# until now set P_NOSTAGE, which is why this never came up.
+.if ${P_BUILDSYS:tl} == "cmake"
+	cd ${P_OBJDIR} && DESTDIR=${P_STAGEDIR} ${P_MAKE} ${P_MAKE_ARGS} install \
+		> ${P_WORKDIR}/stage.log 2>&1 || \
+		{ ${ECHO} "port: ${P_NAME}: stage failed, see ${P_WORKDIR}/stage.log"; \
+		  tail -20 ${P_WORKDIR}/stage.log; exit 1; }
+.else
 	cd ${P_OBJDIR} && ${P_MAKE} ${P_MAKE_ARGS} install DESTDIR=${P_STAGEDIR} \
 		> ${P_WORKDIR}/stage.log 2>&1 || \
 		{ ${ECHO} "port: ${P_NAME}: stage failed, see ${P_WORKDIR}/stage.log"; \
 		  tail -20 ${P_WORKDIR}/stage.log; exit 1; }
+.endif
 .if defined(P_POST_STAGE)
 	@${ECHO} "port: post-stage ${P_NAME}"
 	@cd ${P_BUILDSRC} && ${P_POST_STAGE}
@@ -274,6 +296,25 @@ check:
 .for t in ${P_TREES}
 	@test -d ${TOP}/build/release/${XCTOOLCHAIN}/usr/${t} || \
 		{ ${ECHO} "MISSING: ${XCTOOLCHAIN}/usr/${t}/  (port ${P_NAME})"; exit 1; }
+.endfor
+# A port that installs only directories -- a library with headers and
+# no programs -- would otherwise pass this check having installed
+# nothing at all, because P_PROGS and P_LIBS are both empty for it and
+# there is nothing left to look at.
+.for src dst in ${P_RELEASE_TREES}
+	@test -d ${TOP}/build/release/${dst} || \
+		{ ${ECHO} "MISSING: ${dst}/  (port ${P_NAME}, see ${P_WORKDIR}/*.log)"; exit 1; }
+.endfor
+# For a merged directory the destination existing proves nothing -- another
+# port may have made it -- so this asks whether what this port staged is
+# actually there.
+.for src dst in ${P_RELEASE_MERGE}
+	@test -n "$$(ls -A ${P_PROGSRC}/${src} 2>/dev/null)" || \
+		{ ${ECHO} "MISSING: ${P_NAME} staged no ${src}/  (see ${P_WORKDIR}/*.log)"; exit 1; }
+	@for f in $$(ls -A ${P_PROGSRC}/${src}); do \
+	    test -e ${TOP}/build/release/${dst}/$$f || \
+		{ ${ECHO} "MISSING: ${dst}/$$f  (port ${P_NAME})"; exit 1; }; \
+	done
 .endfor
 
 clean:

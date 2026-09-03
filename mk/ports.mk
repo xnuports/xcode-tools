@@ -55,6 +55,16 @@ PORTS+=	extras/bldd bldd ${XCTOOLCHAIN}/usr/bin
 PORTS+=	extras/arm64th forth usr/local/bin
 PORTS+=	extras/zsign zsign usr/local/bin
 PORTS+=	extras/bsdiff bsdiff usr/local/bin
+PORTS+=	extras/patchelf patchelf usr/local/bin
+
+# Compatibility libraries and libplist.  These are not tools; they are
+# carried so that source written for Linux or BSD, and code that speaks
+# property lists, can be built against this tree.  Headers and
+# libraries go to usr/local, not into the SDK: the SDK describes what
+# the platform provides and these are additions to it.
+PORTS+=	extras/libepoll-shim libepoll-shim usr/local/lib
+PORTS+=	extras/libinotify-kqueue libinotify-kqueue usr/local/lib
+PORTS+=	extras/libplist plistutil usr/local/bin
 
 # ------------------------------------------------------------------
 # bsdmake -- Apple's BSD make, carried as a submodule at src/extras/bsdmake/.

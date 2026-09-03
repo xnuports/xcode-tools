@@ -54,8 +54,8 @@
 [submodule "src/extras/bmake"]
 	path = src/extras/bmake
 	url = https://github.com/xnuports/bmake.git
-[submodule "src/git"]
-	path = src/git
+[submodule "src/git/git"]
+	path = src/git/git
 	url = https://github.com/git/git.git
 [submodule "src/openxc-tools/vmmap"]
 	path = src/openxc-tools/vmmap
@@ -186,3 +186,6 @@
 [submodule "src/swiftlang-llvm/swift-log"]
 	path = src/swiftlang-llvm/swift-log
 	url = https://github.com/apple/swift-log
+[submodule "src/golang/go"]
+	path = src/golang/go
+	url = https://github.com/golang/go
