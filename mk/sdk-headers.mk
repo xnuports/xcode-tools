@@ -60,6 +60,29 @@ sdk-headers:
 	# stdio.h has no definition of va_list.
 	@cp -f ${LIBC}/include/*.h ${SDK_INC}/ 2>/dev/null || true
 
+	# Headers xnu generates rather than ships.
+	#
+	# Much of mach/ is mig's output -- clock.h, mach_port.h, task.h,
+	# mach_host.h and the rest come from libsyscall/mach/*.defs -- and
+	# a few more are written by scripts in xnu's own build.  Copying
+	# from the source tree cannot produce them; they have to be built.
+	#
+	# tools/darwin-xnu-build does that, and leaves them in its
+	# fakeroot.  Producing it needs the network, a Kernel Debug Kit
+	# and the better part of an hour, so it is not run from here: if
+	# the fakeroot is there its generated headers are taken, and if it
+	# is not, this says so and carries on.  To make one:
+	#
+	#   cd tools/darwin-xnu-build && MACOS_VERSION=26.5 ./build.sh
+	#
+.if exists(${TOP}/tools/darwin-xnu-build/fakeroot/usr/include/mach/clock.h)
+	@${ECHO} "sdk: taking xnu's generated headers from darwin-xnu-build"
+	@cp -Rf ${TOP}/tools/darwin-xnu-build/fakeroot/usr/include/mach/. \
+	    ${SDK_INC}/mach/ 2>/dev/null || true
+.else
+	@${ECHO} "sdk: no xnu fakeroot; mach/ will lack its generated headers"
+.endif
+
 	# TargetConditionals.h says which Apple platform is being compiled
 	# for.  Almost everything Apple writes includes it eventually --
 	# swift-foundation stops on it immediately -- and it ships in the
