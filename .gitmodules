@@ -138,3 +138,6 @@
 [submodule "src/extras/libepoll-shim"]
 	path = src/extras/libepoll-shim
 	url = https://github.com/jiixyj/epoll-shim
+[submodule "src/extras/libinotify-kqueue"]
+	path = src/extras/libinotify-kqueue
+	url = https://github.com/libinotify-kqueue/libinotify-kqueue
