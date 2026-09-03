@@ -168,3 +168,6 @@
 [submodule "src/extras/snaputil"]
 	path = src/extras/snaputil
 	url = https://github.com/ahl/apfs
+[submodule "src/extras/zsign"]
+	path = src/extras/zsign
+	url = https://github.com/zhlynn/zsign.git
