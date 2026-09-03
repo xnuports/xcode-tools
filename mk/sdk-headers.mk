@@ -50,7 +50,9 @@ SWIFT_LIB=	${TOP}/build/ports/swift/build/lib/swift/macosx
 SWIFT_SHIMS=	${TOP}/build/ports/swift/build/lib/swift/shims
 SWIFTC=		${TOP}/build/ports/swift/build/bin/swiftc
 GYB=		${TOP}/src/swiftlang-llvm/swift/utils/gyb
+SWIFT_APINOTES=	${TOP}/src/swiftlang-llvm/swift/apinotes
 DARWIN_OVERLAY=	${TOP}/lib/swift-darwin-overlay
+OS_OVERLAY=	${TOP}/lib/swift-os-overlay
 OVERLAY_OBJ=	${TOP}/build/obj/swift-darwin-overlay
 # The deployment target for the overlay's triple.  bundle.mk derives
 # the same value the same way; it is not in xcodetools.sys.mk, so
@@ -109,6 +111,17 @@ sdk-headers:
 	# MacTypes.h is what OSStatus lives in; neither submodule can be
 	# edited to add them.
 	@cp -f ${LIBC_EXTRA}/*.h ${SDK_INC}/ 2>/dev/null || true
+
+	# Swift's API notes.  These are what rename the C spellings to the
+	# ones Swift code actually writes -- os_log_type_t becomes
+	# OSLogType, and without the file that type simply does not exist
+	# as far as the compiler is concerned.  Apple keeps them at the
+	# top of usr/include; the swift tree carries the two that matter.
+.for f in os.apinotes Dispatch.apinotes
+	@cp -f ${SWIFT_APINOTES}/${f} ${SDK_INC}/ 2>/dev/null || true
+.endfor
+	# And ours, for the clock ids -- see the file's own header.
+	@cp -f ${LIBC_EXTRA}/_DarwinFoundation2.apinotes ${SDK_INC}/ 2>/dev/null || true
 
 	# Libinfo's public headers.  The user and group database, the
 	# resolver and the interface-address walker all live here rather
@@ -448,10 +461,38 @@ sdk-headers:
 	@mkdir -p ${SDK_INC}/${d}
 	@cp -Rf ${XNU_FAKEROOT}/usr/include/${d}/. ${SDK_INC}/${d}/ 2>/dev/null || true
 .endfor
+	# mach/ comes from the fakeroot's two userland trees, not from
+	# xnu's source.  The source tree's headers are the kernel's build
+	# of them: its mach/message.h and mach/vm_param.h include
+	# os/base.h and os/overflow.h, which Apple's do not, and that one
+	# difference makes Darwin depend on the os module -- and os
+	# already depends on Darwin, so nothing that spans both can be
+	# built.
+	#
+	# usr/include/mach holds 27 headers and
+	# System.framework/PrivateHeaders/mach another 75.  Together they
+	# are a superset of Apple's 88 exactly: every one Apple ships,
+	# plus fourteen kernel and private ones, which are kept.
+	#
+	# They were removed at first, for parity with Apple's public SDK,
+	# and that was the wrong call: the task_policy.h and
+	# thread_policy.h in this set include their _private siblings
+	# where Apple's do not, so pruning them left public headers that
+	# could not compile, one surfacing after another.  This is a
+	# developer SDK for a toolset that is allowed to use private
+	# interfaces; carrying more than Apple's public SDK is the point,
+	# not a defect.  The module map declares only what compiles, so
+	# the extras cost nothing there.
+	@rm -rf ${SDK_INC}/mach
+	@mkdir -p ${SDK_INC}/mach
+	@cp -Rf ${XNU_FAKEROOT}/System/Library/Frameworks/System.framework/Versions/B/PrivateHeaders/mach/. \
+	    ${SDK_INC}/mach/ 2>/dev/null || true
+	@cp -Rf ${XNU_FAKEROOT}/usr/include/mach/. ${SDK_INC}/mach/ 2>/dev/null || true
+	@mkdir -p ${SDK_INC}/mach/machine
+	@cp -Rf ${XNU}/osfmk/mach/machine/. ${SDK_INC}/mach/machine/ 2>/dev/null || true
 	# mig writes a *_server.h beside each interface -- the server half,
 	# for a program implementing the call rather than making it.  An
-	# SDK has no use for them and Apple ships none: they are what
-	# mach_interface.h was found to be including earlier.
+	# SDK has no use for them and Apple ships none.
 	@rm -f ${SDK_INC}/mach/*_server.h
 	# libdispatch builds for more than Darwin, and its other platforms'
 	# headers came along with the copy.  os/generic_win_base.h is the
@@ -460,6 +501,14 @@ sdk-headers:
 	# sys/_types.  Apple ships neither, nor the build-system files
 	# beside them.
 	@rm -f ${SDK_INC}/os/generic_win_base.h ${SDK_INC}/os/generic_unix_base.h
+	# The os/log.h installed above is xnu's, which is the kernel's: it
+	# has os_log_t and os_log_create but not _os_log_impl, the
+	# function userland os_log() actually calls.  Apple's userland
+	# header comes from libtrace and is not published, so the one
+	# declaration is appended.
+	@if ! grep -q '_os_log_impl' ${SDK_INC}/os/log.h 2>/dev/null; then \
+	    cat ${LIBC_EXTRA}/os-log-impl.h >> ${SDK_INC}/os/log.h; \
+	fi
 	@rm -f ${SDK_INC}/dispatch/CMakeLists.txt
 	@rm -rf ${SDK_INC}/dispatch/generic ${SDK_INC}/dispatch/generic_static
 
@@ -606,8 +655,10 @@ sdk-overlay:
 .if exists(${SWIFTC}) && exists(${DARWIN_OVERLAY}/Platform.swift)
 	@${ECHO} "sdk: building the Darwin Swift overlay"
 	@mkdir -p ${OVERLAY_OBJ} ${SDK_SWIFT}/Darwin.swiftmodule
-	@python3 ${GYB} -o ${OVERLAY_OBJ}/Darwin.swift \
-	    ${DARWIN_OVERLAY}/Darwin.swift.gyb
+.for g in Darwin tgmath
+	@python3 ${GYB} -o ${OVERLAY_OBJ}/${g}.swift \
+	    ${DARWIN_OVERLAY}/${g}.swift.gyb
+.endfor
 .for f in Platform.swift POSIXError.swift MachError.swift
 	@cp -f ${DARWIN_OVERLAY}/${f} ${OVERLAY_OBJ}/
 .endfor
@@ -628,6 +679,35 @@ sdk-overlay:
 	# and never looks at the interface next to it.
 	@rm -f ${SDK_SWIFT}/Darwin.swiftmodule/${a}-apple-macos.swiftmodule
 .endfor
+
+	# The os overlay, the same way.
+	#
+	# `import os' is a Clang module and an overlay too, and the
+	# overlay is where Logger and the OSLogMessage interpolation live
+	# -- the "\(x, privacy: .public)" swift-foundation writes.  The
+	# interpolation is Swift's own, from stdlib/private/OSLog; Logger,
+	# OSLog and the emitter are ours, because that module stops at a
+	# test stub and never had them.  lib/swift-os-overlay says more.
+	#
+	# It is built with -import-underlying-module: the Swift module and
+	# the Clang module share the name os, so it cannot import itself
+	# by name.
+.if exists(${OS_OVERLAY}/OSLogSupport.swift)
+	@${ECHO} "sdk: building the os Swift overlay"
+	@mkdir -p ${SDK_SWIFT}/os.swiftmodule
+.for a in arm64 x86_64
+	@${SWIFTC} -sdk ${SDK_ROOT} -target ${a}-apple-macosx${XT_DEPLOYMENT_TARGET} \
+	    -module-name os -parse-as-library -import-underlying-module \
+	    -enable-library-evolution -swift-version 5 \
+	    -emit-module-interface-path \
+	    ${SDK_SWIFT}/os.swiftmodule/${a}-apple-macos.swiftinterface \
+	    -emit-module -emit-module-path \
+	    ${SDK_SWIFT}/os.swiftmodule/${a}-apple-macos.swiftmodule \
+	    ${OS_OVERLAY}/*.swift 2>/dev/null || \
+	    ${ECHO} "sdk: the ${a} os overlay did not build"
+	@rm -f ${SDK_SWIFT}/os.swiftmodule/${a}-apple-macos.swiftmodule
+.endfor
+.endif
 .else
 	@${ECHO} "sdk: no swift port built; the SDK will have no Darwin overlay"
 .endif

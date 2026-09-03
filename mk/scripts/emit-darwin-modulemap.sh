@@ -612,3 +612,18 @@ for h in dyld.h utils.h; do
 	printf '  module %s { header "mach-o/%s" export * }\n' "$(modname "${h}")" "${h}"
 done
 echo '}'
+
+# objc/ is installed but not declared as a module.
+#
+# Apple declares an ObjectiveC module, an umbrella over objc/, and
+# os/object.h imports objc/NSObject.h from inside the os module.  Here
+# that closes a loop -- Darwin -> os -> ObjectiveC -> Darwin -- because
+# Darwin depends on os (sys/mount.h and others include os/ headers) and
+# the objc umbrella pulls objc-auto.h and so malloc/, which Darwin
+# owns.  Apple's SDK has the same three edges and builds; whatever lets
+# it is not visible in the module maps, and guessing at it costs more
+# than the module is worth right now.
+#
+# Undeclared, the headers are still found and included textually, which
+# is how os/object.h has been compiling all along.  What is lost is
+# `import ObjectiveC' from Swift.
