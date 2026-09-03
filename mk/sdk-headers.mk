@@ -154,6 +154,19 @@ sdk-headers:
 	# this tree.  audit_kernel.h is xnu's alone and Apple ships none
 	# of it, so the installed set is taken from the fakeroot below
 	# where there is one.
+	# IPv6.  netinet/in.h includes <netinet6/in6.h>, so without this
+	# directory netinet/ does not compile at all -- which the module
+	# map turned up, since nothing had tried to build a module over
+	# these headers before.  xnu carries 28 and Apple's SDK ships 9;
+	# the fakeroot's installed set is the nine, so it wins below.
+	@mkdir -p ${SDK_INC}/netinet6
+	@cp -f ${XNU}/bsd/netinet6/*.h ${SDK_INC}/netinet6/ 2>/dev/null || true
+.if exists(${XNU_FAKEROOT}/usr/include/netinet6/in6.h)
+	@rm -rf ${SDK_INC}/netinet6
+	@mkdir -p ${SDK_INC}/netinet6
+	@cp -Rf ${XNU_FAKEROOT}/usr/include/netinet6/. ${SDK_INC}/netinet6/ 2>/dev/null || true
+.endif
+
 	@mkdir -p ${SDK_INC}/bsm
 	@cp -f ${XNU}/bsd/bsm/*.h ${SDK_INC}/bsm/ 2>/dev/null || true
 	@rm -f ${SDK_INC}/bsm/audit_kernel.h
@@ -318,6 +331,48 @@ sdk-headers:
 	 fi
 
 	@${ECHO} "sdk: `find ${SDK_INC} -name '*.h' | wc -l | tr -d ' '` headers installed"
+	# net/, netinet/ and machine/ are replaced outright rather than
+	# copied over.  xnu's source tree carries the kernel's headers as
+	# well as the ones that ship -- 90 in net/ where Apple installs
+	# 18, 57 in netinet/ against 22, 56 in machine/ against 14 -- and
+	# the surplus does not compile in userland: vm/vm_protos.h,
+	# MARK_AS_FIXUP_TEXT and KCNumKinds are kernel-only and the
+	# module map is the first thing here that ever tried to build
+	# them.  The fakeroot's installed set is exactly Apple's for
+	# these, so it replaces ours rather than merging with it.
+	#
+	# Two more go by name.  mach/dyld_kernel_fixups.h and
+	# libkern/section_keywords.h are the kernel's own -- Apple ships
+	# neither -- and they are what MARK_AS_FIXUP_TEXT and KCNumKinds
+	# come from.
+.for d in net netinet machine libkern
+	@rm -rf ${SDK_INC}/${d}
+	@mkdir -p ${SDK_INC}/${d}
+	@cp -Rf ${XNU_FAKEROOT}/usr/include/${d}/. ${SDK_INC}/${d}/ 2>/dev/null || true
+.endfor
+	# mig writes a *_server.h beside each interface -- the server half,
+	# for a program implementing the call rather than making it.  An
+	# SDK has no use for them and Apple ships none: they are what
+	# mach_interface.h was found to be including earlier.
+	@rm -f ${SDK_INC}/mach/*_server.h
+	# libdispatch builds for more than Darwin, and its other platforms'
+	# headers came along with the copy.  os/generic_win_base.h is the
+	# one that bites: it typedefs mode_t to int and uses __declspec,
+	# so anything building a module over os/ collides with the real
+	# sys/_types.  Apple ships neither, nor the build-system files
+	# beside them.
+	@rm -f ${SDK_INC}/os/generic_win_base.h ${SDK_INC}/os/generic_unix_base.h
+	@rm -f ${SDK_INC}/dispatch/CMakeLists.txt
+	@rm -rf ${SDK_INC}/dispatch/generic ${SDK_INC}/dispatch/generic_static
+
+	# Kernel-only headers xnu's tree carries and Apple ships none
+	# of.  Each is here because it is what actually broke the
+	# Darwin module: they reach vm/vm_protos.h and the fixup and
+	# kext-collection macros, none of which exist in userland.
+.for h in mach/dyld_kernel_fixups.h mach/memory_object_control.h \
+	 sys/ubc_internal.h
+	@rm -f ${SDK_INC}/${h}
+.endfor
 
 # --- stubs ----------------------------------------------------------
 #
@@ -331,6 +386,7 @@ sdk-headers:
 # of /usr/lib with llvm-readtapi.
 
 SDK_LIB=	${SDK_ROOT}/usr/lib
+
 
 sdk-stubs:
 	@${ECHO} "sdk: generating library stubs"
@@ -402,6 +458,27 @@ sdk-swift:
 	@${ECHO} "sdk:   build it with: bmake MK_PORTS=yes"
 .endif
 
-sdk: sdk-headers sdk-stubs sdk-swift
+# The Clang module map, which is how Swift reaches the C library.
+#
+# `import Darwin' names a Clang module, not a Swift one, and this is
+# what declares it over the headers installed above.  Without it the
+# SDK compiles Swift that touches nothing but the stdlib and no more:
+# Synchronization and Observation both stop at "missing required
+# module 'Darwin'".
+#
+# It runs after sdk-headers because the emitter reads the installed
+# tree -- every submodule it writes is one whose header is actually
+# there -- so running it earlier would describe a smaller SDK than the
+# one being built.
+sdk-modulemap: sdk-headers
+	@${ECHO} "sdk: generating the Darwin module map"
+	@CC="${CC}" ${TOP}/mk/scripts/emit-darwin-modulemap.sh ${SDK_INC} \
+	    > ${SDK_INC}/Darwin.modulemap
+	@{ ${ECHO} "// The SDK's Clang modules.  Apple splits these across a"; \
+	   ${ECHO} "// dozen files; ours has the one that matters so far."; \
+	   ${ECHO} 'extern module Darwin "Darwin.modulemap"'; \
+	 } > ${SDK_INC}/module.modulemap
 
-.PHONY: sdk sdk-headers sdk-stubs sdk-swift xnu-headers
+sdk: sdk-headers sdk-modulemap sdk-stubs sdk-swift
+
+.PHONY: sdk sdk-headers sdk-modulemap sdk-stubs sdk-swift xnu-headers
