@@ -43,7 +43,7 @@ T_CFLAGS+=	-I${LD64_SRC}/ld -I${LD64_SRC}/abstraction -I${LD64_SRC}/mach_o \
 # wins: put this one first and the linker silently compiles against a
 # description of a different linker's structures.
 T_CFLAGS+=	-I${TOP}/include/ld-internals
-T_CFLAGS+=	-I${TOP}/lib/libplatform/private
+T_CFLAGS+=	-I${TOP}/src/apple-oss-distributions/libplatform/private
 
 # lib/apple_internal_sdk carries the private headers that ship in neither
 # the public SDK nor any open-source drop:
@@ -56,13 +56,13 @@ T_CFLAGS+=	-I${TOP}/lib/libplatform/private
 # usr/include/System is needed as well: the non-KERNEL_PRIVATE branch of
 # machine/cpu_capabilities.h reaches for <arm/cpu_capabilities.h>.
 # Private/ is kept separate so its CommonCrypto does not shadow the SDK's.
-AISDK=		${TOP}/lib/apple_internal_sdk/usr/include
+AISDK=		${TOP}/src/xnuports/apple_internal_sdk/usr/include
 T_CFLAGS+=	-I${AISDK} -I${AISDK}/System -I${AISDK}/Private
 
 # corecrypto keeps its headers in a corecrypto/ directory under each
 # module, so every module directory has to go on the search path.
-CORECRYPTO_INC!=	find ${TOP}/lib/corecrypto -maxdepth 2 -type d -name corecrypto \
-			-not -path '${TOP}/lib/corecrypto' 2>/dev/null \
+CORECRYPTO_INC!=	find ${TOP}/src/apple/corecrypto -maxdepth 2 -type d -name corecrypto \
+			-not -path '${TOP}/src/apple/corecrypto' 2>/dev/null \
 			| sed 's|/corecrypto$$||' | sed 's|^|-I|' | tr '\n' ' '
 T_CFLAGS+=	${CORECRYPTO_INC}
 

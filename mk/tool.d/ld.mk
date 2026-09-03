@@ -88,7 +88,7 @@ ${LD64_GEN}/dyldshim/mach-o/dyld_priv.h:
 	    echo "#pragma push_macro(\"$$m\")"; \
 	    echo "#undef $$m"; echo "#define $$m(...)"; \
 	  done; \
-	  echo '#include "${TOP}/lib/dyld/include/mach-o/dyld_priv.h"'; \
+	  echo '#include "${TOP}/src/apple-oss-distributions/dyld/include/mach-o/dyld_priv.h"'; \
 	  for m in __API_AVAILABLE __API_DEPRECATED \
 		   __API_DEPRECATED_WITH_REPLACEMENT __API_UNAVAILABLE; do \
 	    echo "#pragma pop_macro(\"$$m\")"; \
@@ -132,7 +132,7 @@ ${LD64_GEN}/osshim/os/lock_private.h:
 		   __API_DEPRECATED_WITH_REPLACEMENT __API_UNAVAILABLE; do \
 	    echo "#undef $$m"; echo "#define $$m(...)"; \
 	  done; \
-	  echo '#include "${TOP}/lib/libplatform/private/os/lock_private.h"'; \
+	  echo '#include "${TOP}/src/apple-oss-distributions/libplatform/private/os/lock_private.h"'; \
 	  for m in __API_UNAVAILABLE __API_DEPRECATED_WITH_REPLACEMENT \
 		   __API_DEPRECATED __API_AVAILABLE; do \
 	    echo "#pragma pop_macro(\"$$m\")"; \
