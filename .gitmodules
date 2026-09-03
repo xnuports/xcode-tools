@@ -190,3 +190,7 @@
 	path = src/golang/go
 	url = https://github.com/golang/go
 	branch = go1.27.1
+[submodule "src/apple/libiconv"]
+	path = src/apple/libiconv
+	url = https://github.com/apple-oss-distributions/libiconv
+	branch = rel/libiconv-115
