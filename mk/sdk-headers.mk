@@ -63,29 +63,6 @@ sdk-headers:
 	# stdio.h has no definition of va_list.
 	@cp -f ${LIBC}/include/*.h ${SDK_INC}/ 2>/dev/null || true
 
-	# Headers xnu generates rather than ships.
-	#
-	# Much of mach/ is mig's output -- clock.h, mach_port.h, task.h,
-	# mach_host.h and the rest come from libsyscall/mach/*.defs -- and
-	# a few more are written by scripts in xnu's own build.  Copying
-	# from the source tree cannot produce them; they have to be built.
-	#
-	# tools/darwin-xnu-build does that, and leaves them in its
-	# fakeroot.  Producing it needs the network, a Kernel Debug Kit
-	# and the better part of an hour, so it is not run from here: if
-	# the fakeroot is there its generated headers are taken, and if it
-	# is not, this says so and carries on.  To make one:
-	#
-	#   bmake xnu-headers
-	#
-.if exists(${XNU_FAKEROOT}/usr/include/mach/clock.h)
-	@${ECHO} "sdk: taking xnu's generated headers from darwin-xnu-build"
-	@cp -Rf ${XNU_FAKEROOT}/usr/include/mach/. \
-	    ${SDK_INC}/mach/ 2>/dev/null || true
-.else
-	@${ECHO} "sdk: no xnu fakeroot; mach/ will lack its generated headers"
-.endif
-
 	# Kernel.framework, which is what a kext compiles against and what
 	# IOKit headers are found through.  Its headers are not a copy of
 	# anything in xnu's tree either: the build assembles them, so they
@@ -157,6 +134,38 @@ sdk-headers:
 	@cp -Rf ${XNU}/osfmk/mach/machine/. ${SDK_INC}/mach/machine/ 2>/dev/null || true
 	@cp -Rf ${XNU}/osfmk/mach/arm/. ${SDK_INC}/mach/arm/ 2>/dev/null || true
 	@cp -Rf ${XNU}/osfmk/mach/i386/. ${SDK_INC}/mach/i386/ 2>/dev/null || true
+
+	# Headers xnu generates rather than ships, which must land after
+	# the copies above and not before them.
+	#
+	# Much of mach/ is mig's output -- clock.h, mach_port.h, task.h,
+	# mach_host.h and the rest come from libsyscall/mach/*.defs -- and
+	# a few more are written by scripts in xnu's own build.  Copying
+	# from the source tree cannot produce those at all.
+	#
+	# It also produces different, and correct, versions of headers
+	# that do exist in osfmk/mach.  mach_interface.h is the one that
+	# matters: the source tree's is the kernel's, and includes
+	# clock_reply_server.h and the other mig *server* headers, which
+	# no SDK ships and nothing in userland can resolve.  The installed
+	# one is byte-identical to Apple's and includes none of them.  So
+	# this runs last and the generated headers win; the source tree is
+	# only the fallback for a tree with no fakeroot.
+	#
+	# tools/darwin-xnu-build produces it.  That needs the network, a
+	# Kernel Debug Kit and the better part of an hour, so it is not
+	# run from here: if the fakeroot is there its headers are taken,
+	# and if it is not, this says so and carries on.  To make one:
+	#
+	#   bmake xnu-headers
+	#
+.if exists(${XNU_FAKEROOT}/usr/include/mach/clock.h)
+	@${ECHO} "sdk: taking xnu's generated headers from darwin-xnu-build"
+	@cp -Rf ${XNU_FAKEROOT}/usr/include/mach/. \
+	    ${SDK_INC}/mach/ 2>/dev/null || true
+.else
+	@${ECHO} "sdk: no xnu fakeroot; mach/ will lack its generated headers"
+.endif
 	# mach/ headers that live outside osfmk/mach: vm_page_size.h is
 	# libsyscall's, and everything asking the kernel about pages
 	# reaches for it.
