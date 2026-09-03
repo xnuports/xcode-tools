@@ -129,6 +129,17 @@ P_OBJDIR?=	${P_WORKDIR}/build
 P_CONFDEP=
 .endif
 
+# A port's configure arguments are written in mk/port.d/<name>.mk, so a
+# change there has to reconfigure.  Nothing made that happen: for an
+# out-of-tree port P_CONFDEP is empty, which leaves the .configured
+# stamp with no dependencies at all, and once it exists cmake is never
+# run again.  Editing P_CONFIGURE_ARGS then does nothing whatsoever,
+# silently -- the build succeeds and the change is simply absent, which
+# is the worst way for a build system to disagree with its own source.
+.if exists(${TOP}/mk/port.d/${P_NAME}.mk)
+P_CONFDEP+=	${TOP}/mk/port.d/${P_NAME}.mk
+.endif
+
 # Ports are configured for a prefix of / and installed into a staging
 # directory, so that what lands in the release tree is chosen here
 # rather than by the port's own install rules.
