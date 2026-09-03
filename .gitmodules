@@ -183,3 +183,6 @@
 [submodule "src/apple-oss-distributions/libinfo"]
 	path = src/apple-oss-distributions/libinfo
 	url = https://github.com/apple-oss-distributions/Libinfo.git
+[submodule "src/swiftlang-llvm/swift-log"]
+	path = src/swiftlang-llvm/swift-log
+	url = https://github.com/apple/swift-log
