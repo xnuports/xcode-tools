@@ -42,6 +42,7 @@ REMOVEFILE=	${TOP}/src/apple-oss-distributions/removefile
 LIBDISPATCH=	${TOP}/lib/libdispatch
 LLVM_BUILD=	${TOP}/build/ports/llvm/build
 MSUN=		${TOP}/lib/msun
+DYLD=		${TOP}/lib/dyld
 
 sdk-headers:
 	@${ECHO} "sdk: installing headers into MacOSX.sdk/usr/include"
@@ -123,6 +124,22 @@ sdk-headers:
 	# includes these, and nothing else in the tree provides them.
 	@mkdir -p ${SDK_INC}/mach-o
 	@cp -Rf ${XNU}/EXTERNAL_HEADERS/mach-o/. ${SDK_INC}/mach-o/ 2>/dev/null || true
+
+	# The dynamic loader's headers.  dlfcn.h is the one everything
+	# wants -- dlopen and dlsym live nowhere else, and it is what
+	# swift-foundation stops on -- and the four mach-o headers are
+	# the rest of what dyld contributes to the SDK.
+	#
+	# lib/dyld/include carries fourteen headers and Apple's SDK ships
+	# these five.  The other nine are SPI: dyld_priv.h, dlfcn_private.h,
+	# the cache-format and introspection headers.  They are named one
+	# by one rather than copied wholesale so the SDK keeps carrying
+	# what Apple's carries and not what a source release happens to
+	# have next to it.
+	@cp -f ${DYLD}/include/dlfcn.h ${SDK_INC}/ 2>/dev/null || true
+.for h in dyld.h dyld_images.h fixup-chains.h utils.h
+	@cp -f ${DYLD}/include/mach-o/${h} ${SDK_INC}/mach-o/ 2>/dev/null || true
+.endfor
 
 	# The kernel's user-facing interfaces.
 	@cp -f ${XNU}/bsd/sys/*.h ${SDK_INC}/sys/ 2>/dev/null || true
