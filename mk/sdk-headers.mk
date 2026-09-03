@@ -26,6 +26,8 @@ TOP?=		${.CURDIR}
 RELEASE=	${TOP}/build/release
 SDK_ROOT=	${RELEASE}/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk
 SDK_INC=	${SDK_ROOT}/usr/include
+INTERNAL_SDK=	${RELEASE}/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.Internal.sdk
+INTERNAL_SPI=	${TOP}/lib/apple_internal_sdk
 SDK_FRM=	${SDK_ROOT}/System/Library/Frameworks
 KERNEL_FW=	${SDK_FRM}/Kernel.framework
 XNU_FAKEROOT=	${TOP}/tools/darwin-xnu-build/fakeroot
@@ -712,6 +714,52 @@ sdk-overlay:
 	@${ECHO} "sdk: no swift port built; the SDK will have no Darwin overlay"
 .endif
 
-sdk: sdk-headers sdk-modulemap sdk-stubs sdk-swift sdk-overlay
+# The internal SDK.
+#
+# Apple builds two: the SDK that ships with Xcode, and the one their own
+# developers use, which carries the SPI as well.  Ours is for a toolset
+# that reimplements Apple's own tools, so it is the second kind it needs
+# -- xcodebuild and friends call interfaces the public SDK does not
+# declare.
+#
+# It is a whole SDK and not a delta, which is how Apple's is: everything
+# the public one has, and then the private interfaces on top.  So this
+# copies the built SDK across first.  usr/ and System/ only -- the two
+# SDKSettings files are bundle.mk's, and the internal one names itself
+# macosx<version>.internal, which a copy would overwrite.
+#
+# Where the SPI comes from matters, and the two sources are not equal.
+# Most of it this tree already has, from the open-source releases
+# themselves -- dyld_priv.h, os/*_private.h, mach/*_private.h, xnu's
+# private headers -- and those are the real thing, installed into the
+# public SDK already and inherited here with everything else.
+#
+# lib/apple_internal_sdk is the other kind: headers reconstructed from
+# the outside, for interfaces Apple publishes no source for at all --
+# corecrypto, sandbox, the private frameworks.  Its own README calls
+# them guessed, and neither it nor any other collection of them is
+# complete.  They go on last, so nothing derived from real source is
+# ever overwritten by a reconstruction, and what is missing stays
+# missing rather than being papered over.
+sdk-internal: sdk-headers sdk-modulemap sdk-stubs sdk-swift sdk-overlay
+	@${ECHO} "sdk: assembling MacOSX.Internal.sdk"
+	@mkdir -p ${INTERNAL_SDK}/usr/include ${INTERNAL_SDK}/usr/lib \
+	    ${INTERNAL_SDK}/usr/local/include ${INTERNAL_SDK}/usr/local/lib \
+	    ${INTERNAL_SDK}/System/Library/Frameworks \
+	    ${INTERNAL_SDK}/System/Library/PrivateFrameworks
+.for d in usr System
+	@cp -Rf ${SDK_ROOT}/${d}/. ${INTERNAL_SDK}/${d}/ 2>/dev/null || true
+.endfor
+.if exists(${INTERNAL_SPI}/usr/include)
+	@${ECHO} "sdk: adding the reconstructed SPI headers"
+.for d in usr System
+	@cp -Rf ${INTERNAL_SPI}/${d}/. ${INTERNAL_SDK}/${d}/ 2>/dev/null || true
+.endfor
+.else
+	@${ECHO} "sdk: no lib/apple_internal_sdk; the internal SDK is the public one"
+.endif
 
-.PHONY: sdk sdk-headers sdk-modulemap sdk-stubs sdk-swift sdk-overlay xnu-headers
+sdk: sdk-headers sdk-modulemap sdk-stubs sdk-swift sdk-overlay sdk-internal
+
+.PHONY: sdk sdk-headers sdk-modulemap sdk-stubs sdk-swift sdk-overlay \
+	sdk-internal xnu-headers
