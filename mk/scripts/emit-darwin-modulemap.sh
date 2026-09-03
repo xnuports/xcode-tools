@@ -511,7 +511,8 @@ dirgroup '' libkern libkern
 	# module 'Darwin': Darwin -> os -> Darwin".  Giving os its own
 	# base.h leaves the dependency running one way only.
 	body=""
-	for h in lock.h base.h clock.h proc.h; do
+	# clock.h is not here either: see the case above.
+	for h in lock.h base.h proc.h; do
 		[ -f "${INC}/os/${h}" ] || continue
 		compiles "os/${h}" || continue
 		# A wrapper apiece, pointing at the header the top-level os
@@ -578,8 +579,19 @@ for h in $(ls "${INC}/os" 2>/dev/null | grep '[.]h$' | sort); do
 	# submodule over _modules/_os_lock.h and marks it deprecated in
 	# favour of Darwin.os.lock.  Both spellings have to work --
 	# swift-foundation says `import os' and then os_unfair_lock.
-	# os owns every os/ header; Darwin reaches lock and base through
-	# the wrappers written above.
+	# Left undeclared: see the note at the end of this file.
+	# clock.h goes with them, because it includes os/workgroup.h and
+	# an undeclared header's includes land in whoever included it --
+	# so declaring clock.h means os depends on mach/port.h, and
+	# Darwin depends on os.
+	# trace.h joins them, and for the same shape of reason: it
+	# includes <xpc/xpc.h>, which includes <dispatch/dispatch.h>,
+	# which is Darwin's.  It only became compilable when this SDK
+	# started carrying the xpc headers, and being compilable is what
+	# drew it into the module.
+	case "${h}" in workgroup*.h|clock.h|trace.h) continue;; esac
+	# os owns the rest; Darwin reaches lock and base through the
+	# wrappers written above.
 	is_foundation "os/${h}" && continue
 	# The SPI headers are installed for ld64's sake and Apple's SDK
 	# ships none of them.  They also reach back into Darwin --
@@ -627,3 +639,18 @@ echo '}'
 # Undeclared, the headers are still found and included textually, which
 # is how os/object.h has been compiling all along.  What is lost is
 # `import ObjectiveC' from Swift.
+
+# The workgroup family is installed and left undeclared.
+#
+# Apple gives it a module of its own, os_workgroup, and that cannot be
+# done here: those headers include <mach/port.h>, which Darwin owns,
+# and os/clock.h includes them, so declaring them draws
+# "os -> os_workgroup -> Darwin" while Darwin already depends on os
+# through mach/vm_statistics.h.  Apple's Darwin and os divide up
+# differently and theirs does not close.
+#
+# Undeclared they are still found and included textually, which is how
+# os/clock.h has always reached them.  They compiled for the first time
+# when SPI_AVAILABLE was defined, and being compilable is what pulled
+# them into the module and broke it -- they were excluded before by
+# failing, not by intent.
