@@ -60,6 +60,26 @@ sdk-headers:
 	# stdio.h has no definition of va_list.
 	@cp -f ${LIBC}/include/*.h ${SDK_INC}/ 2>/dev/null || true
 
+	# TargetConditionals.h says which Apple platform is being compiled
+	# for.  Almost everything Apple writes includes it eventually --
+	# swift-foundation stops on it immediately -- and it ships in the
+	# SDK's usr/include.  CoreFoundation is where the open source
+	# carries it.
+	@${TOP}/mk/scripts/emit-targetconditionals.sh \
+	    > ${SDK_INC}/TargetConditionals.h
+
+	# os/, whose headers come from two projects.  libplatform has the
+	# public half of the locking primitives -- the private half was
+	# already installed for ld64's sake -- and xnu's libkern/os has
+	# the rest of what the SDK carries: base.h above all, which every
+	# other os header includes for OS_ENUM and its neighbours.
+	@mkdir -p ${SDK_INC}/os
+	@cp -f ${TOP}/lib/libplatform/include/os/lock.h ${SDK_INC}/os/ \
+	    2>/dev/null || true
+.for h in base.h atomic.h overflow.h log.h trace.h object.h
+	@cp -f ${XNU}/libkern/os/${h} ${SDK_INC}/os/ 2>/dev/null || true
+.endfor
+
 	# FreeBSD/ holds headers Libc took from there and installs flat.
 	# nl_types.h is the one that matters: libc++ reaches for it
 	# through <locale>, so without it no C++ program including
@@ -90,6 +110,14 @@ sdk-headers:
 	@cp -Rf ${XNU}/osfmk/mach/machine/. ${SDK_INC}/mach/machine/ 2>/dev/null || true
 	@cp -Rf ${XNU}/osfmk/mach/arm/. ${SDK_INC}/mach/arm/ 2>/dev/null || true
 	@cp -Rf ${XNU}/osfmk/mach/i386/. ${SDK_INC}/mach/i386/ 2>/dev/null || true
+	# mach/ headers that live outside osfmk/mach: vm_page_size.h is
+	# libsyscall's, and everything asking the kernel about pages
+	# reaches for it.
+	@cp -f ${XNU}/libsyscall/mach/mach/vm_page_size.h ${SDK_INC}/mach/ \
+	    2>/dev/null || true
+
+	@mkdir -p ${SDK_INC}/mach_debug
+	@cp -f ${XNU}/osfmk/mach_debug/*.h ${SDK_INC}/mach_debug/ 2>/dev/null || true
 	@cp -f ${XNU}/bsd/net/*.h ${SDK_INC}/net/ 2>/dev/null || true
 	@cp -f ${XNU}/bsd/netinet/*.h ${SDK_INC}/netinet/ 2>/dev/null || true
 	@cp -f ${XNU}/bsd/uuid/*.h ${SDK_INC}/uuid/ 2>/dev/null || true
@@ -126,6 +154,10 @@ sdk-headers:
 	@cp -Rf ${COMMONCRYPTO}/include/. ${SDK_INC}/CommonCrypto/ 2>/dev/null || true
 	@cp -Rf ${LIBDISPATCH}/dispatch/. ${SDK_INC}/dispatch/ 2>/dev/null || true
 	@cp -Rf ${LIBDISPATCH}/os/. ${SDK_INC}/os/ 2>/dev/null || true
+	# libdispatch's os/ carries its build file; it is not a header and
+	# nothing should find one in an SDK.  Removed after the copy that
+	# brings it, not before.
+	@rm -f ${SDK_INC}/os/CMakeLists.txt
 
 	# Two of xnu's headers are generated rather than shipped -- the
 	# POSIX availability macros and the symbol-aliasing helpers -- which
