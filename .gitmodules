@@ -180,3 +180,6 @@
 [submodule "src/extras/macho"]
 	path = src/extras/macho
 	url = https://github.com/macmade/macho.git
+[submodule "src/apple-oss-distributions/libinfo"]
+	path = src/apple-oss-distributions/libinfo
+	url = https://github.com/apple-oss-distributions/Libinfo.git
