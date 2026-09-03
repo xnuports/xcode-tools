@@ -141,3 +141,6 @@
 [submodule "src/extras/libinotify-kqueue"]
 	path = src/extras/libinotify-kqueue
 	url = https://github.com/libinotify-kqueue/libinotify-kqueue
+[submodule "src/apple-oss-distributions/pyobjc"]
+	path = src/apple-oss-distributions/pyobjc
+	url = https://github.com/apple-oss-distributions/pyobjc
