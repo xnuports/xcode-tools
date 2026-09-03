@@ -129,3 +129,6 @@
 [submodule "src/swiftlang-llvm/swift-tools-support-core"]
 	path = src/swiftlang-llvm/swift-tools-support-core
 	url = https://github.com/swiftlang/swift-tools-support-core.git
+[submodule "src/swiftlang-llvm/swift-foundation"]
+	path = src/swiftlang-llvm/swift-foundation
+	url = https://github.com/swiftlang/swift-foundation
