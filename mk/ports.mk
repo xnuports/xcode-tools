@@ -24,6 +24,14 @@ PORTS+=	apple/distribution-Developer_Tools/flex flex ${XCTOOLCHAIN}/usr/bin
 PORTS+=	apple/distribution-Developer_Tools/gnumake gnumake usr/bin
 
 # ------------------------------------------------------------------
+# git and python, both of which Xcode ships in Developer/usr/bin.  The
+# git checkout is the same version Apple's build reports; cpython is
+# not -- Xcode's python3 is 3.9.6, the old shim, and this is current.
+# ------------------------------------------------------------------
+PORTS+=	git/git git usr/bin
+PORTS+=	python/cpython python3 usr/bin
+
+# ------------------------------------------------------------------
 # LLVM and Clang.  By far the longest build in the tree -- most of an
 # hour on ten cores -- which is the main reason MK_PORTS is off by
 # default.  See mk/port.d/llvm.mk, including the notes on tapi.
