@@ -165,3 +165,6 @@
 [submodule "src/extras/acextract"]
 	path = src/extras/acextract
 	url = https://github.com/bartoszj/acextract
+[submodule "src/extras/snaputil"]
+	path = src/extras/snaputil
+	url = https://github.com/ahl/apfs
