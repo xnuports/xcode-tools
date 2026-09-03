@@ -162,3 +162,6 @@
 [submodule "src/extras/openssl"]
 	path = src/extras/openssl
 	url = https://github.com/openssl/openssl.git
+[submodule "src/extras/acextract"]
+	path = src/extras/acextract
+	url = https://github.com/bartoszj/acextract
