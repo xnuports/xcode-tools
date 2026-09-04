@@ -260,3 +260,6 @@
 [submodule "src/apple/IOSCSIArchitectureModelFamily"]
 	path = src/apple/IOSCSIArchitectureModelFamily
 	url = https://github.com/apple-oss-distributions/IOSCSIArchitectureModelFamily.git
+[submodule "src/apple/IOUSBFamily"]
+	path = src/apple/IOUSBFamily
+	url = https://github.com/apple-oss-distributions/IOUSBFamily.git
