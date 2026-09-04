@@ -15,20 +15,20 @@
 # /Applications/Xcode.app/Contents/Developer/.
 
 # ------------------------------------------------------------------
-# Our own reimplementations (src/openxc-tools/openxc/, BSD-3-Clause).
+# Our own reimplementations (src/openxc-tools/, BSD-3-Clause).
 # Apple ships all of these in Developer/usr/bin.
 # ------------------------------------------------------------------
-PROGS+=	openxc-tools/openxc/codesign codesign usr/bin
-PROGS+=	openxc-tools/openxc/devicectl devicectl usr/bin
-PROGS+=	openxc-tools/openxc/notarytool notarytool usr/bin
-PROGS+=	openxc-tools/openxc/pkgbuild pkgbuild usr/bin
-PROGS+=	openxc-tools/openxc/productbuild productbuild usr/bin
-PROGS+=	openxc-tools/openxc/simctl simctl usr/bin
-PROGS+=	openxc-tools/openxc/xcode-select xcode-select usr/bin
-PROGS+=	openxc-tools/openxc/xcodebuild xcodebuild usr/bin
-PROGS+=	openxc-tools/openxc/xcrun xcrun usr/bin
-PROGS+=	openxc-tools/openxc/xcstringstool xcstringstool usr/bin
-PROGS+=	openxc-tools/openxc/xctrace xctrace usr/bin
+PROGS+=	openxc-tools/codesign codesign usr/bin
+PROGS+=	openxc-tools/devicectl devicectl usr/bin
+PROGS+=	openxc-tools/notarytool notarytool usr/bin
+PROGS+=	openxc-tools/pkgbuild pkgbuild usr/bin
+PROGS+=	openxc-tools/productbuild productbuild usr/bin
+PROGS+=	openxc-tools/simctl simctl usr/bin
+PROGS+=	openxc-tools/xcode-select xcode-select usr/bin
+PROGS+=	openxc-tools/xcodebuild xcodebuild usr/bin
+PROGS+=	openxc-tools/xcrun xcrun usr/bin
+PROGS+=	openxc-tools/xcstringstool xcstringstool usr/bin
+PROGS+=	openxc-tools/xctrace xctrace usr/bin
 
 .if ${MK_TOOLCHAIN:tl} == "yes"
 # ------------------------------------------------------------------

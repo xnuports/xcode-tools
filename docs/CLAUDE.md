@@ -123,7 +123,7 @@ xcode-tools/
 
 ## 4. Tools We Have Implemented (10)
 
-Our own BSD-licensed reimplementations in `src/openxc-tools/openxc/`:
+Our own BSD-licensed reimplementations in `src/openxc-tools/`:
 
 | # | Tool | Lines of Code | Status | Primary Gap |
 |---|------|--------------|--------|-------------|
@@ -381,7 +381,7 @@ the individual upstream repositories.
 - `-Wl,-reproducible` on every link. With `-g`, ld records each object's mtime
   in the debug map (`N_OSO` stab) and folds it into `LC_UUID`, so two clean
   builds of identical sources otherwise differ byte-for-byte.
-- `-Werror` applies only to our own sources under `src/openxc-tools/openxc/`; imported
+- `-Werror` applies only to our own sources under `src/openxc-tools/`; imported
   Apple/GNU sources predate most modern diagnostics and are exempt.
 
 ### 8.2 Output layout
@@ -648,7 +648,7 @@ to find the default toolchain, so a replacement has to answer to it, exactly as
 our tools have to answer to Apple's argv.
 
 **The tools are now self-locating, and no path is compiled in.**
-`src/openxc-tools/openxc/common/devpath.c` derives the Developer directory from the running
+`src/openxc-tools/common/devpath.c` derives the Developer directory from the running
 binary's own location (`<developer_dir>/usr/bin/<tool>`), used by `xcrun`,
 `xcodebuild` and `xcode-select` through `mk/with-devpath.mk`. A freshly built
 or relocated `build/release/` therefore works with no configuration and no
@@ -702,7 +702,7 @@ Three bugs fell out of making the tree actually usable:
 
 ### Stage 4 — Port the closed-source utilities
 
-Our own BSD-licensed reimplementations, in `src/openxc-tools/openxc/`, landing on the same
+Our own BSD-licensed reimplementations, in `src/openxc-tools/`, landing on the same
 `PROGS+=` / `tool.d/` machinery as everything else — no build-system cost.
 
 **The `/usr/bin/xc*` family first**, since it is the most conspicuous gap.
@@ -877,7 +877,7 @@ To build a single program without the whole tree, invoke the engine directly
 the way `src/Makefile` does:
 
 ```sh
-bmake -f mk/tool.mk TOP=$PWD T_DIR=openxc-tools/openxc/codesign T_PROG=codesign T_BIN=usr/bin
+bmake -f mk/tool.mk TOP=$PWD T_DIR=openxc-tools/codesign T_PROG=codesign T_BIN=usr/bin
 ```
 
 ### Testing
@@ -910,11 +910,11 @@ claims.
 ### Adding a New Tool
 
 1. Put the sources somewhere under `src/`. For our own reimplementations that
-   is `src/openxc-tools/openxc/<tool-name>/`; for an imported component it is wherever the
+   is `src/openxc-tools/<tool-name>/`; for an imported component it is wherever the
    submodule already keeps them — do not move or copy them.
 2. Add one line to `mk/progs.mk`:
    ```
-   PROGS+=	openxc-tools/openxc/<tool-name> <tool-name> usr/bin
+   PROGS+=	openxc-tools/<tool-name> <tool-name> usr/bin
    ```
    The third field is the path under `build/release/`, mirroring where Xcode
    ships the tool: `usr/bin`, `usr/libexec`, or `${XCTOOLCHAIN}/usr/bin`.
@@ -1000,7 +1000,7 @@ For specific tools:
 ## 12. License Compliance Checklist
 
 All code must comply with these rules:
-1. Our reimplemented tools (in `src/openxc-tools/openxc/`) are BSD-3-Clause
+1. Our reimplemented tools (in `src/openxc-tools/`) are BSD-3-Clause
 2. Each submodule retains its own license
 3. No proprietary Apple code (except what's in open-source submodules)
 4. No copying of Apple's closed-source binaries
@@ -1015,13 +1015,13 @@ All code must comply with these rules:
 |------|---------|
 | `docs/DOCUMENTATION.md` | Full audit of our tools vs. Apple's |
 | `docs/CLAUDE.md` | This file — development instructions |
-| `src/openxc-tools/openxc/codesign/cs_sign.c` | Code signing entry point (most tested) |
-| `src/openxc-tools/openxc/codesign/cs_macho.c` | Mach-O parsing and __LINKEDIT updates |
-| `src/openxc-tools/openxc/codesign/cs_blob.c` | CodeDirectory/SuperBlob construction |
-| `src/openxc-tools/openxc/xcodebuild/xcodebuild.c` | Main build orchestration logic |
-| `src/openxc-tools/openxc/xcodebuild/project.c` | .pbxproj parser |
-| `src/openxc-tools/openxc/xcodebuild/plist.c` | Property list parser |
-| `src/openxc-tools/openxc/xcrun/xcrun.c` | Tool location and execution |
+| `src/openxc-tools/codesign/cs_sign.c` | Code signing entry point (most tested) |
+| `src/openxc-tools/codesign/cs_macho.c` | Mach-O parsing and __LINKEDIT updates |
+| `src/openxc-tools/codesign/cs_blob.c` | CodeDirectory/SuperBlob construction |
+| `src/openxc-tools/xcodebuild/xcodebuild.c` | Main build orchestration logic |
+| `src/openxc-tools/xcodebuild/project.c` | .pbxproj parser |
+| `src/openxc-tools/xcodebuild/plist.c` | Property list parser |
+| `src/openxc-tools/xcrun/xcrun.c` | Tool location and execution |
 | `Makefile` | Top-level bmake build |
 | `mk/progs.mk` | The program inventory — add a tool here |
 | `mk/tool.mk` | The per-program build engine |
@@ -1029,7 +1029,7 @@ All code must comply with these rules:
 | `mk/bundle.mk` | Emits the `.xctoolchain` / `.sdk` bundle metadata |
 | `mk/port.mk` | Driver for components with their own build system |
 | `mk/ports.mk` | The port inventory |
-| `src/openxc-tools/openxc/common/devpath.c` | Finds our Developer directory at runtime |
+| `src/openxc-tools/common/devpath.c` | Finds our Developer directory at runtime |
 | `configs/xcrun.ini` | Default SDK/toolchain config |
 
 ---

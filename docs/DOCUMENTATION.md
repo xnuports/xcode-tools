@@ -121,7 +121,7 @@ We currently have **10 open-source reimaginations** of Apple's command-line tool
 
 ### 2.1 codesign
 
-**Source:** `src/openxc-tools/openxc/codesign/` (7 files: codesign.c, codesign.h, cs_blob.c, cs_file.c, cs_macho.c, cs_sign.c, cs_verify.c)
+**Source:** `src/openxc-tools/codesign/` (7 files: codesign.c, codesign.h, cs_blob.c, cs_file.c, cs_macho.c, cs_sign.c, cs_verify.c)
 
 **Capabilities:**
 - Ad-hoc code signing (`codesign -s -`)
@@ -159,7 +159,7 @@ We currently have **10 open-source reimaginations** of Apple's command-line tool
 
 ### 2.2 devicectl
 
-**Source:** `src/openxc-tools/openxc/devicectl/` (2 files: devicectl.c, devicectl.h)
+**Source:** `src/openxc-tools/devicectl/` (2 files: devicectl.c, devicectl.h)
 
 **Capabilities:**
 - Device listing and pairing
@@ -180,7 +180,7 @@ We currently have **10 open-source reimaginations** of Apple's command-line tool
 
 ### 2.3 notarytool
 
-**Source:** `src/openxc-tools/openxc/notarytool/` (6 files: notarytool.c, api.c, api.h, json.c, json.h, jwt.c, jwt.h, keychain.c, keychain.h)
+**Source:** `src/openxc-tools/notarytool/` (6 files: notarytool.c, api.c, api.h, json.c, json.h, jwt.c, jwt.h, keychain.c, keychain.h)
 
 **Capabilities:**
 - Notarization submission via Apple API
@@ -201,7 +201,7 @@ We currently have **10 open-source reimaginations** of Apple's command-line tool
 
 ### 2.4 pkgbuild
 
-**Source:** `src/openxc-tools/openxc/pkgbuild/` (6 files: pkgbuild.c, analyze.c, analyze.h, payload.c, payload.h, bom.c, bom.h, xar.c, xar.h)
+**Source:** `src/openxc-tools/pkgbuild/` (6 files: pkgbuild.c, analyze.c, analyze.h, payload.c, payload.h, bom.c, bom.h, xar.c, xar.h)
 
 **Capabilities:**
 - `.pkg` installer creation from file payloads
@@ -233,7 +233,7 @@ We currently have **10 open-source reimaginations** of Apple's command-line tool
 
 ### 2.5 productbuild
 
-**Source:** `src/openxc-tools/openxc/productbuild/` (7 files: productbuild.c, dist.c, dist.h, analyze.c, analyze.h, payload.c, payload.h, bom.c, bom.h, xar.c, xar.h)
+**Source:** `src/openxc-tools/productbuild/` (7 files: productbuild.c, dist.c, dist.h, analyze.c, analyze.h, payload.c, payload.h, bom.c, bom.h, xar.c, xar.h)
 
 **Capabilities:**
 - Product archive (`.pkg`) creation from distribution XML
@@ -261,7 +261,7 @@ We currently have **10 open-source reimaginations** of Apple's command-line tool
 
 ### 2.6 simctl
 
-**Source:** `src/openxc-tools/openxc/simctl/` (5 files: simctl.c, simctl.h, sim_list.c, sim_list_dispatch.c, sim_list_dispatch.c, sim_ops.c)
+**Source:** `src/openxc-tools/simctl/` (5 files: simctl.c, simctl.h, sim_list.c, sim_list_dispatch.c, sim_list_dispatch.c, sim_ops.c)
 
 **Capabilities:**
 - Simulator listing (available devices)
@@ -292,7 +292,7 @@ We currently have **10 open-source reimaginations** of Apple's command-line tool
 
 ### 2.7 xcode-select
 
-**Source:** `src/openxc-tools/openxc/xcode-select/` (1 file: xcode-select.c)
+**Source:** `src/openxc-tools/xcode-select/` (1 file: xcode-select.c)
 
 **Capabilities:**
 - `--switch <path>` to select developer directory
@@ -314,7 +314,7 @@ We currently have **10 open-source reimaginations** of Apple's command-line tool
 
 ### 2.8 xcodebuild
 
-**Source:** `src/openxc-tools/openxc/xcodebuild/` (6 files: xcodebuild.c, project.c, project.h, plist.c, plist.h, settings.c, settings.h, ini.c, ini.h)
+**Source:** `src/openxc-tools/xcodebuild/` (6 files: xcodebuild.c, project.c, project.h, plist.c, plist.h, settings.c, settings.h, ini.c, ini.h)
 
 **Capabilities:**
 - Developer directory resolution (via xcode-select, DEVELOPER_DIR)
@@ -358,7 +358,7 @@ We currently have **10 open-source reimaginations** of Apple's command-line tool
 
 ### 2.9 xcrun
 
-**Source:** `src/openxc-tools/openxc/xcrun/` (3 files: xcrun.c, ini.c, ini.h)
+**Source:** `src/openxc-tools/xcrun/` (3 files: xcrun.c, ini.c, ini.h)
 
 **Capabilities:**
 - Tool location within Developer folder
@@ -393,7 +393,7 @@ We currently have **10 open-source reimaginations** of Apple's command-line tool
 
 ### 2.10 xctrace
 
-**Source:** `src/openxc-tools/openxc/xctrace/` (4 files: xctrace.c, xctrace.h, xc_record.c, xc_export.c)
+**Source:** `src/openxc-tools/xctrace/` (4 files: xctrace.c, xctrace.h, xc_record.c, xc_export.c)
 
 **Capabilities:**
 - `.trace` file recording initiation
@@ -968,7 +968,7 @@ We currently have **10 open-source reimaginations** of Apple's command-line tool
 
 | Component | License | Source |
 |-----------|---------|--------|
-| Our xcode/ tools (codesign, devicectl, etc.) | BSD-3-Clause | `src/openxc-tools/openxc/` |
+| Our xcode/ tools (codesign, devicectl, etc.) | BSD-3-Clause | `src/openxc-tools/` |
 | LLVM/Clang | Apache-2.0 + LLVM Exception | `src/swiftlang-llvm/llvm-project/` |
 | Swift | Apache-2.0 + BSD Runtime | `src/swiftlang-llvm/swift/` |
 | Objective-C runtime | Apple Public Source License | `src/apple-oss-distributions/objc4/` |

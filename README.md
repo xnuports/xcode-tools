@@ -194,8 +194,8 @@ Two clean builds of the default set produce byte-identical binaries.
 
 | Path | |
 |---|---|
-| `src/openxc-tools/openxc/` | our reimplementations (BSD-3-Clause) |
-| `src/openxc-tools/openxc/common/` | shared helpers: plist parsers, SDK discovery, self-location |
+| `src/openxc-tools/` | our reimplementations (BSD-3-Clause) |
+| `src/openxc-tools/common/` | shared helpers: plist parsers, SDK discovery, self-location |
 | `src/` | source submodules — `distribution-Developer_Tools` (cctools, ld64, tapi, …), llvm-project, swift, cpython, git, bmake, bsdmake |
 | `lib/` | library submodules — corecrypto, dyld, libplatform, libdispatch, `apple_internal_sdk` |
 | `include/` | headers vendored where the SDK ships none |
