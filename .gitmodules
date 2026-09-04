@@ -266,3 +266,6 @@
 [submodule "src/apple/IOAudioFamily"]
 	path = src/apple/IOAudioFamily
 	url = https://github.com/apple-oss-distributions/IOAudioFamily.git
+[submodule "src/apple/IOSerialFamily"]
+	path = src/apple/IOSerialFamily
+	url = https://github.com/apple-oss-distributions/IOSerialFamily.git
