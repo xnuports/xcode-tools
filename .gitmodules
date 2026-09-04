@@ -203,3 +203,6 @@
 [submodule "src/apple/libedit"]
 	path = src/apple/libedit
 	url = https://github.com/apple-oss-distributions/libedit
+[submodule "src/apple/WebKit"]
+	path = src/apple/WebKit
+	url = https://github.com/apple-oss-distributions/WebKit
