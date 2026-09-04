@@ -257,3 +257,6 @@
 [submodule "src/apple/IOFireWireFamily"]
 	path = src/apple/IOFireWireFamily
 	url = https://github.com/apple-oss-distributions/IOFireWireFamily.git
+[submodule "src/apple/IOSCSIArchitectureModelFamily"]
+	path = src/apple/IOSCSIArchitectureModelFamily
+	url = https://github.com/apple-oss-distributions/IOSCSIArchitectureModelFamily.git
