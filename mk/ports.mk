@@ -39,6 +39,11 @@ PORTS+=	extras/pcre2 pcre2 usr/local/lib
 PORTS+=	apple/distribution-Developer_Tools/Git git usr/bin
 PORTS+=	python/cpython python3 usr/bin
 
+# pip, which Xcode ships alongside python3 as Developer/usr/bin/pip3 and
+# pip3.<minor>.  It has to come after cpython: the install runs the python3
+# that port just put in place.
+PORTS+=	python/pip pip usr/bin
+
 # perl, also Apple's: perl-175 carries the 5.34.1 /usr/bin/perl reports.
 # See mk/port.d/perl.mk for the two things their build assumes and this
 # one cannot -- running as root, and an x86_64 host.
