@@ -28,6 +28,7 @@ SDK_ROOT=	${RELEASE}/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk
 SDK_INC=	${SDK_ROOT}/usr/include
 INTERNAL_SDK=	${RELEASE}/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.Internal.sdk
 INTERNAL_SPI=	${TOP}/src/apple-internals/apple_internal_sdk
+APPLE_SPI=	${TOP}/lib/apple-spi
 SDK_FRM=	${SDK_ROOT}/System/Library/Frameworks
 INTERNAL_KERNEL_FW=	${INTERNAL_SDK}/System/Library/Frameworks/Kernel.framework
 CF_SRC=		${TOP}/src/apple/CF
@@ -51,6 +52,8 @@ OBJC4=		${TOP}/src/apple/objc4
 LIBINFO=	${TOP}/src/apple/libinfo
 LIBPLATFORM=	${TOP}/src/apple/libplatform
 EXPAT=		${TOP}/src/apple/expat
+SYSLOG=		${TOP}/src/apple/syslog
+BZIP2=		${TOP}/src/apple/bzip2
 LIBICONV=	${TOP}/src/apple/libiconv
 ZLIB=		${TOP}/src/apple/zlib
 CURL=		${TOP}/src/apple/curl
@@ -198,6 +201,25 @@ sdk-headers:
 	@cp -f ${ZLIB}/zlib/zlib.h ${ZLIB}/zlib/zconf.h ${SDK_INC}/ 2>/dev/null || true
 	@mkdir -p ${SDK_INC}/curl
 	@cp -f ${CURL}/curl/include/curl/*.h ${SDK_INC}/curl/ 2>/dev/null || true
+	# bzlib.h, which perl's Compress::Bzip2 wants.
+	@cp -f ${BZIP2}/bzip2/bzlib.h ${SDK_INC}/ 2>/dev/null || true
+
+	# asl.h, from Apple's syslog.  ASL is deprecated but the symbols are
+	# still in libSystem and Apple's own perl still logs through it.
+	# Only asl.h.  The drop carries a dozen more -- asl_core.h,
+	# asl_msg.h, asl_private.h and so on -- and Apple's public SDK
+	# ships none of them.
+	@cp -f ${SYSLOG}/libsystem_asl.tproj/include/asl.h ${SDK_INC}/ 2>/dev/null || true
+
+	# Two of libsyscall's headers that Apple ships in usr/include and
+	# nothing here was installing: libproc.h, which Apple's perl
+	# includes, and spawn.h.  They come from the fakeroot rather than
+	# xnu's source tree because the source copies are the kernel's
+	# build of them.
+.for h in libproc.h spawn.h
+	@cp -f ${XNU_FAKEROOT}/usr/include/${h} ${SDK_INC}/ 2>/dev/null || true
+.endfor
+
 	# libDER, which xnu vendors in EXTERNAL_HEADERS and Apple ships in
 	# usr/include.  Apple installs two of the eleven headers there --
 	# the type and the config -- and that is the set Security's oids.h
@@ -675,7 +697,7 @@ sdk-stubs:
 	@[ -f ${SDK_LIB}/libiconv.2.tbd ] && \
 	    ln -sfn libiconv.2.tbd ${SDK_LIB}/libiconv.tbd || true
 	# and the rest, each its own dylib rather than part of libSystem.
-.for l v in libz 1 libcurl 4 libedit 3 libexpat 1
+.for l v in libz 1 libcurl 4 libedit 3 libexpat 1 libbz2 1.0
 	@${TOP}/mk/scripts/make-tbd.sh /usr/lib/${l}.${v}.dylib \
 	    ${SDK_LIB}/${l}.${v}.tbd 2>/dev/null || true
 	@[ -f ${SDK_LIB}/${l}.${v}.tbd ] && \
@@ -1066,6 +1088,25 @@ sdk-internal: sdk-headers sdk-modulemap sdk-stubs sdk-swift sdk-overlay sdk-fram
 	# MacOSX.sdk.  So the whole tree goes here and only here: firehose,
 	# machine/cpu_capabilities.h, the private mach and sys headers, the
 	# lot.  This is what makes the internal SDK unrestricted.
+	# The rest of syslog's headers, which are private.
+	@cp -f ${SYSLOG}/libsystem_asl.tproj/include/*.h \
+	    ${INTERNAL_SDK}/usr/local/include/ 2>/dev/null || true
+	@rm -f ${INTERNAL_SDK}/usr/local/include/asl.h
+	# Reconstructed SPI from lib/apple-spi.  Internal SDK only: these
+	# are interfaces no SDK publishes, so they follow the same rule as
+	# xnu's usr/local/include.
+	@mkdir -p ${INTERNAL_SDK}/usr/local/include
+	@cp -f ${APPLE_SPI}/*.h ${INTERNAL_SDK}/usr/local/include/ 2>/dev/null || true
+	# rootless.h at the top level as well as under sandbox/.  Apple's
+	# perl says #include <rootless.h> plainly, which is evidence for
+	# where their internal SDK keeps it; usr/local/include is where
+	# this tree puts SPI, and it is on the include path after
+	# usr/include.  The symbols are in libSystem either way.
+.if exists(${INTERNAL_SPI}/usr/include/sandbox/rootless.h)
+	@mkdir -p ${INTERNAL_SDK}/usr/local/include
+	@cp -f ${INTERNAL_SPI}/usr/include/sandbox/rootless.h \
+	    ${INTERNAL_SDK}/usr/local/include/ 2>/dev/null || true
+.endif
 	# The userspace os/log_private.h, reconstructed -- see the header.
 	# SPI, so it goes here and not in the public SDK.
 	@mkdir -p ${INTERNAL_SDK}/usr/include/os
