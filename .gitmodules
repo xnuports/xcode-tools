@@ -209,3 +209,6 @@
 [submodule "src/apple/expat"]
 	path = src/apple/expat
 	url = https://github.com/apple-oss-distributions/expat.git
+[submodule "src/apple/CFNetwork"]
+	path = src/apple/CFNetwork
+	url = https://github.com/apple-oss-distributions/CFNetwork
