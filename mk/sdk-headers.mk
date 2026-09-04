@@ -804,9 +804,16 @@ sdk-swift:
 	#
 	# Cxx and CxxStdlib have no entry: they have no runtime dylib and
 	# Apple's SDK stubs neither.
+	#
+	# There is one stub per .swiftmodule installed below.  Five of the
+	# twelve had one before, so "import os" typechecked against the
+	# interface and then failed to link -- Logger and os_log_type_t
+	# resolved to nothing, which made the whole os overlay useless.
 	@mkdir -p ${SDK_SWIFT}
 .for l in libswiftCore libswift_Concurrency libswiftSwiftOnoneSupport \
-	  libswift_Builtin_float libswift_StringProcessing
+	  libswift_Builtin_float libswift_StringProcessing \
+	  libswiftDarwin libswiftos libswiftDistributed libswiftObservation \
+	  libswiftRegexBuilder libswiftSynchronization libswift_RegexParser
 	@${TOP}/mk/scripts/make-tbd.sh /usr/lib/swift/${l}.dylib \
 	    ${SDK_SWIFT}/${l}.tbd 2>/dev/null || true
 .endfor
