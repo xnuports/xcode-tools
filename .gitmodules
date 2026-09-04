@@ -230,3 +230,6 @@
 [submodule "src/apple/IOKitUser"]
 	path = src/apple/IOKitUser
 	url = https://github.com/apple-oss-distributions/IOKitUser.git
+[submodule "src/apple/libxml2"]
+	path = src/apple/libxml2
+	url = https://github.com/apple-oss-distributions/libxml2.git
