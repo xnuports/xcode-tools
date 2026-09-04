@@ -41,6 +41,9 @@ SECURITY=	${TOP}/src/apple/Security
 SEC_FW=		${SDK_FRM}/Security.framework
 IOKITUSER=	${TOP}/src/apple/IOKitUser
 IOKIT_MANIFEST=	${TOP}/lib/iokit-headers.txt
+WEBKIT=		${TOP}/src/apple/WebKit
+WEBKIT_MANIFEST=	${TOP}/lib/webkit-headers.txt
+WEBKIT_FW=	${SDK_FRM}/WebKit.framework
 IOKIT_FW=	${SDK_FRM}/IOKit.framework
 FOUNDATION_FW=	${SDK_FRM}/Foundation.framework
 CS_FW=		${SDK_FRM}/CoreServices.framework
@@ -1105,6 +1108,32 @@ sdk-frameworks:
 	@ln -sfn Versions/Current/Headers ${FSE_FW}/Headers
 	@ln -sfn Versions/Current/Modules ${FSE_FW}/Modules
 	@ln -sfn Versions/Current/FSEvents.tbd ${FSE_FW}/FSEvents.tbd
+
+	@${ECHO} "sdk: assembling WebKit.framework"
+	# All 215 of Apple's public headers are in this source; they are
+	# just spread across it by role -- the modern API under
+	# Source/WebKit/UIProcess/API/Cocoa, the DOM and the legacy classes
+	# under Source/WebKitLegacy/mac -- so the manifest says which ones
+	# and where they go.
+	#
+	# Headers only.  Building WebKit itself is a different undertaking
+	# from assembling an SDK: JavaScriptCore, WebCore, ANGLE and the
+	# rest.  The framework the SDK describes is the system's, stubbed
+	# like every other one here.
+	@mkdir -p ${WEBKIT_FW}/Versions/A/Modules
+	@CC="${CC}" SDK="${SDK_ROOT}" \
+	    ${TOP}/mk/scripts/install-framework-manifest.sh ${WEBKIT_MANIFEST} \
+	    ${WEBKIT_FW}/Versions/A/Headers \
+	    ${WEBKIT_FW}/Versions/A/Modules/module.modulemap \
+	    WebKit.h objective-c \
+	    ${WEBKIT}/Source
+	@${TOP}/mk/scripts/make-tbd.sh \
+	    /System/Library/Frameworks/WebKit.framework/Versions/A/WebKit \
+	    ${WEBKIT_FW}/Versions/A/WebKit.tbd 2>/dev/null || true
+	@ln -sfn A ${WEBKIT_FW}/Versions/Current
+	@ln -sfn Versions/Current/Headers ${WEBKIT_FW}/Headers
+	@ln -sfn Versions/Current/Modules ${WEBKIT_FW}/Modules
+	@ln -sfn Versions/Current/WebKit.tbd ${WEBKIT_FW}/WebKit.tbd
 
 	@${ECHO} "sdk: assembling IOKit.framework"
 	@rm -rf ${IOKIT_FW}/Versions/A/Headers
