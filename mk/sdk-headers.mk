@@ -39,6 +39,8 @@ CF_FW=		${SDK_FRM}/CoreFoundation.framework
 CORESERVICES=	${TOP}/lib/coreservices
 SECURITY=	${TOP}/src/apple/Security
 SEC_FW=		${SDK_FRM}/Security.framework
+IOKITUSER=	${TOP}/src/apple/IOKitUser
+IOKIT_FW=	${SDK_FRM}/IOKit.framework
 FOUNDATION_FW=	${SDK_FRM}/Foundation.framework
 CS_FW=		${SDK_FRM}/CoreServices.framework
 FSE_FW=		${CS_FW}/Versions/A/Frameworks/FSEvents.framework
@@ -206,6 +208,21 @@ sdk-headers:
 	# asl_msg.h, asl_private.h and so on -- and Apple's public SDK
 	# ships none of them.
 	@cp -f ${SYSLOG}/libsystem_asl.tproj/include/asl.h ${SDK_INC}/ 2>/dev/null || true
+
+	# The rest of what xnu installs into usr/include.  Fifteen
+	# directories Apple ships and nothing here was installing: the
+	# Mach ones IOKit reaches through -- IOTypes.h includes
+	# <device/device_types.h> -- and kern, nfs, pexpert, servers and
+	# the others alongside them.  They come from the fakeroot for the
+	# same reason libproc.h does: the source copies are the kernel's
+	# build of them.
+.for d in arm64 atm bank corpses default_pager device kern miscfs netkey \
+	  nfs pexpert security servers vfs voucher
+.if exists(${XNU_FAKEROOT}/usr/include/${d})
+	@mkdir -p ${SDK_INC}/${d}
+	@cp -Rf ${XNU_FAKEROOT}/usr/include/${d}/. ${SDK_INC}/${d}/ 2>/dev/null || true
+.endif
+.endfor
 
 	# Two of libsyscall's headers that Apple ships in usr/include and
 	# nothing here was installing: libproc.h, which Apple's perl
@@ -1050,6 +1067,24 @@ sdk-frameworks:
 	@ln -sfn Versions/Current/Headers ${FSE_FW}/Headers
 	@ln -sfn Versions/Current/Modules ${FSE_FW}/Modules
 	@ln -sfn Versions/Current/FSEvents.tbd ${FSE_FW}/FSEvents.tbd
+
+	@${ECHO} "sdk: assembling IOKit.framework"
+	@rm -rf ${IOKIT_FW}/Versions/A/Headers
+	@mkdir -p ${IOKIT_FW}/Versions/A/Headers ${IOKIT_FW}/Versions/A/Modules
+	# IOKitUser's own internal headers go to the internal SDK's copy of
+	# the framework, under PrivateHeaders, and not into this one.
+	@rm -rf ${INTERNAL_SDK}/System/Library/Frameworks/IOKit.framework/Versions/A/PrivateHeaders
+	@${TOP}/mk/scripts/install-iokit-headers.sh ${IOKITUSER} \
+	    ${XNU_FAKEROOT} ${IOKIT_FW}/Versions/A/Headers \
+	    ${IOKIT_FW}/Versions/A/Modules/module.modulemap \
+	    ${INTERNAL_SDK}/System/Library/Frameworks/IOKit.framework/Versions/A/PrivateHeaders
+	@${TOP}/mk/scripts/make-tbd.sh \
+	    /System/Library/Frameworks/IOKit.framework/Versions/A/IOKit \
+	    ${IOKIT_FW}/Versions/A/IOKit.tbd 2>/dev/null || true
+	@ln -sfn A ${IOKIT_FW}/Versions/Current
+	@ln -sfn Versions/Current/Headers ${IOKIT_FW}/Headers
+	@ln -sfn Versions/Current/Modules ${IOKIT_FW}/Modules
+	@ln -sfn Versions/Current/IOKit.tbd ${IOKIT_FW}/IOKit.tbd
 
 	@${ECHO} "sdk: assembling Security.framework"
 	# Security's own build stages its public headers into
