@@ -17,6 +17,19 @@
 # here, and the dispatchers widened to match, so a header calling them
 # with seven platforms expands the way it does against Apple's SDK.
 #
+# The deprecation families need the same treatment and for a sharper
+# reason.  Security's SecProtocolMetadata.h deprecates across macos,
+# ios, watchos, tvos and macCatalyst at once, which is five, and
+# __API_DEPRECATED_WITH_REPLACEMENT stopped at four.  Overflowing
+# __API_UNAVAILABLE is worse still: its dispatcher picks the fourth
+# argument as the macro name and calls it, so the annotation silently
+# becomes something else rather than failing.
+#
+# The __SPI_* family is here too.  Apple's SDK defines five of them and
+# expands each to nothing; only __SPI_AVAILABLE was defined here, so a
+# header carrying __SPI_DEPRECATED -- spawn.h does, on
+# posix_spawn_file_actions_addchdir_np -- would not parse.
+#
 # This appends to the installed copy rather than editing anything in
 # the source tree: the SDK is generated, and this is part of generating
 # it.
@@ -81,6 +94,25 @@ grep -q 'xnuports: widened' "$H" 2>/dev/null && exit 0
 	echo "#define __SPI_AVAILABLE(...) __API_AVAILABLE(__VA_ARGS__)"
 	echo "#endif"
 	echo ""
+	echo "/* xnuports: the rest of the __SPI_* family, which Apple's SDK"
+	echo "   defines and expands to nothing.  spawn.h carries a"
+	echo "   __SPI_DEPRECATED on the addchdir_np calls and does not parse"
+	echo "   without it, which stops any configure check that includes"
+	echo "   <spawn.h> -- libarchive then builds posix_spawn code with no"
+	echo "   declarations in scope. */"
+	echo "#ifndef __SPI_DEPRECATED"
+	echo "#define __SPI_DEPRECATED(...)"
+	echo "#endif"
+	echo "#ifndef __SPI_DEPRECATED_WITH_REPLACEMENT"
+	echo "#define __SPI_DEPRECATED_WITH_REPLACEMENT(...)"
+	echo "#endif"
+	echo "#ifndef __SPI_AVAILABLE_BEGIN"
+	echo "#define __SPI_AVAILABLE_BEGIN(...)"
+	echo "#endif"
+	echo "#ifndef __SPI_AVAILABLE_END"
+	echo "#define __SPI_AVAILABLE_END"
+	echo "#endif"
+	echo ""
 	echo "#undef __API_UNAVAILABLE_GET_MACRO"
 	echo "#define __API_UNAVAILABLE4(a,b,c,d) __API_U(a) __API_U(b) __API_U(c) __API_U(d)"
 	echo "#define __API_UNAVAILABLE5(a,b,c,d,e) __API_UNAVAILABLE4(a,b,c,d) __API_U(e)"
@@ -93,4 +125,37 @@ grep -q 'xnuports: widened' "$H" 2>/dev/null && exit 0
 	echo "        __API_UNAVAILABLE8, __API_UNAVAILABLE7, __API_UNAVAILABLE6, \\"
 	echo "        __API_UNAVAILABLE5, __API_UNAVAILABLE4, __API_UNAVAILABLE3, \\"
 	echo "        __API_UNAVAILABLE2, __API_UNAVAILABLE1)(__VA_ARGS__)"
+
+	echo ""
+	echo "/* xnuports: the deprecations, widened the same way.  The first"
+	echo "   argument is the message or replacement, so MSG6 is five"
+	echo "   platforms. */"
+	echo "#define __API_DEPRECATED_MSG6(m,a,b,c,d,e) __API_DEPRECATED_MSG5(m,a,b,c,d) __API_D(m,e)"
+	echo "#define __API_DEPRECATED_MSG7(m,a,b,c,d,e,f) __API_DEPRECATED_MSG6(m,a,b,c,d,e) __API_D(m,f)"
+	echo "#define __API_DEPRECATED_MSG8(m,a,b,c,d,e,f,g) __API_DEPRECATED_MSG7(m,a,b,c,d,e,f) __API_D(m,g)"
+	echo "#define __API_DEPRECATED_MSG9(m,a,b,c,d,e,f,g,h) __API_DEPRECATED_MSG8(m,a,b,c,d,e,f,g) __API_D(m,h)"
+	echo "#undef __API_DEPRECATED_MSG_GET_MACRO"
+	echo "#define __API_DEPRECATED_MSG_GET_MACRO(_1,_2,_3,_4,_5,_6,_7,_8,_9,NAME,...) NAME"
+	echo "#undef __API_DEPRECATED"
+	echo "#define __API_DEPRECATED(...) __API_DEPRECATED_MSG_GET_MACRO(__VA_ARGS__, \\"
+	echo "        __API_DEPRECATED_MSG9, __API_DEPRECATED_MSG8, \\"
+	echo "        __API_DEPRECATED_MSG7, __API_DEPRECATED_MSG6, \\"
+	echo "        __API_DEPRECATED_MSG5, __API_DEPRECATED_MSG4, \\"
+	echo "        __API_DEPRECATED_MSG3, __API_DEPRECATED_MSG2)(__VA_ARGS__)"
+
+	echo ""
+	echo "#ifdef __API_R"
+	echo "#define __API_DEPRECATED_REP6(r,a,b,c,d,e) __API_DEPRECATED_REP5(r,a,b,c,d) __API_R(r,e)"
+	echo "#define __API_DEPRECATED_REP7(r,a,b,c,d,e,f) __API_DEPRECATED_REP6(r,a,b,c,d,e) __API_R(r,f)"
+	echo "#define __API_DEPRECATED_REP8(r,a,b,c,d,e,f,g) __API_DEPRECATED_REP7(r,a,b,c,d,e,f) __API_R(r,g)"
+	echo "#define __API_DEPRECATED_REP9(r,a,b,c,d,e,f,g,h) __API_DEPRECATED_REP8(r,a,b,c,d,e,f,g) __API_R(r,h)"
+	echo "#undef __API_DEPRECATED_REP_GET_MACRO"
+	echo "#define __API_DEPRECATED_REP_GET_MACRO(_1,_2,_3,_4,_5,_6,_7,_8,_9,NAME,...) NAME"
+	echo "#undef __API_DEPRECATED_WITH_REPLACEMENT"
+	echo "#define __API_DEPRECATED_WITH_REPLACEMENT(...) __API_DEPRECATED_REP_GET_MACRO(__VA_ARGS__, \\"
+	echo "        __API_DEPRECATED_REP9, __API_DEPRECATED_REP8, \\"
+	echo "        __API_DEPRECATED_REP7, __API_DEPRECATED_REP6, \\"
+	echo "        __API_DEPRECATED_REP5, __API_DEPRECATED_REP4, \\"
+	echo "        __API_DEPRECATED_REP3, __API_DEPRECATED_REP2)(__VA_ARGS__)"
+	echo "#endif"
 } >> "$H"
