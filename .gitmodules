@@ -239,3 +239,6 @@
 [submodule "src/apple/xar"]
 	path = src/apple/xar
 	url = https://github.com/apple-oss-distributions/xar.git
+[submodule "src/extras/xz"]
+	path = src/extras/xz
+	url = https://github.com/tukaani-project/xz.git
