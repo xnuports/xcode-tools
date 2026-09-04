@@ -227,3 +227,6 @@
 [submodule "src/apple/libarchive"]
 	path = src/apple/libarchive
 	url = https://github.com/apple-oss-distributions/libarchive.git
+[submodule "src/apple/IOKitUser"]
+	path = src/apple/IOKitUser
+	url = https://github.com/apple-oss-distributions/IOKitUser.git
