@@ -52,10 +52,10 @@ ECHO=		echo
 XCTOOLCHAIN=	Toolchains/XcodeDefault.xctoolchain
 
 #
-# Our own sources under src/openxc-tools/openxc/ are held to -Werror; they build clean
+# Our own sources under src/openxc-tools/ are held to -Werror; they build clean
 # today and should stay that way.  Imported Apple/GNU sources predate
 # most of these diagnostics and are deliberately not held to it -- see
-# tool.mk, which applies this only to T_DIR values under xcode/.
+# tool.mk, which applies this only to T_DIR values under openxc-tools/.
 #
 XCODE_STRICT_CFLAGS=	-Werror
 

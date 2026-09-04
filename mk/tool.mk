@@ -38,7 +38,7 @@ T_TARGET?=	${TOP}/build/release/${T_BIN}/${T_PROG}
 
 # Our own reimplementations build clean; hold them to -Werror.  Imported
 # sources are exempt (see mk/xcodetools.sys.mk).
-.if ${T_DIR:Mxcode/*} != ""
+.if ${T_DIR:Mopenxc-tools/*} != ""
 T_CFLAGS+=	${XCODE_STRICT_CFLAGS}
 .endif
 
