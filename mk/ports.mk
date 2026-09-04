@@ -44,6 +44,11 @@ PORTS+=	python/cpython python3 usr/bin
 # one cannot -- running as root, and an x86_64 host.
 PORTS+=	apple/perl perl usr/bin
 
+# libarchive, which is where /usr/bin/tar and /usr/bin/cpio come from.
+# bsdtar and bsdcpio are the names it installs; tar and cpio are the
+# names the system uses, and mk/port.d/libarchive.mk links them.
+PORTS+=	apple/libarchive libarchive usr/bin
+
 # ------------------------------------------------------------------
 # Go, and ipsw which is written in it.  Neither is something Xcode
 # ships, so both go to usr/local.  Go is pinned to a release tag --
