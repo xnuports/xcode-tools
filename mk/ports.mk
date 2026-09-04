@@ -39,6 +39,11 @@ PORTS+=	extras/pcre2 pcre2 usr/local/lib
 PORTS+=	apple/distribution-Developer_Tools/Git git usr/bin
 PORTS+=	python/cpython python3 usr/bin
 
+# perl, also Apple's: perl-175 carries the 5.34.1 /usr/bin/perl reports.
+# See mk/port.d/perl.mk for the two things their build assumes and this
+# one cannot -- running as root, and an x86_64 host.
+PORTS+=	apple/perl perl usr/bin
+
 # ------------------------------------------------------------------
 # Go, and ipsw which is written in it.  Neither is something Xcode
 # ships, so both go to usr/local.  Go is pinned to a release tag --
