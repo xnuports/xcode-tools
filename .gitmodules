@@ -254,3 +254,6 @@
 [submodule "src/apple/IOGraphics"]
 	path = src/apple/IOGraphics
 	url = https://github.com/apple-oss-distributions/IOGraphics.git
+[submodule "src/apple/IOFireWireFamily"]
+	path = src/apple/IOFireWireFamily
+	url = https://github.com/apple-oss-distributions/IOFireWireFamily.git
