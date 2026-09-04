@@ -233,3 +233,6 @@
 [submodule "src/apple/libxml2"]
 	path = src/apple/libxml2
 	url = https://github.com/apple-oss-distributions/libxml2.git
+[submodule "src/apple/libxslt"]
+	path = src/apple/libxslt
+	url = https://github.com/apple-oss-distributions/libxslt.git
