@@ -47,4 +47,13 @@ while [ -n "$todo" ]; do
 	todo=$next
 done
 
+# One header the umbrella does not reach.  CoreFoundation.h includes
+# CFMessagePort.h and not CFMachPort.h, though the drop carries both and
+# Apple ship both; the omission is upstream's.  CFMachPortCreate() and
+# its neighbours are public API, and IOKit's private headers include
+# <CoreFoundation/CFMachPort.h> directly.
+if [ "$FW" = CoreFoundation ] && [ -f "$SRC/CFMachPort.h" ] && [ ! -f "$DEST/CFMachPort.h" ]; then
+	cp -f "$SRC/CFMachPort.h" "$DEST/CFMachPort.h"
+fi
+
 echo "    $FW: $(ls "$DEST"/*.h 2>/dev/null | wc -l | tr -d ' ') headers"
