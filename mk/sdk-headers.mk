@@ -509,6 +509,11 @@ sdk-headers:
 	@cp -f ${COPYFILE}/copyfile.h ${SDK_INC}/ 2>/dev/null || true
 	@cp -f ${REMOVEFILE}/removefile.h ${SDK_INC}/ 2>/dev/null || true
 	@cp -Rf ${COMMONCRYPTO}/include/. ${SDK_INC}/CommonCrypto/ 2>/dev/null || true
+	# The drop keeps its SPI in include/Private, and copying the tree
+	# wholesale carried that directory into the public SDK, where
+	# Apple's has nothing of the kind -- theirs is the eight headers
+	# and a module map.  It goes.
+	@rm -rf ${SDK_INC}/CommonCrypto/Private
 	@cp -Rf ${LIBDISPATCH}/dispatch/. ${SDK_INC}/dispatch/ 2>/dev/null || true
 	@cp -Rf ${LIBDISPATCH}/os/. ${SDK_INC}/os/ 2>/dev/null || true
 	# libdispatch's os/ carries its build file; it is not a header and
@@ -709,6 +714,29 @@ sdk-stubs:
 	    ${SDK_LIB}/libiconv.2.tbd 2>/dev/null || true
 	@[ -f ${SDK_LIB}/libiconv.2.tbd ] && \
 	    ln -sfn libiconv.2.tbd ${SDK_LIB}/libiconv.tbd || true
+	# The compatibility names.  On this system pthread, m, dl, c, info,
+	# rpcsvc, poll and proc are all inside libSystem, and Apple ship a
+	# stub for each whose install name is libSystem's -- so -lpthread
+	# and -lm resolve and link the one library.  Without them any
+	# configure script that checks for them decides the system has no
+	# libz, or no libxml2, or whatever it was really testing.
+.for l in libpthread libm libdl libc libinfo librpcsvc libpoll libproc
+	@ln -sfn libSystem.B.tbd ${SDK_LIB}/${l}.tbd
+.endfor
+	# These three are their own dylibs rather than aliases.
+.for l v in libresolv .9 libcharset .1
+	@${TOP}/mk/scripts/make-tbd.sh /usr/lib/${l}${v}.dylib \
+	    ${SDK_LIB}/${l}${v}.tbd 2>/dev/null || true
+	@[ -f ${SDK_LIB}/${l}${v}.tbd ] && \
+	    ln -sfn ${l}${v}.tbd ${SDK_LIB}/${l}.tbd || true
+.endfor
+	# libutil's dylib has no dot before its version, and Apple's stub
+	# keeps that spelling.
+	@${TOP}/mk/scripts/make-tbd.sh /usr/lib/libutil1.0.dylib \
+	    ${SDK_LIB}/libutil1.0.tbd 2>/dev/null || true
+	@[ -f ${SDK_LIB}/libutil1.0.tbd ] && \
+	    ln -sfn libutil1.0.tbd ${SDK_LIB}/libutil.tbd || true
+
 	# usr/lib/system.  Apple's SDK carries a stub for each of libSystem's
 	# sub-libraries and this one carried none, which is not merely a
 	# missing convenience: libSystem.B.tbd names their symbols, but the
@@ -734,7 +762,8 @@ sdk-stubs:
 .endfor
 
 	# and the rest, each its own dylib rather than part of libSystem.
-.for l v in libz 1 libcurl 4 libedit 3 libexpat 1 libbz2 1.0
+.for l v in libz 1 libcurl 4 libedit 3 libexpat 1 libbz2 1.0 \
+	     libxml2 2 libxslt 1 libexslt 0
 	@${TOP}/mk/scripts/make-tbd.sh /usr/lib/${l}.${v}.dylib \
 	    ${SDK_LIB}/${l}.${v}.tbd 2>/dev/null || true
 	@[ -f ${SDK_LIB}/${l}.${v}.tbd ] && \
@@ -1156,6 +1185,14 @@ sdk-internal: sdk-headers sdk-modulemap sdk-stubs sdk-swift sdk-overlay sdk-fram
 	@cp -Rf ${XNU_FAKEROOT}/System/Library/Frameworks/System.framework/Versions/B/PrivateHeaders/. \
 	    ${INTERNAL_SDK}/usr/include/System/ 2>/dev/null || true
 .endif
+
+	# CommonCrypto's SPI, flattened.  Apple's own projects include
+	# <CommonCrypto/CommonDigestSPI.h> -- xar's archive.h does -- so
+	# in their internal SDK these sit beside the public headers rather
+	# than under a Private directory.
+	@mkdir -p ${INTERNAL_SDK}/usr/include/CommonCrypto
+	@cp -f ${COMMONCRYPTO}/include/Private/*.h \
+	    ${INTERNAL_SDK}/usr/include/CommonCrypto/ 2>/dev/null || true
 
 	# libpthread's private headers.  The eight public ones are already
 	# in usr/include/pthread; these ten are the SPI beside them, and
