@@ -25,11 +25,9 @@ P_PREPARE=	${TOP}/mk/scripts/prepare-apple-libarchive.sh .
 # then carries a dependency on.  Apple's tar links no libb2; the tree
 # has its own archive_blake2s_ref.c and that is what gets used.
 #
-# lzma is not, and cannot be: Apple ships liblzma in the shared cache
-# but publishes neither lzma.h nor any xz source, so their own public
-# SDK cannot build against it either.  Apple's tar reports
-# liblzma/5.4.3; ours will not, until there is a header to compile
-# against.  Everything else matches.
+# lzma comes from the internal SDK, where xz's header is installed:
+# Apple stub the library and publish no header, so nothing could build
+# against it until now.
 # The tree's cmake_minimum_required predates this cmake, which refuses
 # the old policy set outright and names this flag as the way through.
 # Against the internal SDK: Apple's additions to this tree include
@@ -42,7 +40,7 @@ P_CONFIGURE_ARGS=	-DCMAKE_OSX_SYSROOT=${INTERNAL_SDK} \
 		-DENABLE_ZLIB=ON \
 		-DENABLE_BZip2=ON \
 		-DENABLE_ICONV=ON \
-		-DENABLE_LZMA=OFF \
+		-DENABLE_LZMA=ON \
 		-DENABLE_LZ4=OFF \
 		-DENABLE_ZSTD=OFF \
 		-DENABLE_LIBXML2=OFF \

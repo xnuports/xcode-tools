@@ -56,6 +56,7 @@ LIBPLATFORM=	${TOP}/src/apple/libplatform
 EXPAT=		${TOP}/src/apple/expat
 SYSLOG=		${TOP}/src/apple/syslog
 BZIP2=		${TOP}/src/apple/bzip2
+XZ=		${TOP}/src/extras/xz
 LIBPTHREAD=	${TOP}/src/apple/libpthread
 LIBICONV=	${TOP}/src/apple/libiconv
 ZLIB=		${TOP}/src/apple/zlib
@@ -763,7 +764,7 @@ sdk-stubs:
 
 	# and the rest, each its own dylib rather than part of libSystem.
 .for l v in libz 1 libcurl 4 libedit 3 libexpat 1 libbz2 1.0 \
-	     libxml2 2 libxslt 1 libexslt 0
+	     libxml2 2 libxslt 1 libexslt 0 liblzma 5
 	@${TOP}/mk/scripts/make-tbd.sh /usr/lib/${l}.${v}.dylib \
 	    ${SDK_LIB}/${l}.${v}.tbd 2>/dev/null || true
 	@[ -f ${SDK_LIB}/${l}.${v}.tbd ] && \
@@ -1184,6 +1185,17 @@ sdk-internal: sdk-headers sdk-modulemap sdk-stubs sdk-swift sdk-overlay sdk-fram
 	@mkdir -p ${INTERNAL_SDK}/usr/include/System
 	@cp -Rf ${XNU_FAKEROOT}/System/Library/Frameworks/System.framework/Versions/B/PrivateHeaders/. \
 	    ${INTERNAL_SDK}/usr/include/System/ 2>/dev/null || true
+.endif
+
+	# lzma.h and its api directory.  Apple stub liblzma.5 in the public
+	# SDK and ship no header for it at all, so the header goes here and
+	# the public SDK keeps matching theirs.  Without it nothing can
+	# build against a library the system has had all along -- which is
+	# why our tar reports no liblzma where Apple's reports 5.4.3.
+.if exists(${XZ}/src/liblzma/api)
+	@mkdir -p ${INTERNAL_SDK}/usr/include/lzma
+	@cp -f ${XZ}/src/liblzma/api/lzma.h ${INTERNAL_SDK}/usr/include/ 2>/dev/null || true
+	@cp -f ${XZ}/src/liblzma/api/lzma/*.h ${INTERNAL_SDK}/usr/include/lzma/ 2>/dev/null || true
 .endif
 
 	# CommonCrypto's SPI, flattened.  Apple's own projects include
