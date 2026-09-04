@@ -236,3 +236,6 @@
 [submodule "src/apple/libxslt"]
 	path = src/apple/libxslt
 	url = https://github.com/apple-oss-distributions/libxslt.git
+[submodule "src/apple/xar"]
+	path = src/apple/xar
+	url = https://github.com/apple-oss-distributions/xar.git
