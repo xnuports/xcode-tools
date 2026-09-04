@@ -269,3 +269,6 @@
 [submodule "src/apple/IOSerialFamily"]
 	path = src/apple/IOSerialFamily
 	url = https://github.com/apple-oss-distributions/IOSerialFamily.git
+[submodule "src/puredarwin/Foundation"]
+	path = src/puredarwin/Foundation
+	url = https://github.com/somestupidgirl/Foundation.git
