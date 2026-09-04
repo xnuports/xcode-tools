@@ -221,3 +221,6 @@
 [submodule "src/apple/syslog"]
 	path = src/apple/syslog
 	url = https://github.com/apple-oss-distributions/syslog.git
+[submodule "src/apple/bzip2"]
+	path = src/apple/bzip2
+	url = https://github.com/apple-oss-distributions/bzip2.git
