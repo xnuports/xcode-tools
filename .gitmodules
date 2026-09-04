@@ -248,3 +248,6 @@
 [submodule "src/apple/IONetworkingFamily"]
 	path = src/apple/IONetworkingFamily
 	url = https://github.com/apple-oss-distributions/IONetworkingFamily.git
+[submodule "src/apple/IOHIDFamily"]
+	path = src/apple/IOHIDFamily
+	url = https://github.com/apple-oss-distributions/IOHIDFamily.git
