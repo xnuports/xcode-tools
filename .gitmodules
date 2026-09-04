@@ -218,3 +218,6 @@
 [submodule "src/apple/perl"]
 	path = src/apple/perl
 	url = https://github.com/apple-oss-distributions/perl.git
+[submodule "src/apple/syslog"]
+	path = src/apple/syslog
+	url = https://github.com/apple-oss-distributions/syslog.git
