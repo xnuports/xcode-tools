@@ -215,3 +215,6 @@
 [submodule "src/extras/pcre2"]
 	path = src/extras/pcre2
 	url = https://github.com/PCRE2Project/pcre2.git
+[submodule "src/apple/perl"]
+	path = src/apple/perl
+	url = https://github.com/apple-oss-distributions/perl.git
