@@ -54,6 +54,7 @@ LIBPLATFORM=	${TOP}/src/apple/libplatform
 EXPAT=		${TOP}/src/apple/expat
 SYSLOG=		${TOP}/src/apple/syslog
 BZIP2=		${TOP}/src/apple/bzip2
+LIBPTHREAD=	${TOP}/src/apple/libpthread
 LIBICONV=	${TOP}/src/apple/libiconv
 ZLIB=		${TOP}/src/apple/zlib
 CURL=		${TOP}/src/apple/curl
@@ -129,11 +130,6 @@ sdk-headers:
 	# guard swallows the new one, so edits stop taking effect.
 	@grep -q __XNUPORTS_AVAILABILITY_PLATFORMS__ ${SDK_INC}/AvailabilityInternal.h 2>/dev/null || \
 	    cat ${LIBC_EXTRA}/availability-platforms.h >> ${SDK_INC}/AvailabilityInternal.h 2>/dev/null || true
-	# The arity widening has to go on Availability.h instead: that file
-	# includes AvailabilityInternal.h and only then defines
-	# __API_AVAILABLE and friends, so anything set earlier is lost.
-	@grep -q __XNUPORTS_AVAILABILITY_ARITY_H__ ${SDK_INC}/Availability.h 2>/dev/null || \
-	    cat ${LIBC_EXTRA}/availability-arity.h >> ${SDK_INC}/Availability.h 2>/dev/null || true
 
 	# The C library itself.  The subdirectories matter as much as the
 	# top level: sys/_types holds the one-type-per-file headers that
@@ -696,6 +692,30 @@ sdk-stubs:
 	    ${SDK_LIB}/libiconv.2.tbd 2>/dev/null || true
 	@[ -f ${SDK_LIB}/libiconv.2.tbd ] && \
 	    ln -sfn libiconv.2.tbd ${SDK_LIB}/libiconv.tbd || true
+	# usr/lib/system.  Apple's SDK carries a stub for each of libSystem's
+	# sub-libraries and this one carried none, which is not merely a
+	# missing convenience: libSystem.B.tbd names their symbols, but the
+	# linker resolves a re-exported symbol through the library that
+	# actually defines it, so anything calling into one of these failed
+	# to link.  Apple's libarchive calls qtn_file_alloc() and could not
+	# be built.
+	@mkdir -p ${SDK_LIB}/system
+.for l in libcache libcommonCrypto libcompiler_rt libcopyfile \
+	  libcorecrypto libcorecrypto_noasm libcorecrypto_trace libdispatch \
+	  libdyld libkeymgr libkxld liblaunch \
+	  libmacho libmathCommon libmathCommon.A libquarantine \
+	  libremovefile libsystem_asl libsystem_blocks libsystem_c \
+	  libsystem_collections libsystem_configuration libsystem_containermanager libsystem_coreservices \
+	  libsystem_darwin libsystem_darwindirectory libsystem_dnssd libsystem_eligibility \
+	  libsystem_featureflags libsystem_info libsystem_kernel libsystem_m \
+	  libsystem_malloc libsystem_networkextension libsystem_notify libsystem_platform \
+	  libsystem_pthread libsystem_sandbox libsystem_sanitizers libsystem_secinit \
+	  libsystem_symptoms libsystem_trace libsystem_trial libunc \
+	  libunwind libxpc
+	@${TOP}/mk/scripts/make-tbd.sh /usr/lib/system/${l}.dylib \
+	    ${SDK_LIB}/system/${l}.tbd 2>/dev/null || true
+.endfor
+
 	# and the rest, each its own dylib rather than part of libSystem.
 .for l v in libz 1 libcurl 4 libedit 3 libexpat 1 libbz2 1.0
 	@${TOP}/mk/scripts/make-tbd.sh /usr/lib/${l}.${v}.dylib \
@@ -1092,6 +1112,23 @@ sdk-internal: sdk-headers sdk-modulemap sdk-stubs sdk-swift sdk-overlay sdk-fram
 	@cp -f ${SYSLOG}/libsystem_asl.tproj/include/*.h \
 	    ${INTERNAL_SDK}/usr/local/include/ 2>/dev/null || true
 	@rm -f ${INTERNAL_SDK}/usr/local/include/asl.h
+	# usr/include/System, which is how Apple's own projects reach the
+	# System.framework private headers -- libarchive says
+	# #include <System/sys/fsctl.h>.  The fakeroot's PrivateHeaders is
+	# that set; only a partial copy of it was here before.
+.if exists(${XNU_FAKEROOT}/System/Library/Frameworks/System.framework/Versions/B/PrivateHeaders)
+	@mkdir -p ${INTERNAL_SDK}/usr/include/System
+	@cp -Rf ${XNU_FAKEROOT}/System/Library/Frameworks/System.framework/Versions/B/PrivateHeaders/. \
+	    ${INTERNAL_SDK}/usr/include/System/ 2>/dev/null || true
+.endif
+
+	# libpthread's private headers.  The eight public ones are already
+	# in usr/include/pthread; these ten are the SPI beside them, and
+	# Apple's libarchive includes <pthread/private.h>.
+	@mkdir -p ${INTERNAL_SDK}/usr/local/include/pthread
+	@cp -f ${LIBPTHREAD}/private/pthread/*.h \
+	    ${INTERNAL_SDK}/usr/local/include/pthread/ 2>/dev/null || true
+
 	# Reconstructed SPI from lib/apple-spi.  Internal SDK only: these
 	# are interfaces no SDK publishes, so they follow the same rule as
 	# xnu's usr/local/include.
@@ -1140,6 +1177,12 @@ sdk-internal: sdk-headers sdk-modulemap sdk-stubs sdk-swift sdk-overlay sdk-fram
 .for h in stdarg.h stdatomic.h stdbool.h ptrauth.h ptrcheck.h
 	@rm -f ${INTERNAL_SDK}/usr/include/${h}
 .endfor
+	# An earlier version of this file wrote Kernel.framework's
+	# PrivateHeaders to ${INTERNAL_SDK}/${KERNEL_FW}, and KERNEL_FW is
+	# an absolute path -- so the whole of it landed under a Users
+	# directory at the root of this SDK.  The bug is gone; the tree it
+	# made is not, because nothing here ever deletes.
+	@rm -rf ${INTERNAL_SDK}/Users
 
 sdk: sdk-headers sdk-modulemap sdk-stubs sdk-swift sdk-overlay sdk-frameworks \
 	sdk-internal
