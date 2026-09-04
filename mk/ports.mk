@@ -49,6 +49,14 @@ PORTS+=	apple/perl perl usr/bin
 # names the system uses, and mk/port.d/libarchive.mk links them.
 PORTS+=	apple/libarchive libarchive usr/bin
 
+# The XML trio.  libxml2 first: it installs its headers into both SDKs
+# at usr/include/libxml2, where Apple put them and where xml2-config
+# points, and both of the others are built against it.  xar reads a
+# .pkg's table of contents with it.
+PORTS+=	apple/libxml2 libxml2 usr/local/bin
+PORTS+=	apple/libxslt libxslt usr/local/bin
+PORTS+=	apple/xar xar usr/bin
+
 # ------------------------------------------------------------------
 # Go, and ipsw which is written in it.  Neither is something Xcode
 # ships, so both go to usr/local.  Go is pinned to a release tag --
