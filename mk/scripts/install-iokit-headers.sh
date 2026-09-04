@@ -1,17 +1,32 @@
 #!/bin/sh
 #
-# install-iokit-headers.sh IOKITUSER FAKEROOT DEST [MODULEMAP [PRIVATE_DEST]]
+# install-iokit-headers.sh MANIFEST IOKITUSER FAKEROOT SRCROOT DEST
+#                          [MODULEMAP [PRIVATE_DEST]]
+#
+# CC and SDK come from the environment, as they do for
+# emit-darwin-modulemap.sh: the make variable for the compiler carries
+# more than one word, and passing it positionally shifts everything
+# after it.
 #
 # Assemble IOKit.framework's headers.
 #
-# They come from two places.  xnu installs a userland IOKit.framework
-# of its own -- the types, return codes and keys that the kernel and
-# userland agree on -- and that is taken as installed, from the
-# fakeroot.  The rest is IOKitUser, whose layout maps onto the
-# framework by a single rule: each <name>.subproj becomes IOKit/<name>,
-# and what sits at the top becomes IOKit itself.  IOHIDLib.h is in
-# hid.subproj and Apple ship it as hid/IOHIDLib.h; IOPMLib.h is in
-# pwr_mgt.subproj and ships as pwr_mgt/IOPMLib.h, and so on.
+# The set is the manifest, lib/iokit-headers.txt -- the paths Apple
+# ship, recorded because they cannot be derived here.  Each is looked
+# for by name across the sources this tree has, in order:
+#
+#   the fakeroot's IOKit.framework   xnu's own userland install
+#   IOKitUser                        the framework's own project
+#   the driver families              IOStorageFamily, IOHIDFamily, ...
+#
+# and installed at the path the manifest gives, whatever layout the
+# project it came from happens to use: IOMedia.h sits at the top of
+# IOStorageFamily and ships as storage/IOMedia.h, IOSerialKeys.h is
+# under a .kmodproj and ships as serial/IOSerialKeys.h.
+#
+# Searching by name rather than copying trees is deliberate.  The
+# families carry their kernel-side headers too -- IOStorageFamily has
+# IOBlockStorageDriver's internals beside the ones in the SDK -- and
+# Apple ship none of those.
 #
 # IOKitUser also carries its own internal headers, and those are not
 # part of the framework Apple ship: IOKitLibPrivate.h, the *Internal.h
@@ -34,11 +49,13 @@
 
 set -e
 
-IKU=$1
-FAKEROOT=$2
-DEST=$3
-MM=$4
-PRIVATE_DEST=$5
+MANIFEST=$1
+IKU=$2
+FAKEROOT=$3
+SRCROOT=$4
+DEST=$5
+MM=$6
+PRIVATE_DEST=$7
 
 # What Apple do not ship in the public framework.  Matched on the name
 # where the name says so, and listed where it does not.
@@ -62,84 +79,99 @@ is_private() {
 
 mkdir -p "$DEST"
 
-# xnu's installed framework first.  Its own Versions/A/Headers is the
-# header root -- copying from the bundle root would carry the Versions
-# directory into the destination as if it were a header directory.
-FW=$FAKEROOT/System/Library/Frameworks/IOKit.framework/Versions/A/Headers
-if [ -d "$FW" ]; then
-	( cd "$FW" && find . -name '*.h' | while read -r h; do
-		mkdir -p "$DEST/$(dirname "$h")"
-		cp -f "$h" "$DEST/$h"
-	done )
-fi
+# Build one index of every candidate header, by basename, in priority
+# order -- the first hit wins, so xnu's installed copy beats a driver
+# family's source copy of the same name.
+INDEX="$DEST/.index"
+mkdir -p "$DEST"
+: > "$INDEX"
 
-# IOKitUser's top level.
-for h in "$IKU"/*.h; do
-	[ -f "$h" ] || continue
-	b=$(basename "$h")
-	if is_private "$b" ""; then
-		[ -n "$PRIVATE_DEST" ] || continue
-		mkdir -p "$PRIVATE_DEST"
-		cp -f "$h" "$PRIVATE_DEST/"
-	else
-		cp -f "$h" "$DEST/"
-	fi
+for root in \
+    "$FAKEROOT/System/Library/Frameworks/IOKit.framework/Versions/A/Headers" \
+    "$IKU" \
+    "$SRCROOT/xnu/iokit/IOKit" \
+    "$SRCROOT"/IOStorageFamily "$SRCROOT"/IONetworkingFamily \
+    "$SRCROOT"/IOHIDFamily "$SRCROOT"/IOGraphics \
+    "$SRCROOT"/IOFireWireFamily "$SRCROOT"/IOSCSIArchitectureModelFamily \
+    "$SRCROOT"/IOUSBFamily "$SRCROOT"/IOAudioFamily "$SRCROOT"/IOSerialFamily
+do
+	[ -d "$root" ] || continue
+	find "$root" -name '*.h' -not -path '*/.git/*' 2>/dev/null >> "$INDEX"
 done
 
-# Then each subproject, under the name it ships as.
-for d in "$IKU"/*.subproj; do
-	[ -d "$d" ] || continue
-	name=$(basename "$d" .subproj)
-	mkdir -p "$DEST/$name"
-	for h in "$d"/*.h; do
+missing=0
+while read -r h; do
+	case "$h" in ''|\#*) continue;; esac
+	base=${h##*/}
+	src=$(grep -m1 "/$base\$" "$INDEX" 2>/dev/null || true)
+	if [ -z "$src" ]; then
+		missing=$((missing + 1))
+		echo "$h" >> "$DEST/.notfound"
+		continue
+	fi
+	mkdir -p "$DEST/$(dirname "$h")"
+	cp -f "$src" "$DEST/$h"
+done < "$MANIFEST"
+
+# IOKitUser's own internal headers, which Apple ship nowhere, go to the
+# private destination if one was given.
+if [ -n "$PRIVATE_DEST" ]; then
+	for h in "$IKU"/*.h; do
 		[ -f "$h" ] || continue
 		b=$(basename "$h")
-		if is_private "$b" "$name"; then
-			[ -n "$PRIVATE_DEST" ] || continue
+		is_private "$b" "" || continue
+		mkdir -p "$PRIVATE_DEST"
+		cp -f "$h" "$PRIVATE_DEST/"
+	done
+	for d in "$IKU"/*.subproj; do
+		[ -d "$d" ] || continue
+		name=$(basename "$d" .subproj)
+		for h in "$d"/*.h; do
+			[ -f "$h" ] || continue
+			b=$(basename "$h")
+			is_private "$b" "$name" || continue
 			mkdir -p "$PRIVATE_DEST/$name"
 			cp -f "$h" "$PRIVATE_DEST/$name/"
-		else
-			cp -f "$h" "$DEST/$name/"
-		fi
+		done
 	done
-done
+fi
 
-# A header is only declared if everything it reaches is here.
+rm -f "$INDEX"
+
+# A header is only declared if it actually compiles.
 #
-# The families are missing, and a header that reaches into one cannot
-# be part of the module: audio/IOAudioLib.h includes
-# <IOKit/audio/IOAudioTypes.h>, which belongs to IOAudioFamily, so
-# naming it makes the whole module unbuildable.  Such headers are still
-# installed -- they compile for anyone who has the family -- they are
-# simply left undeclared, which is what the Darwin module map does with
-# the headers it cannot take.
+# Two things rule one out.  The families are incomplete, so a header
+# reaching into one that is absent cannot be named -- audio/IOAudioLib.h
+# includes <IOKit/audio/IOAudioTypes.h> and naming it would make the
+# whole module unbuildable.  And several of these compile only inside
+# the kernel: graphics/IOGraphicsEngine.h wants IOOptionBits and
+# IOByteCount, which are IOKit's kernel types and are in no userland
+# header.
 #
-# The reachability has to be transitive.  Checking one level only
-# catches audio/IOAudioLib.h and still declares hid/IOHIDManager.h,
-# which includes hid/IOHIDBase.h, which includes the hid/IOHIDKeys.h
-# that IOHIDFamily owns.  So the set is closed by iterating to a fixed
-# point: anything including something already ruled out is ruled out
-# too, until a pass changes nothing.
+# Reachability alone catches the first and not the second, so each
+# candidate is compiled.  What fails is still installed -- it is a
+# header Apple ship and someone may include it deliberately -- it is
+# just left out of the module map, which is what the Darwin map does
+# with the headers it cannot take.
 BAD="$DEST/.undeclarable"
 : > "$BAD"
 
 ( cd "$DEST" && find . -name '*.h' | sed 's|^\./||' | sort ) > "$DEST/.allheaders"
 
-while :; do
-	changed=0
+if [ -n "$CC" ] && [ -n "$SDK" ]; then
+	probe="$DEST/.probe.c"
 	while read -r h; do
-		grep -qxF "$h" "$BAD" && continue
-		deps=$(sed -n 's|.*<IOKit/\([A-Za-z0-9_./]*\.h\)>.*|\1|p' "$DEST/$h" 2>/dev/null || true)
-		for d in $deps; do
-			if [ ! -f "$DEST/$d" ] || grep -qxF "$d" "$BAD"; then
-				echo "$h" >> "$BAD"
-				changed=1
-				break
-			fi
-		done
+		printf '#include <IOKit/%s>\nint _xt_probe;\n' "$h" > "$probe"
+		# $CC unquoted on purpose: the make variable for the
+		# compiler is more than one word, and quoting it makes
+		# the whole thing a command name that does not exist --
+		# every probe then "fails" and nothing is declared.
+		if ! $CC -isysroot "$SDK" -fsyntax-only "$probe" >/dev/null 2>&1; then
+			echo "$h" >> "$BAD"
+		fi
 	done < "$DEST/.allheaders"
-	[ "$changed" -eq 0 ] && break
-done
+	rm -f "$probe"
+fi
 
 declarable() {
 	! grep -qxF "$1" "$BAD"
@@ -154,7 +186,6 @@ declarable() {
 # module map that names a missing header does not build.  So it is
 # generated: the top level by name, then one explicit submodule per
 # directory, which is the same shape.
-MM=$4
 if [ -n "$MM" ]; then
 	mkdir -p "$(dirname "$MM")"
 	{
@@ -184,4 +215,10 @@ fi
 
 rm -f "$BAD" "$DEST/.allheaders"
 
-echo "    IOKit: $(find "$DEST" -name '*.h' | wc -l | tr -d ' ') headers"
+n=$(find "$DEST" -name '*.h' | wc -l | tr -d ' ')
+if [ "$missing" -gt 0 ]; then
+	echo "    IOKit: $n headers ($missing of the manifest not in this tree)"
+	rm -f "$DEST/.notfound"
+else
+	echo "    IOKit: $n headers"
+fi

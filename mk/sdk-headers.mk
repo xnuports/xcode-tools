@@ -40,6 +40,7 @@ CORESERVICES=	${TOP}/lib/coreservices
 SECURITY=	${TOP}/src/apple/Security
 SEC_FW=		${SDK_FRM}/Security.framework
 IOKITUSER=	${TOP}/src/apple/IOKitUser
+IOKIT_MANIFEST=	${TOP}/lib/iokit-headers.txt
 IOKIT_FW=	${SDK_FRM}/IOKit.framework
 FOUNDATION_FW=	${SDK_FRM}/Foundation.framework
 CS_FW=		${SDK_FRM}/CoreServices.framework
@@ -1111,8 +1112,10 @@ sdk-frameworks:
 	# IOKitUser's own internal headers go to the internal SDK's copy of
 	# the framework, under PrivateHeaders, and not into this one.
 	@rm -rf ${INTERNAL_SDK}/System/Library/Frameworks/IOKit.framework/Versions/A/PrivateHeaders
-	@${TOP}/mk/scripts/install-iokit-headers.sh ${IOKITUSER} \
-	    ${XNU_FAKEROOT} ${IOKIT_FW}/Versions/A/Headers \
+	@CC="${CC}" SDK="${SDK_ROOT}" \
+	    ${TOP}/mk/scripts/install-iokit-headers.sh ${IOKIT_MANIFEST} \
+	    ${IOKITUSER} ${XNU_FAKEROOT} ${TOP}/src/apple \
+	    ${IOKIT_FW}/Versions/A/Headers \
 	    ${IOKIT_FW}/Versions/A/Modules/module.modulemap \
 	    ${INTERNAL_SDK}/System/Library/Frameworks/IOKit.framework/Versions/A/PrivateHeaders
 	@${TOP}/mk/scripts/make-tbd.sh \
