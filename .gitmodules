@@ -206,3 +206,6 @@
 [submodule "src/apple/WebKit"]
 	path = src/apple/WebKit
 	url = https://github.com/apple-oss-distributions/WebKit
+[submodule "src/apple/expat"]
+	path = src/apple/expat
+	url = https://github.com/apple-oss-distributions/expat.git
