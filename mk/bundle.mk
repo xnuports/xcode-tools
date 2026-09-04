@@ -20,6 +20,13 @@ TOP?=		${.CURDIR}
 
 .include "${TOP}/mk/xcodetools.sys.mk"
 
+# A platform description, when one is named.  It is included before the
+# defaults below so its plain assignments stand: everything macOS-shaped
+# here is a ?= for exactly that reason.  See mk/platform.d.
+.if defined(XT_PLATFORM_MK)
+.include "${XT_PLATFORM_MK}"
+.endif
+
 RELEASE=	${TOP}/build/release
 CONFIGS=	${TOP}/configs
 SCRIPTS=	${TOP}/scripts
@@ -59,7 +66,12 @@ TC_DIR=		${RELEASE}/${XCTOOLCHAIN}
 # Version and deployment target are taken from the host SDK, so the
 # emitted bundle is coherent with what the tools would actually build
 # against.  Override on the command line to pin them.
+# != is unconditional, so it has to be guarded: a platform description
+# sets its own version from its own SDK, and DriverKit's numbering is a
+# release behind the rest.
+.if !defined(XT_SDK_VERSION)
 XT_SDK_VERSION!=	xcrun --show-sdk-version 2>/dev/null || echo 0.0
+.endif
 XT_DEPLOYMENT_TARGET?=	${XT_SDK_VERSION}
 XT_SDK_CANONICAL?=	macosx${XT_SDK_VERSION}
 XT_SDK_INTERNAL_CANONICAL?=	macosx${XT_SDK_VERSION}.internal
@@ -79,7 +91,40 @@ XT_SDK_ARCHS?=		arm64 x86_64
 XT_TOOLCHAIN_ID?=	com.apple.dt.toolchain.XcodeDefault
 XT_PLATFORM_ID?=	com.apple.platform.macosx
 
-bundles: bundle-dirs bundle-toolchain bundle-platform bundle-sdk bundle-shims bundle-config bundle-aliases bundle-makefiles
+# The rest of a platform's identity.  These defaulted to macOS's when
+# this file emitted only that one; they are named now because the same
+# recipe emits iPhoneOS, AppleTVOS, WatchOS and DriverKit, each with
+# mk/platform.d/<name>.mk supplying its own.
+XT_FAMILY_ID?=		macosx
+XT_FAMILY_NAME?=	macOS
+XT_PLATFORM_NAME?=	macOS Platform
+XT_DESCRIPTION?=	macOS
+
+# The platforms beside macOS.  Each is the same recipe with a different
+# description: bundle-dirs lays the directories out, bundle-platform
+# writes Info.plist and bundle-sdk the SDKSettings, so what comes out is
+# a bundle of the right shape with an empty SDK inside it -- which is
+# how MacOSX.platform started too.
+#
+# The toolchain is not emitted per platform.  There is one toolchain and
+# every platform builds with it, which is Apple's arrangement as well.
+XT_OTHER_PLATFORMS?=	iPhoneOS AppleTVOS WatchOS DriverKit
+
+platforms:
+.for p in ${XT_OTHER_PLATFORMS}
+	@${MAKE} -f ${TOP}/mk/bundle.mk TOP=${TOP} \
+	    XT_PLATFORM_MK=${TOP}/mk/platform.d/${p}.mk \
+	    bundle-dirs bundle-platform bundle-sdk > /dev/null
+	@${ECHO} "   platform:  ${p}.platform"
+.endfor
+
+# Finder leaves these behind in a tree anyone browses, and they are not
+# build output.  One of them once kept a directory alive through a move
+# that should have emptied it.
+bundle-clean-strays:
+	@find ${RELEASE} -name '.DS_Store' -delete 2>/dev/null || true
+
+bundles: bundle-dirs bundle-toolchain bundle-platform bundle-sdk bundle-shims bundle-config bundle-aliases bundle-makefiles platforms bundle-clean-strays
 	@${ECHO} "== bundles emitted =="
 	@${ECHO} "   toolchain: ${XCTOOLCHAIN} (${XT_TOOLCHAIN_ID})"
 	@${ECHO} "   sdk:       ${XT_SDK}.sdk ${XT_SDK_VERSION} (${XT_SDK_CANONICAL})"
@@ -133,7 +178,32 @@ ${TC_DIR}/ToolchainInfo.plist:
 
 # --- platform ---------------------------------------------------------
 
-bundle-platform: ${PLATFORM_DIR}/Info.plist
+bundle-platform: ${PLATFORM_DIR}/Info.plist ${PLATFORM_DIR}/version.plist
+
+# Apple's platform bundles carry one of these beside Info.plist, and
+# anything reading a platform's version looks here rather than at the
+# SDK's.  ProductBuildVersion is the host's build, which is what their
+# PlatformSupport records too.
+XT_BUILD_VERSION!=	sw_vers -buildVersion 2>/dev/null || echo 0
+
+${PLATFORM_DIR}/version.plist:
+	@mkdir -p ${.TARGET:H}
+	@{ \
+	  echo '<?xml version="1.0" encoding="UTF-8"?>'; \
+	  echo '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">'; \
+	  echo '<plist version="1.0">'; \
+	  echo '<dict>'; \
+	  echo '	<key>CFBundleShortVersionString</key>'; \
+	  echo '	<string>${XT_SDK_VERSION}</string>'; \
+	  echo '	<key>CFBundleVersion</key>'; \
+	  echo '	<string>${XT_SDK_VERSION}</string>'; \
+	  echo '	<key>ProductBuildVersion</key>'; \
+	  echo '	<string>${XT_BUILD_VERSION}</string>'; \
+	  echo '	<key>ProjectName</key>'; \
+	  echo '	<string>PlatformSupport</string>'; \
+	  echo '</dict>'; \
+	  echo '</plist>'; \
+	} > ${.TARGET}
 
 ${PLATFORM_DIR}/Info.plist:
 	@mkdir -p ${.TARGET:H}
@@ -145,7 +215,7 @@ ${PLATFORM_DIR}/Info.plist:
 	  echo '	<key>CFBundleIdentifier</key>'; \
 	  echo '	<string>${XT_PLATFORM_ID}</string>'; \
 	  echo '	<key>CFBundleName</key>'; \
-	  echo '	<string>macOS Platform</string>'; \
+	  echo '	<string>${XT_PLATFORM_NAME}</string>'; \
 	  echo '	<key>CFBundleShortVersionString</key>'; \
 	  echo '	<string>${XT_SDK_VERSION}</string>'; \
 	  echo '	<key>CFBundleVersion</key>'; \
@@ -153,11 +223,11 @@ ${PLATFORM_DIR}/Info.plist:
 	  echo '	<key>Version</key>'; \
 	  echo '	<string>${XT_SDK_VERSION}</string>'; \
 	  echo '	<key>Description</key>'; \
-	  echo '	<string>macOS</string>'; \
+	  echo '	<string>${XT_DESCRIPTION}</string>'; \
 	  echo '	<key>FamilyIdentifier</key>'; \
-	  echo '	<string>macosx</string>'; \
+	  echo '	<string>${XT_FAMILY_ID}</string>'; \
 	  echo '	<key>FamilyName</key>'; \
-	  echo '	<string>macOS</string>'; \
+	  echo '	<string>${XT_FAMILY_NAME}</string>'; \
 	  echo '	<key>Identifier</key>'; \
 	  echo '	<string>${XT_PLATFORM_ID}</string>'; \
 	  echo '	<key>Type</key>'; \
@@ -177,14 +247,14 @@ SDKSETTINGS=	${TOP}/mk/scripts/emit-sdksettings.sh
 
 ${SDK_DIR}/SDKSettings.plist: ${SDKSETTINGS}
 	@mkdir -p ${.TARGET:H}
-	@${SDKSETTINGS} ${XT_SDK_CANONICAL} "macOS ${XT_SDK_VERSION}" \
+	@${SDKSETTINGS} ${XT_SDK_CANONICAL} "${XT_DESCRIPTION} ${XT_SDK_VERSION}" \
 	    ${XT_SDK_VERSION} ${XT_DEPLOYMENT_TARGET} "${XT_SDK_ARCHS}" \
 	    > ${.TARGET}
 
 ${INTERNAL_SDK_DIR}/SDKSettings.plist: ${SDKSETTINGS}
 	@mkdir -p ${.TARGET:H}
 	@${SDKSETTINGS} ${XT_SDK_INTERNAL_CANONICAL} \
-	    "macOS ${XT_SDK_VERSION} Internal" \
+	    "${XT_DESCRIPTION} ${XT_SDK_VERSION} Internal" \
 	    ${XT_SDK_VERSION} ${XT_DEPLOYMENT_TARGET} "${XT_SDK_ARCHS}" \
 	    > ${.TARGET}
 
