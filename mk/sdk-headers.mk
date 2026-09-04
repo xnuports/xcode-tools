@@ -29,6 +29,18 @@ SDK_INC=	${SDK_ROOT}/usr/include
 INTERNAL_SDK=	${RELEASE}/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.Internal.sdk
 INTERNAL_SPI=	${TOP}/src/apple-internals/apple_internal_sdk
 SDK_FRM=	${SDK_ROOT}/System/Library/Frameworks
+INTERNAL_KERNEL_FW=	${INTERNAL_SDK}/System/Library/Frameworks/Kernel.framework
+CF_SRC=		${TOP}/src/apple/CF
+CF_EXTRA=	${TOP}/lib/cf-extra
+CFNET_SRC=	${TOP}/src/apple/CFNetwork/Headers
+CFNET_FW=	${SDK_FRM}/CFNetwork.framework
+CF_FW=		${SDK_FRM}/CoreFoundation.framework
+CORESERVICES=	${TOP}/lib/coreservices
+SECURITY=	${TOP}/src/apple/Security
+SEC_FW=		${SDK_FRM}/Security.framework
+FOUNDATION_FW=	${SDK_FRM}/Foundation.framework
+CS_FW=		${SDK_FRM}/CoreServices.framework
+FSE_FW=		${CS_FW}/Versions/A/Frameworks/FSEvents.framework
 KERNEL_FW=	${SDK_FRM}/Kernel.framework
 XNU_FAKEROOT=	${TOP}/tools/darwin-xnu-build/fakeroot
 
@@ -37,6 +49,12 @@ LIBC_EXTRA=	${TOP}/lib/libc-extra
 XPC_HEADERS=	${TOP}/lib/xpc
 OBJC4=		${TOP}/src/apple/objc4
 LIBINFO=	${TOP}/src/apple/libinfo
+LIBPLATFORM=	${TOP}/src/apple/libplatform
+EXPAT=		${TOP}/src/apple/expat
+LIBICONV=	${TOP}/src/apple/libiconv
+ZLIB=		${TOP}/src/apple/zlib
+CURL=		${TOP}/src/apple/curl
+LIBEDIT=	${TOP}/src/apple/libedit
 XNU=		${TOP}/src/apple/xnu
 LIBPTHREAD=	${TOP}/src/apple/libpthread
 LIBMALLOC=	${TOP}/src/apple/libmalloc
@@ -102,7 +120,17 @@ sdk-headers:
 	# compile without it.  The rest are appended to the installed
 	# AvailabilityInternal.h, which is where they have to be, since
 	# dyld.h includes <Availability.h> and nothing else.
-	@cat ${LIBC_EXTRA}/availability-platforms.h >> ${SDK_INC}/AvailabilityInternal.h 2>/dev/null || true
+	# Appended, not included -- see the header.  Guarded because this
+	# SDK is assembled incrementally: without the check every build
+	# adds another copy, and once a stale copy is in place its include
+	# guard swallows the new one, so edits stop taking effect.
+	@grep -q __XNUPORTS_AVAILABILITY_PLATFORMS__ ${SDK_INC}/AvailabilityInternal.h 2>/dev/null || \
+	    cat ${LIBC_EXTRA}/availability-platforms.h >> ${SDK_INC}/AvailabilityInternal.h 2>/dev/null || true
+	# The arity widening has to go on Availability.h instead: that file
+	# includes AvailabilityInternal.h and only then defines
+	# __API_AVAILABLE and friends, so anything set earlier is lost.
+	@grep -q __XNUPORTS_AVAILABILITY_ARITY_H__ ${SDK_INC}/Availability.h 2>/dev/null || \
+	    cat ${LIBC_EXTRA}/availability-arity.h >> ${SDK_INC}/Availability.h 2>/dev/null || true
 
 	# The C library itself.  The subdirectories matter as much as the
 	# top level: sys/_types holds the one-type-per-file headers that
@@ -114,6 +142,17 @@ sdk-headers:
 	# MacTypes.h is what OSStatus lives in; neither submodule can be
 	# edited to add them.
 	@cp -f ${LIBC_EXTRA}/*.h ${SDK_INC}/ 2>/dev/null || true
+
+	# libplatform's public headers.  Libc does not carry these -- the
+	# project owns setjmp.h, ucontext.h, the OSAtomic family and the
+	# os/ locking headers -- and without them the SDK has no setjmp.h
+	# at all, which stops anything including <CoreFoundation/...>.
+	# exclavekit/ is deliberately skipped: Apple ships none of it.
+	@cp -f ${LIBPLATFORM}/include/*.h ${SDK_INC}/ 2>/dev/null || true
+	@mkdir -p ${SDK_INC}/os ${SDK_INC}/libkern
+	@cp -f ${LIBPLATFORM}/include/os/*.h ${SDK_INC}/os/ 2>/dev/null || true
+	# NB: libplatform's libkern/ headers are installed further down --
+	# libkern is replaced wholesale from the fakeroot after this point.
 
 	# XPC's public headers.  Apple publishes no source for libxpc and
 	# no open-source release of its headers, but the implementation is
@@ -143,6 +182,43 @@ sdk-headers:
 	  lookup.subproj/bootparams.h gen.subproj/ifaddrs.h
 	@cp -f ${LIBINFO}/${h} ${SDK_INC}/ 2>/dev/null || true
 .endfor
+
+	# libiconv's public header.  Apple ships iconv.h and a libiconv
+	# stub in the SDK; this tree had neither, which is how building
+	# Apple's own git against this SDK stopped at "'iconv.h' file not
+	# found".  The implementation is /usr/lib/libiconv.2.dylib rather
+	# than libSystem, so it wants a stub of its own -- see sdk-stubs.
+	@cp -f ${LIBICONV}/citrus/iconv.h ${SDK_INC}/ 2>/dev/null || true
+
+	# The other libraries Apple ships headers for and this tree did
+	# not.  Each is a separate open-source release and a separate
+	# system dylib, so each needs its header here and its stub in
+	# sdk-stubs.  Building Apple's own git against this SDK is what
+	# found them, one at a time: iconv.h, then zlib.h, then the rest.
+	@cp -f ${ZLIB}/zlib/zlib.h ${ZLIB}/zlib/zconf.h ${SDK_INC}/ 2>/dev/null || true
+	@mkdir -p ${SDK_INC}/curl
+	@cp -f ${CURL}/curl/include/curl/*.h ${SDK_INC}/curl/ 2>/dev/null || true
+	# libDER, which xnu vendors in EXTERNAL_HEADERS and Apple ships in
+	# usr/include.  Apple installs two of the eleven headers there --
+	# the type and the config -- and that is the set Security's oids.h
+	# reaches for, so it is the set installed here.
+	@mkdir -p ${SDK_INC}/libDER
+.for h in DERItem.h libDER_config.h
+	@cp -f ${XNU}/EXTERNAL_HEADERS/libDER/${h} ${SDK_INC}/libDER/ 2>/dev/null || true
+.endfor
+	@printf 'module libDER [system] {\n\
+    umbrella "."\n\
+\n\
+    module * { export * }\n\
+}\n' > ${SDK_INC}/libDER/module.modulemap
+
+	# expat: the dylib is already stubbed below, and Apple ships the
+	# header in usr/include, but nothing installed it until now.
+	@cp -f ${EXPAT}/expat/lib/expat.h ${EXPAT}/expat/lib/expat_external.h \
+	    ${SDK_INC}/ 2>/dev/null || true
+	@mkdir -p ${SDK_INC}/editline
+	@cp -f ${LIBEDIT}/src/histedit.h ${SDK_INC}/ 2>/dev/null || true
+	@cp -f ${LIBEDIT}/src/editline/readline.h ${SDK_INC}/editline/ 2>/dev/null || true
 
 	# The Objective-C runtime's public headers.  os/object.h includes
 	# objc/NSObject.h once OS_OBJECT_USE_OBJC is on, which is what the
@@ -207,6 +283,27 @@ sdk-headers:
 	# written against the fakeroot's Availability generation, which
 	# cannot be installed here without breaking sys/qos.h.
 	@cp -f ${LIBC_EXTRA}/os/availability.h ${SDK_INC}/os/ 2>/dev/null || true
+	# Libc's own os/ headers, which Apple's public SDK does not carry
+	# -- they are SPI.  os/assumes.h is the one Apple's git wants, and
+	# this is a developer SDK for a toolset meant to use private
+	# interfaces, so all six go in.
+	@cp -f ${LIBC}/os/*.h ${SDK_INC}/os/ 2>/dev/null || true
+	# assumes.h includes os/log_private.h, which is not Libc's: the
+	# userland one comes from libtrace, which Apple does not publish,
+	# and xnu's libkern carries a copy.  base_private.h and
+	# feature_private.h come from the internal-SDK reconstruction,
+	# which is where the headers Apple publishes no source for live.
+	# Named one by one rather than copying libkern/os wholesale --
+	# most of what is in there is the kernel's, and adding headers to
+	# this SDK has twice been enough to disturb the module map.
+	# NB: xnu's libkern/os/log_private.h is the *kernel* variant.  The
+	# userspace one is libtrace's and is not published.  Installing the
+	# kernel copy into usr/include only misleads -- it has none of the
+	# os_log_pack ABI userspace callers want -- so it stays in
+	# Kernel.framework, where the fakeroot already puts it.
+.for h in base_private.h feature_private.h
+	@cp -f ${INTERNAL_SPI}/usr/include/os/${h} ${SDK_INC}/os/ 2>/dev/null || true
+.endfor
 .if exists(${XNU_FAKEROOT}/usr/include/os/availability.h)
 	# base.h, atomic.h and overflow.h from xnu's libkern above are the
 	# kernel's, and the kernel's base.h does not pull in API_AVAILABLE
@@ -472,6 +569,11 @@ sdk-headers:
 	@mkdir -p ${SDK_INC}/${d}
 	@cp -Rf ${XNU_FAKEROOT}/usr/include/${d}/. ${SDK_INC}/${d}/ 2>/dev/null || true
 .endfor
+	# The fakeroot's libkern is xnu's, and the OSAtomic family is not
+	# xnu's -- it belongs to libplatform.  Apple ships both in
+	# usr/include/libkern, so put libplatform's back now that the
+	# wholesale replacement above is done.
+	@cp -f ${LIBPLATFORM}/include/libkern/*.h ${SDK_INC}/libkern/ 2>/dev/null || true
 	# mach/ comes from the fakeroot's two userland trees, not from
 	# xnu's source.  The source tree's headers are the kernel's build
 	# of them: its mach/message.h and mach/vm_param.h include
@@ -566,6 +668,19 @@ sdk-stubs:
 	@${TOP}/mk/scripts/make-tbd.sh /usr/lib/libc++abi.dylib \
 	    ${SDK_LIB}/libc++abi.tbd \
 	    ${SDK_INC} 2>/dev/null || true
+	# libiconv is its own dylib and not part of libSystem, so nothing
+	# else in this SDK stubs it.
+	@${TOP}/mk/scripts/make-tbd.sh /usr/lib/libiconv.2.dylib \
+	    ${SDK_LIB}/libiconv.2.tbd 2>/dev/null || true
+	@[ -f ${SDK_LIB}/libiconv.2.tbd ] && \
+	    ln -sfn libiconv.2.tbd ${SDK_LIB}/libiconv.tbd || true
+	# and the rest, each its own dylib rather than part of libSystem.
+.for l v in libz 1 libcurl 4 libedit 3 libexpat 1
+	@${TOP}/mk/scripts/make-tbd.sh /usr/lib/${l}.${v}.dylib \
+	    ${SDK_LIB}/${l}.${v}.tbd 2>/dev/null || true
+	@[ -f ${SDK_LIB}/${l}.${v}.tbd ] && \
+	    ln -sfn ${l}.${v}.tbd ${SDK_LIB}/${l}.tbd || true
+.endfor
 	@[ -f ${SDK_LIB}/libobjc.A.tbd ] && \
 	    ln -sfn libobjc.A.tbd ${SDK_LIB}/libobjc.tbd || true
 
@@ -628,6 +743,20 @@ sdk-swift:
 # tree -- every submodule it writes is one whose header is actually
 # there -- so running it earlier would describe a smaller SDK than the
 # one being built.
+	# xnu's EXTERNAL_HEADERS/ vendors copies of headers the compiler
+	# itself provides, for the kernel build.  They are Kernel.framework
+	# material; Apple's SDK ships none of them in usr/include, and when
+	# one lands there it shadows the compiler's real copy -- clang's
+	# stdatomic.h found through -isysroot rather than the resource dir
+	# yields no memory_order at all.  So take them back out.
+.for h in stdarg.h stdatomic.h stdbool.h ptrauth.h ptrcheck.h
+	@rm -f ${SDK_INC}/${h}
+.endfor
+	# Likewise os/log_private.h: earlier builds installed xnu's kernel
+	# variant here.  The userspace one is SPI and lives in the internal
+	# SDK; the public SDK should carry neither.
+	@rm -f ${SDK_INC}/os/log_private.h
+
 sdk-modulemap: sdk-headers
 	@${ECHO} "sdk: generating the Darwin module map"
 	@CC="${CC}" ${TOP}/mk/scripts/emit-darwin-modulemap.sh ${SDK_INC} \
@@ -750,7 +879,180 @@ sdk-overlay:
 # complete.  They go on last, so nothing derived from real source is
 # ever overwritten by a reconstruction, and what is missing stays
 # missing rather than being papered over.
-sdk-internal: sdk-headers sdk-modulemap sdk-stubs sdk-swift sdk-overlay
+sdk-frameworks:
+	@${ECHO} "sdk: assembling CoreFoundation.framework"
+	# Cleared first: the header install skips what is already there,
+	# and CFAvailability.h is appended to below.  Without this an
+	# earlier build's copy of that appended block survives, its include
+	# guard swallows the new one, and edits to it silently do nothing.
+	@rm -rf ${CF_FW}/Versions/A/Headers
+	@mkdir -p ${CF_FW}/Versions/A/Headers ${CF_FW}/Versions/A/Modules
+	@${TOP}/mk/scripts/install-framework-headers.sh ${CF_SRC} \
+	    ${CF_FW}/Versions/A/Headers
+	# The annotation macros the drop predates -- see the header.
+	@cat ${CF_EXTRA}/cf-nullability.h \
+	    >> ${CF_FW}/Versions/A/Headers/CFAvailability.h
+	# Apple's own modulemap, less the "requires !exclavekit" on
+	# CFPlugInCOM: exclavekit is not a feature this tree's clang knows,
+	# and naming an unknown feature makes the module unbuildable rather
+	# than conditionally absent.
+	@printf 'framework module CoreFoundation [system] {\n\
+    umbrella header "CoreFoundation.h"\n\
+    explicit module CFPlugInCOM {\n\
+        header "CFPlugInCOM.h"\n\
+        export *\n\
+    }\n\
+\n\
+    export *\n\
+    module * {\n\
+        export *\n\
+    }\n\
+}\n' > ${CF_FW}/Versions/A/Modules/module.modulemap
+	# The framework binary itself is the running system's -- this SDK
+	# stubs what it links against rather than shipping copies, the same
+	# as it does for libSystem.
+	@${TOP}/mk/scripts/make-tbd.sh \
+	    /System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation \
+	    ${CF_FW}/Versions/A/CoreFoundation.tbd 2>/dev/null || true
+	@ln -sfn A ${CF_FW}/Versions/Current
+	@ln -sfn Versions/Current/Headers ${CF_FW}/Headers
+	@ln -sfn Versions/Current/Modules ${CF_FW}/Modules
+	@ln -sfn Versions/Current/CoreFoundation.tbd ${CF_FW}/CoreFoundation.tbd
+
+	@${ECHO} "sdk: assembling CFNetwork.framework"
+	# Apple's CFNetwork drop stops at CFNetwork-129.20, which is from
+	# 2005, so this is the 10 public headers that release had.  Apple's
+	# SDK ships 12: CFNetworkErrors.h and CFProxySupport.h came later
+	# and are in no published source.  The stub is the running system's,
+	# so the whole modern API is there to link against -- it is only the
+	# declarations that stop in 2005.
+	@rm -rf ${CFNET_FW}/Versions/A/Headers
+	@mkdir -p ${CFNET_FW}/Versions/A/Headers ${CFNET_FW}/Versions/A/Modules
+	@${TOP}/mk/scripts/install-framework-headers.sh ${CFNET_SRC} \
+	    ${CFNET_FW}/Versions/A/Headers CFNetwork
+	# Two fixups, both consequences of the drop's age.
+	#
+	# CFHost.h and CFNetServices.h declare their callbacks with
+	# CALLBACK_API_C, which is ConditionalMacros.h's, and nothing in
+	# the drop includes that header -- in 2005 it arrived through
+	# Carbon.  Both include CFNetworkDefs.h first, so it goes there.
+	#
+	@printf '\n#include <ConditionalMacros.h>\n' \
+	    >> ${CFNET_FW}/Versions/A/Headers/CFNetworkDefs.h
+	# The same two wrap their structures in "#pragma options
+	# align=mac68k", which clang rejects outright on arm64.  It is
+	# translated to #pragma pack rather than dropped: measured against
+	# Apple's own SDK, CFHostClientContext is 40 bytes either way, but
+	# Apple's carries an alignment of 2 and the unpacked version has 8.
+	# The members are all pointer-sized so no offset moves, but the
+	# type's alignment is part of its ABI, and matching it is the point
+	# of this tree.  align=reset becomes the matching pop.
+.for h in CFHost.h CFNetServices.h
+	@LC_ALL=C sed -i '' \
+	    -e 's|^#pragma options align=mac68k|#pragma pack(push, 2)|' \
+	    -e 's|^#pragma options align=reset|#pragma pack(pop)|' \
+	    ${CFNET_FW}/Versions/A/Headers/${h} 2>/dev/null || true
+.endfor
+	@printf 'framework module CFNetwork [system] {\n\
+    umbrella header "CFNetwork.h"\n\
+    export *\n\
+    module * {\n\
+        export *\n\
+    }\n\
+}\n' > ${CFNET_FW}/Versions/A/Modules/module.modulemap
+	@${TOP}/mk/scripts/make-tbd.sh \
+	    /System/Library/Frameworks/CFNetwork.framework/Versions/A/CFNetwork \
+	    ${CFNET_FW}/Versions/A/CFNetwork.tbd 2>/dev/null || true
+	@ln -sfn A ${CFNET_FW}/Versions/Current
+	@ln -sfn Versions/Current/Headers ${CFNET_FW}/Headers
+	@ln -sfn Versions/Current/Modules ${CFNET_FW}/Modules
+	@ln -sfn Versions/Current/CFNetwork.tbd ${CFNET_FW}/CFNetwork.tbd
+
+	@${ECHO} "sdk: assembling CoreServices.framework"
+	@mkdir -p ${CS_FW}/Versions/A/Headers ${CS_FW}/Versions/A/Modules \
+	    ${FSE_FW}/Versions/A/Headers ${FSE_FW}/Versions/A/Modules
+	@cp -f ${CORESERVICES}/CoreServices/CoreServices.h \
+	    ${CS_FW}/Versions/A/Headers/
+	@cp -f ${CORESERVICES}/FSEvents/FSEvents.h \
+	    ${FSE_FW}/Versions/A/Headers/
+	@printf 'framework module CoreServices [system] {\n\
+    umbrella header "CoreServices.h"\n\
+    export *\n\
+    module * {\n\
+        export *\n\
+    }\n\
+}\n' > ${CS_FW}/Versions/A/Modules/module.modulemap
+	@printf 'framework module FSEvents [system] {\n\
+    umbrella header "FSEvents.h"\n\
+    export *\n\
+    module * {\n\
+        export *\n\
+    }\n\
+}\n' > ${FSE_FW}/Versions/A/Modules/module.modulemap
+	# FSEvents ships inside CoreServices, so both get a stub: the
+	# umbrella re-exports what the subframework defines, and a linker
+	# given -framework CoreServices has to resolve the FSEvents
+	# symbols through it.
+	@${TOP}/mk/scripts/make-tbd.sh \
+	    /System/Library/Frameworks/CoreServices.framework/Versions/A/CoreServices \
+	    ${CS_FW}/Versions/A/CoreServices.tbd 2>/dev/null || true
+	@${TOP}/mk/scripts/make-tbd.sh \
+	    /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/FSEvents.framework/Versions/A/FSEvents \
+	    ${FSE_FW}/Versions/A/FSEvents.tbd 2>/dev/null || true
+	@ln -sfn A ${CS_FW}/Versions/Current
+	@ln -sfn Versions/Current/Headers ${CS_FW}/Headers
+	@ln -sfn Versions/Current/Modules ${CS_FW}/Modules
+	@ln -sfn Versions/Current/Frameworks ${CS_FW}/Frameworks
+	@ln -sfn Versions/Current/CoreServices.tbd ${CS_FW}/CoreServices.tbd
+	@ln -sfn A ${FSE_FW}/Versions/Current
+	@ln -sfn Versions/Current/Headers ${FSE_FW}/Headers
+	@ln -sfn Versions/Current/Modules ${FSE_FW}/Modules
+	@ln -sfn Versions/Current/FSEvents.tbd ${FSE_FW}/FSEvents.tbd
+
+	@${ECHO} "sdk: assembling Security.framework"
+	# Security's own build stages its public headers into
+	# header_symlinks/Security, which is the set the framework
+	# installs -- so take it rather than trying to work out which of
+	# the source tree's headers are public.
+	@mkdir -p ${SEC_FW}/Versions/A/Headers ${SEC_FW}/Versions/A/Modules
+	@cp -Lf ${SECURITY}/header_symlinks/Security/*.h \
+	    ${SEC_FW}/Versions/A/Headers/ 2>/dev/null || true
+	# macOS/ carries the platform-only half of the same public set --
+	# the CSSM headers above all -- and SecCertificate.h includes
+	# Security/cssmtype.h straight out of it.
+	@cp -Lf ${SECURITY}/header_symlinks/macOS/Security/*.h \
+	    ${SEC_FW}/Versions/A/Headers/ 2>/dev/null || true
+	@printf 'framework module Security [system] {\n\
+    umbrella header "Security.h"\n\
+    export *\n\
+    module * {\n\
+        export *\n\
+    }\n\
+}\n' > ${SEC_FW}/Versions/A/Modules/module.modulemap
+	@${TOP}/mk/scripts/make-tbd.sh \
+	    /System/Library/Frameworks/Security.framework/Versions/A/Security \
+	    ${SEC_FW}/Versions/A/Security.tbd 2>/dev/null || true
+	@ln -sfn A ${SEC_FW}/Versions/Current
+	@ln -sfn Versions/Current/Headers ${SEC_FW}/Headers
+	@ln -sfn Versions/Current/Modules ${SEC_FW}/Modules
+	@ln -sfn Versions/Current/Security.tbd ${SEC_FW}/Security.tbd
+
+	@${ECHO} "sdk: stubbing Foundation.framework"
+	# Stub only, no headers.  Foundation's headers are Objective-C and
+	# Apple publishes none of them; reimplementing them is its own
+	# project.  What is needed here is narrower: Apple's git links
+	# git-credential-osxkeychain against Foundation without including
+	# any of it, so the framework has to be linkable and nothing more.
+	# A .tbd of the running system's Foundation is exactly that, and it
+	# is the same thing this SDK does for libSystem.
+	@mkdir -p ${FOUNDATION_FW}/Versions/A
+	@${TOP}/mk/scripts/make-tbd.sh \
+	    /System/Library/Frameworks/Foundation.framework/Versions/C/Foundation \
+	    ${FOUNDATION_FW}/Versions/A/Foundation.tbd 2>/dev/null || true
+	@ln -sfn A ${FOUNDATION_FW}/Versions/Current
+	@ln -sfn Versions/Current/Foundation.tbd ${FOUNDATION_FW}/Foundation.tbd
+
+sdk-internal: sdk-headers sdk-modulemap sdk-stubs sdk-swift sdk-overlay sdk-frameworks
 	@${ECHO} "sdk: assembling MacOSX.Internal.sdk"
 	@mkdir -p ${INTERNAL_SDK}/usr/include ${INTERNAL_SDK}/usr/lib \
 	    ${INTERNAL_SDK}/usr/local/include ${INTERNAL_SDK}/usr/local/lib \
@@ -759,6 +1061,31 @@ sdk-internal: sdk-headers sdk-modulemap sdk-stubs sdk-swift sdk-overlay
 .for d in usr System
 	@cp -Rf ${SDK_ROOT}/${d}/. ${INTERNAL_SDK}/${d}/ 2>/dev/null || true
 .endfor
+	# xnu installs its SPI under usr/local/include, and Apple's public
+	# SDK ships none of it -- that directory is empty in Xcode's
+	# MacOSX.sdk.  So the whole tree goes here and only here: firehose,
+	# machine/cpu_capabilities.h, the private mach and sys headers, the
+	# lot.  This is what makes the internal SDK unrestricted.
+	# The userspace os/log_private.h, reconstructed -- see the header.
+	# SPI, so it goes here and not in the public SDK.
+	@mkdir -p ${INTERNAL_SDK}/usr/include/os
+	@cp -f ${LIBC_EXTRA}/os/log_private.h \
+	    ${INTERNAL_SDK}/usr/include/os/ 2>/dev/null || true
+	# Apple's public SDK carries Kernel.framework with Headers only --
+	# PrivateHeaders ships in the KDK.  The internal SDK is where they
+	# belong here.
+.if exists(${XNU_FAKEROOT}/System/Library/Frameworks/Kernel.framework/Versions/A/PrivateHeaders)
+	@${ECHO} "sdk: adding Kernel.framework PrivateHeaders"
+	@mkdir -p ${INTERNAL_KERNEL_FW}/Versions/A/PrivateHeaders
+	@cp -Rf ${XNU_FAKEROOT}/System/Library/Frameworks/Kernel.framework/Versions/A/PrivateHeaders/. \
+	    ${INTERNAL_KERNEL_FW}/Versions/A/PrivateHeaders/ 2>/dev/null || true
+.endif
+.if exists(${XNU_FAKEROOT}/usr/local/include)
+	@${ECHO} "sdk: adding xnu's SPI (usr/local/include)"
+	@mkdir -p ${INTERNAL_SDK}/usr/local/include
+	@cp -Rf ${XNU_FAKEROOT}/usr/local/include/. \
+	    ${INTERNAL_SDK}/usr/local/include/ 2>/dev/null || true
+.endif
 .if exists(${INTERNAL_SPI}/usr/include)
 	@${ECHO} "sdk: adding the reconstructed SPI headers"
 .for d in usr System
@@ -767,8 +1094,14 @@ sdk-internal: sdk-headers sdk-modulemap sdk-stubs sdk-swift sdk-overlay
 .else
 	@${ECHO} "sdk: no lib/apple_internal_sdk; the internal SDK is the public one"
 .endif
+	# this SDK is assembled with cp -Rf, which merges and never deletes,
+	# so a header pruned upstream lives on here from an earlier build.
+.for h in stdarg.h stdatomic.h stdbool.h ptrauth.h ptrcheck.h
+	@rm -f ${INTERNAL_SDK}/usr/include/${h}
+.endfor
 
-sdk: sdk-headers sdk-modulemap sdk-stubs sdk-swift sdk-overlay sdk-internal
+sdk: sdk-headers sdk-modulemap sdk-stubs sdk-swift sdk-overlay sdk-frameworks \
+	sdk-internal
 
 .PHONY: sdk sdk-headers sdk-modulemap sdk-stubs sdk-swift sdk-overlay \
-	sdk-internal xnu-headers
+	sdk-frameworks sdk-internal xnu-headers

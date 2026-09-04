@@ -589,7 +589,11 @@ for h in $(ls "${INC}/os" 2>/dev/null | grep '[.]h$' | sort); do
 	# which is Darwin's.  It only became compilable when this SDK
 	# started carrying the xpc headers, and being compilable is what
 	# drew it into the module.
-	case "${h}" in workgroup*.h|clock.h|trace.h) continue;; esac
+	# security_config.h is the same shape again: it includes
+	# <sys/types.h>, which is Darwin's, and Darwin depends on os.
+	# Apple ships the header too, and their os.modulemap does not
+	# name it either.
+	case "${h}" in workgroup*.h|clock.h|trace.h|security_config.h) continue;; esac
 	# os owns the rest; Darwin reaches lock and base through the
 	# wrappers written above.
 	is_foundation "os/${h}" && continue
