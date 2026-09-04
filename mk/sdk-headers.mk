@@ -44,8 +44,12 @@ IOKIT_MANIFEST=	${TOP}/lib/iokit-headers.txt
 WEBKIT=		${TOP}/src/apple/WebKit
 WEBKIT_MANIFEST=	${TOP}/lib/webkit-headers.txt
 WEBKIT_FW=	${SDK_FRM}/WebKit.framework
+JSC_MANIFEST=	${TOP}/lib/javascriptcore-headers.txt
+JSC_FW=		${SDK_FRM}/JavaScriptCore.framework
 IOKIT_FW=	${SDK_FRM}/IOKit.framework
 FOUNDATION_FW=	${SDK_FRM}/Foundation.framework
+PD_FOUNDATION=	${TOP}/src/puredarwin/Foundation
+FOUNDATION_EXTRA=	${TOP}/lib/foundation-extra
 CS_FW=		${SDK_FRM}/CoreServices.framework
 FSE_FW=		${CS_FW}/Versions/A/Frameworks/FSEvents.framework
 KERNEL_FW=	${SDK_FRM}/Kernel.framework
@@ -989,6 +993,9 @@ sdk-frameworks:
 	@mkdir -p ${CF_FW}/Versions/A/Headers ${CF_FW}/Versions/A/Modules
 	@${TOP}/mk/scripts/install-framework-headers.sh ${CF_SRC} \
 	    ${CF_FW}/Versions/A/Headers
+	# CFCGTypes.h, which the drop does not carry at all -- see the
+	# header.  Foundation's NSGeometry.h includes it.
+	@cp -f ${CF_EXTRA}/CFCGTypes.h ${CF_FW}/Versions/A/Headers/ 2>/dev/null || true
 	# The annotation macros the drop predates -- see the header.
 	@cat ${CF_EXTRA}/cf-nullability.h \
 	    >> ${CF_FW}/Versions/A/Headers/CFAvailability.h
@@ -1109,6 +1116,63 @@ sdk-frameworks:
 	@ln -sfn Versions/Current/Modules ${FSE_FW}/Modules
 	@ln -sfn Versions/Current/FSEvents.tbd ${FSE_FW}/FSEvents.tbd
 
+	@${ECHO} "sdk: assembling Foundation.framework"
+	# Apple publish none of Foundation's headers, so these are
+	# PureDarwin's reimplementation -- see src/puredarwin/Foundation.
+	# 32 of Apple's 173, the value types and the file and URL classes.
+	#
+	# The set is whatever the source has rather than a recorded
+	# manifest: this is a reimplementation being worked on alongside
+	# this tree, so what it provides is expected to grow, and a list
+	# here would only go stale.  They install flat, which is how they
+	# refer to each other -- <Foundation/NSString.h>.
+	#
+	# The library is still the system's, stubbed.  These headers
+	# describe a Foundation that is not built yet.
+	@mkdir -p ${FOUNDATION_FW}/Versions/A/Modules ${OVERLAY_OBJ}
+.if exists(${PD_FOUNDATION}/Runtime.subproj/Foundation.h)
+	@find ${PD_FOUNDATION} -name '*.h' -not -path '*/.git/*' | \
+	    sed 's|.*/||' | sort -u > ${OVERLAY_OBJ}/foundation-headers.txt
+	@CC="${CC}" SDK="${SDK_ROOT}" \
+	    ${TOP}/mk/scripts/install-framework-manifest.sh \
+	    ${OVERLAY_OBJ}/foundation-headers.txt \
+	    ${FOUNDATION_FW}/Versions/A/Headers \
+	    ${FOUNDATION_FW}/Versions/A/Modules/module.modulemap \
+	    Foundation.h objective-c \
+	    ${PD_FOUNDATION}
+	# The NS_ annotation macros the reimplementation has not got to --
+	# see the header.  Appended before anything is asked to compile.
+	@cat ${FOUNDATION_EXTRA}/foundation-annotations.h \
+	    >> ${FOUNDATION_FW}/Versions/A/Headers/NSObjCRuntime.h
+.endif
+	@${TOP}/mk/scripts/make-tbd.sh \
+	    /System/Library/Frameworks/Foundation.framework/Versions/C/Foundation \
+	    ${FOUNDATION_FW}/Versions/A/Foundation.tbd 2>/dev/null || true
+	@ln -sfn A ${FOUNDATION_FW}/Versions/Current
+	@ln -sfn Versions/Current/Headers ${FOUNDATION_FW}/Headers
+	@ln -sfn Versions/Current/Modules ${FOUNDATION_FW}/Modules
+	@ln -sfn Versions/Current/Foundation.tbd ${FOUNDATION_FW}/Foundation.tbd
+
+	@${ECHO} "sdk: assembling JavaScriptCore.framework"
+	# All fifteen of Apple's are under Source/JavaScriptCore/API.  This
+	# comes before WebKit because 127 of WebKit's headers include
+	# <JavaScriptCore/JSBase.h>.
+	@mkdir -p ${JSC_FW}/Versions/A/Modules
+	@CC="${CC}" SDK="${SDK_ROOT}" \
+	    ${TOP}/mk/scripts/install-framework-manifest.sh ${JSC_MANIFEST} \
+	    ${JSC_FW}/Versions/A/Headers \
+	    ${JSC_FW}/Versions/A/Modules/module.modulemap \
+	    JavaScriptCore.h objective-c \
+	    ${WEBKIT}/Source/JavaScriptCore/API \
+	    ${WEBKIT}/Source/JavaScriptCore
+	@${TOP}/mk/scripts/make-tbd.sh \
+	    /System/Library/Frameworks/JavaScriptCore.framework/Versions/A/JavaScriptCore \
+	    ${JSC_FW}/Versions/A/JavaScriptCore.tbd 2>/dev/null || true
+	@ln -sfn A ${JSC_FW}/Versions/Current
+	@ln -sfn Versions/Current/Headers ${JSC_FW}/Headers
+	@ln -sfn Versions/Current/Modules ${JSC_FW}/Modules
+	@ln -sfn Versions/Current/JavaScriptCore.tbd ${JSC_FW}/JavaScriptCore.tbd
+
 	@${ECHO} "sdk: assembling WebKit.framework"
 	# All 215 of Apple's public headers are in this source; they are
 	# just spread across it by role -- the modern API under
@@ -1116,16 +1180,35 @@ sdk-frameworks:
 	# under Source/WebKitLegacy/mac -- so the manifest says which ones
 	# and where they go.
 	#
+	# The roots are ordered because nine of the names appear more than
+	# once.  There are two WebKitAvailability.h, and the one under
+	# JavaScriptCore defines none of the WEBKIT_*_MAC macros the DOM
+	# headers annotate with; taking it left 125 headers unable to
+	# parse.  The directories that vend public headers come first.
+	#
+	# The WebKitLegacy and WebCore imports are rewritten to WebKit's,
+	# as Apple's build does: their DOMDocument.h says
+	# <WebKit/DOMNode.h> where this source says
+	# <WebKitLegacy/DOMNode.h>, and their headers name WebCore
+	# nowhere.  Neither is a framework any SDK ships -- those headers
+	# are vended inside WebKit itself -- and without the rewrite 125 of
+	# the 215 cannot parse.
+	#
 	# Headers only.  Building WebKit itself is a different undertaking
 	# from assembling an SDK: JavaScriptCore, WebCore, ANGLE and the
 	# rest.  The framework the SDK describes is the system's, stubbed
 	# like every other one here.
 	@mkdir -p ${WEBKIT_FW}/Versions/A/Modules
-	@CC="${CC}" SDK="${SDK_ROOT}" \
+	@CC="${CC}" SDK="${SDK_ROOT}" REWRITE_IMPORTS="WebKitLegacy WebCore" STRIP_TOKENS=WEBCORE_EXPORT \
 	    ${TOP}/mk/scripts/install-framework-manifest.sh ${WEBKIT_MANIFEST} \
 	    ${WEBKIT_FW}/Versions/A/Headers \
 	    ${WEBKIT_FW}/Versions/A/Modules/module.modulemap \
 	    WebKit.h objective-c \
+	    ${WEBKIT}/Source/WebKitLegacy/mac \
+	    ${WEBKIT}/Source/WebKit/UIProcess/API/Cocoa \
+	    ${WEBKIT}/Source/WebCore/platform/cocoa \
+	    ${WEBKIT}/Source/WebKit \
+	    ${WEBKIT}/Source/WebCore \
 	    ${WEBKIT}/Source
 	@${TOP}/mk/scripts/make-tbd.sh \
 	    /System/Library/Frameworks/WebKit.framework/Versions/A/WebKit \
@@ -1182,21 +1265,6 @@ sdk-frameworks:
 	@ln -sfn Versions/Current/Headers ${SEC_FW}/Headers
 	@ln -sfn Versions/Current/Modules ${SEC_FW}/Modules
 	@ln -sfn Versions/Current/Security.tbd ${SEC_FW}/Security.tbd
-
-	@${ECHO} "sdk: stubbing Foundation.framework"
-	# Stub only, no headers.  Foundation's headers are Objective-C and
-	# Apple publishes none of them; reimplementing them is its own
-	# project.  What is needed here is narrower: Apple's git links
-	# git-credential-osxkeychain against Foundation without including
-	# any of it, so the framework has to be linkable and nothing more.
-	# A .tbd of the running system's Foundation is exactly that, and it
-	# is the same thing this SDK does for libSystem.
-	@mkdir -p ${FOUNDATION_FW}/Versions/A
-	@${TOP}/mk/scripts/make-tbd.sh \
-	    /System/Library/Frameworks/Foundation.framework/Versions/C/Foundation \
-	    ${FOUNDATION_FW}/Versions/A/Foundation.tbd 2>/dev/null || true
-	@ln -sfn A ${FOUNDATION_FW}/Versions/Current
-	@ln -sfn Versions/Current/Foundation.tbd ${FOUNDATION_FW}/Foundation.tbd
 
 sdk-internal: sdk-headers sdk-modulemap sdk-stubs sdk-swift sdk-overlay sdk-frameworks
 	@${ECHO} "sdk: assembling MacOSX.Internal.sdk"

@@ -1,0 +1,20 @@
+# The public headers of JavaScriptCore.framework.
+#
+# All fifteen are in src/apple/WebKit, under Source/JavaScriptCore/API.
+# WebKit's own headers need them: 127 of its 215 include
+# <JavaScriptCore/JSBase.h>, directly or through another.
+JSBase.h
+JSContext.h
+JSContextRef.h
+JSExport.h
+JSManagedValue.h
+JSObjectRef.h
+JSStringRef.h
+JSStringRefCF.h
+JSTypedArray.h
+JSValue.h
+JSValueRef.h
+JSVirtualMachine.h
+JavaScript.h
+JavaScriptCore.h
+WebKitAvailability.h

@@ -17,6 +17,18 @@
 # undeclared, which is what this tree's other module maps do with the
 # headers they cannot take.  CC and SDK come from the environment.
 #
+# STRIP_TOKENS, from the environment, is a space-separated list of
+# build-only macros to remove -- Apple do the same when they vend a
+# header out of the project that defines them.
+#
+# REWRITE_IMPORTS, also from the environment, is a space-separated list
+# of framework names whose imports are rewritten to this framework's.
+# Apple do this when they vend a header from one framework inside
+# another: their DOMDocument.h says <WebKit/DOMNode.h> where the source
+# says <WebKitLegacy/DOMNode.h>, because WebKitLegacy is not a
+# framework their SDK ships.  Without the same rewrite those imports
+# point at nothing and 125 of WebKit's headers do not parse.
+#
 # Copyright (c) 2026 Sunneva N. Mariu <sunnevanattsol@gmail.com>
 # SPDX-License-Identifier: BSD-3-Clause
 
@@ -58,6 +70,20 @@ done < "$MANIFEST"
 rm -f "$INDEX"
 
 name=$(basename "$UMBRELLA" .h)
+
+for other in $REWRITE_IMPORTS; do
+	find "$DEST" -name '*.h' -exec \
+	    sed -i '' "s|<$other/|<$name/|g" {} +
+done
+
+# STRIP_TOKENS: build-only macros Apple remove when they vend a header.
+# WebScriptObject.h declares "WEBCORE_EXPORT @interface WebScriptObject"
+# in the source and plain "@interface WebScriptObject" in Apple's SDK;
+# the macro is defined by WebCore's build and nowhere a caller can see.
+for tok in $STRIP_TOKENS; do
+	find "$DEST" -name '*.h' -exec \
+	    sed -i '' "s|^$tok ||g; s| $tok | |g" {} +
+done
 
 if [ -n "$MM" ]; then
 	BAD="$DEST/.undeclarable"
