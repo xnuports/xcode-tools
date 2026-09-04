@@ -263,3 +263,6 @@
 [submodule "src/apple/IOUSBFamily"]
 	path = src/apple/IOUSBFamily
 	url = https://github.com/apple-oss-distributions/IOUSBFamily.git
+[submodule "src/apple/IOAudioFamily"]
+	path = src/apple/IOAudioFamily
+	url = https://github.com/apple-oss-distributions/IOAudioFamily.git
