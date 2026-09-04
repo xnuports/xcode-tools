@@ -208,4 +208,15 @@
 #define CF_CLOSED_ENUM(_type, _name) _type _name; enum
 #endif
 
+/*
+ * The underscored spellings.  Foundation's NSObjCRuntime.h defines
+ * NS_TYPED_ENUM and NS_TYPED_EXTENSIBLE_ENUM in terms of these, so a
+ * header saying NS_TYPED_EXTENSIBLE_ENUM on a typedef -- NSException.h
+ * does, on NSExceptionName -- expands to an undefined identifier and
+ * does not parse.  They are the same annotations as the CF_ spellings
+ * above.
+ */
+#define _CF_TYPED_ENUM              CF_STRING_ENUM
+#define _CF_TYPED_EXTENSIBLE_ENUM   CF_EXTENSIBLE_STRING_ENUM
+
 #endif /* __XNUPORTS_CF_NULLABILITY_H__ */
