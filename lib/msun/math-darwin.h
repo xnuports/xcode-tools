@@ -65,6 +65,33 @@ typedef long double	__float_t;
 typedef long double	__double_t;
 #endif
 
+/*
+ * __INT_MAX is FreeBSD's, from <machine/_limits.h>.  Darwin has no such
+ * header, and msun's math.h writes FP_ILOGB0 and FP_ILOGBNAN in terms
+ * of it.
+ */
+#ifndef __INT_MAX
+#define __INT_MAX		2147483647
+#endif
+
 #include <msun/math.h>
+
+/*
+ * FP_ILOGB0 and FP_ILOGBNAN, corrected to this platform's.
+ *
+ * C allows either INT_MIN or -INT_MAX for FP_ILOGB0, and msun picks
+ * FreeBSD's answer: -INT_MAX for zero and +INT_MAX for NaN.  The libm
+ * this SDK links is Apple's, and it returns INT_MIN for both --
+ * measured, ilogb(0.0) and ilogb(NAN) are each -2147483648, which is
+ * what Apple's own math.h says.  msun's FP_ILOGBNAN does not merely
+ * differ, it has the wrong sign, so anything comparing against it
+ * would be wrong about every NaN.
+ *
+ * Redefined after the include because msun defines them unguarded.
+ */
+#undef FP_ILOGB0
+#undef FP_ILOGBNAN
+#define FP_ILOGB0		(-2147483647 - 1)
+#define FP_ILOGBNAN		(-2147483647 - 1)
 
 #endif /* _XNUPORTS_MATH_H_ */
