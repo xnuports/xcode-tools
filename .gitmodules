@@ -212,3 +212,6 @@
 [submodule "src/apple/CFNetwork"]
 	path = src/apple/CFNetwork
 	url = https://github.com/apple-oss-distributions/CFNetwork
+[submodule "src/extras/pcre2"]
+	path = src/extras/pcre2
+	url = https://github.com/PCRE2Project/pcre2.git
