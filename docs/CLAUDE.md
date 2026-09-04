@@ -172,8 +172,8 @@ These submodules provide source code for tools previously listed as "no source":
 | `git` | `src/git/` | Git-155 | git, git-receive-pack, git-shell, git-upload-pack |
 | `cpython` | `src/python/cpython/` | v3.14.6 | python3, pip3, pydoc3, 2to3 |
 | `python-apple-support` | `src/python/python-apple-support/` | heads/main | **Reference only** — a meta-build system for Python XCFrameworks. We build Python ourselves, so this is kept for reference rather than used. |
-| `PlistBuddy` | `src/openxc-tools/PlistBuddy/` | heads/main | PlistBuddy |
-| `pngcrush` | `src/openxc-tools/pngcrush/` | v1.8.1 | pngcrush |
+| `PlistBuddy` | `src/other/PlistBuddy/` | heads/main | PlistBuddy |
+| `pngcrush` | `src/other/pngcrush/` | v1.8.1 | pngcrush |
 | `xctoolchain` | `xctoolchain/` | heads/master | **Reference only** — generic `.xcconfig` build settings, not a source of the `.xctoolchain` bundle format |
 | `ld-internals` | `include/ld-internals/` | heads/main | ld64 private headers |
 

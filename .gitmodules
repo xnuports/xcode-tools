@@ -3,7 +3,7 @@
 	url = https://github.com/swiftlang/llvm-project.git
 	branch = swift/release/6.3
 [submodule "src/openxc-tools/PlistBuddy"]
-	path = src/openxc-tools/PlistBuddy
+	path = src/other/PlistBuddy
 	url = https://github.com/xnuports/PlistBuddy
 [submodule "src/apple/distribution-Developer_Tools"]
 	path = src/apple/distribution-Developer_Tools
@@ -27,7 +27,7 @@
 	url = https://github.com/python/cpython.git
 	branch = 3.14
 [submodule "src/openxc-tools/pngcrush"]
-	path = src/openxc-tools/pngcrush
+	path = src/other/pngcrush
 	url = https://github.com/xnuports/pngcrush.git
 [submodule "src/apple/libplatform"]
 	path = src/apple/libplatform
@@ -58,7 +58,7 @@
 	path = src/git/git
 	url = https://github.com/git/git.git
 [submodule "src/openxc-tools/vmmap"]
-	path = src/openxc-tools/vmmap
+	path = src/other/vmmap
 	url = https://github.com/xnuports/vmmap.git
 [submodule "src/swiftlang-llvm/swift-cmark"]
 	path = src/swiftlang-llvm/swift-cmark

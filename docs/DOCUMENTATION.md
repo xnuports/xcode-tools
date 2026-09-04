@@ -481,7 +481,7 @@ We currently have **10 open-source reimaginations** of Apple's command-line tool
 | momc | Core Data | Compiles `.xcdatamodel` files |
 | mapc | Maps | Map template compiler |
 | copypng | Asset | PNG optimization/copy for iOS resources |
-| pngcrush | Asset | PNG optimization | ✅ Source available (`src/openxc-tools/pngcrush/`) |
+| pngcrush | Asset | PNG optimization | ✅ Source available (`src/other/pngcrush/`) |
 | TextureAtlas | Asset | Texture atlas compiler |
 | TextureConverter | Asset | Texture format conversion |
 | altool | App Store | App Store Transport / upload validation |
@@ -774,7 +774,7 @@ We currently have **10 open-source reimaginations** of Apple's command-line tool
 
 ### pngcrush Submodule
 
-**Source:** `src/openxc-tools/pngcrush/` (pngcrush v1.8.1, xnuports fork)
+**Source:** `src/other/pngcrush/` (pngcrush v1.8.1, xnuports fork)
 
 **What it covers:**
 - PNG (Portable Network Graphics) optimization
@@ -927,7 +927,7 @@ We currently have **10 open-source reimaginations** of Apple's command-line tool
 | Linker (ld, ld-classic) | ✅ Source available | ✅ Full | Via `src/apple-oss-distributions/distribution-Developer_Tools/ld64/` |
 | Dev utilities (asa, ctags, indent, lorder, rpcgen, unifdef) | ✅ Source available | ✅ Full | Via `src/apple-oss-distributions/distribution-Developer_Tools/developer_cmds/` |
 | Header docs (headerdoc2html, hdxml2manxml) | ✅ Source available | ✅ Full | Via `src/apple-oss-distributions/distribution-Developer_Tools/headerdoc/` |
-| pngcrush | ✅ Source available | ✅ Full | pngcrush v1.8.1 (`src/openxc-tools/pngcrush/`) |
+| pngcrush | ✅ Source available | ✅ Full | pngcrush v1.8.1 (`src/other/pngcrush/`) |
 
 ## 8. Roadmap Recommendations
 
@@ -972,11 +972,11 @@ We currently have **10 open-source reimaginations** of Apple's command-line tool
 | LLVM/Clang | Apache-2.0 + LLVM Exception | `src/swiftlang-llvm/llvm-project/` |
 | Swift | Apache-2.0 + BSD Runtime | `src/swiftlang-llvm/swift/` |
 | Objective-C runtime | Apple Public Source License | `src/apple-oss-distributions/objc4/` |
-| PlistBuddy | Apple Public Source License | `src/openxc-tools/PlistBuddy/` |
+| PlistBuddy | Apple Public Source License | `src/other/PlistBuddy/` |
 | distribution-Developer_Tools | Mixed (Apple APL, GPL, BSD) | `src/apple-oss-distributions/distribution-Developer_Tools/` |
 | Git | GPL-2.0 | `src/git/` |
 | CPython | PSF-2.0 | `src/python/cpython/` |
 | Python-Apple-Support | BSD-3-Clause | `src/python/python-apple-support/` |
 | ld-internals | Apple Public Source License | `include/ld-internals/` |
-| pngcrush | PNG License | `src/openxc-tools/pngcrush/` |
+| pngcrush | PNG License | `src/other/pngcrush/` |
 | Our top-level code | BSD-3-Clause | `LICENSE.BSD-3` |

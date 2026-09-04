@@ -113,16 +113,16 @@ PROGS+=	apple/distribution-Developer_Tools/headerdoc/xmlman resolveLinks usr/bin
 PROGS+=	apple/distribution-Developer_Tools/headerdoc gatherheaderdoc usr/bin
 
 # ------------------------------------------------------------------
-# pngcrush (src/openxc-tools/pngcrush) -- Developer/usr/bin.  Bundles its own libpng
+# pngcrush (src/other/pngcrush) -- Developer/usr/bin.  Bundles its own libpng
 # and zlib, so the source list is pinned rather than discovered.
 # ------------------------------------------------------------------
-PROGS+=	openxc-tools/pngcrush/pngcrush pngcrush usr/bin
+PROGS+=	other/pngcrush/pngcrush pngcrush usr/bin
 
 # ------------------------------------------------------------------
-# vmmap (src/openxc-tools/vmmap) -- a third-party implementation of a tool Apple
+# vmmap (src/other/vmmap) -- a third-party implementation of a tool Apple
 # ships in Developer/usr/bin but has never open-sourced.
 # ------------------------------------------------------------------
-PROGS+=	openxc-tools/vmmap/src vmmap usr/bin
+PROGS+=	other/vmmap/src vmmap usr/bin
 
 # ------------------------------------------------------------------
 # bsdmake (src/extras/bsdmake).
@@ -134,14 +134,14 @@ PROGS+=	openxc-tools/vmmap/src vmmap usr/bin
 PROGS+=	extras/bsdmake bsdmake usr/local/bin
 
 # ------------------------------------------------------------------
-# PlistBuddy (src/openxc-tools/PlistBuddy).
+# PlistBuddy (src/other/PlistBuddy).
 #
 # Note this one is not part of Xcode's Developer directory at all --
 # stock macOS ships it at /usr/libexec/PlistBuddy.  It is carried here
 # because the project added it as a submodule; usr/libexec is the
 # closest match to where the system keeps it.
 # ------------------------------------------------------------------
-PROGS+=	openxc-tools/PlistBuddy PlistBuddy usr/libexec
+PROGS+=	other/PlistBuddy PlistBuddy usr/libexec
 
 # ------------------------------------------------------------------
 # bsdmake (src/extras/bsdmake/) -- Apple's BSD make.
