@@ -24,11 +24,19 @@ PORTS+=	apple/distribution-Developer_Tools/flex flex ${XCTOOLCHAIN}/usr/bin
 PORTS+=	apple/distribution-Developer_Tools/gnumake gnumake usr/bin
 
 # ------------------------------------------------------------------
-# git and python, both of which Xcode ships in Developer/usr/bin.  The
-# git checkout is the same version Apple's build reports; cpython is
-# not -- Xcode's python3 is 3.9.6, the old shim, and this is current.
+# git and python, both of which Xcode ships in Developer/usr/bin.
+# git comes from Apple's distribution, so it reports the same
+# "(Apple Git-N)" Xcode's does; cpython does not match -- Xcode's
+# python3 is 3.9.6, the old shim, and this is current.
+#
+# pcre2 comes first because Apple's git links it statically out of the
+# internal SDK.  See mk/port.d/pcre2.mk.
 # ------------------------------------------------------------------
-PORTS+=	git/git git usr/bin
+# The third word is where P_PROGS would land, and pcre2 has none: it
+# installs a static library into the internal SDK instead.  usr/local/lib
+# is what the other library ports name.
+PORTS+=	extras/pcre2 pcre2 usr/local/lib
+PORTS+=	apple/distribution-Developer_Tools/Git git usr/bin
 PORTS+=	python/cpython python3 usr/bin
 
 # ------------------------------------------------------------------
