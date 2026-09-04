@@ -272,3 +272,6 @@
 [submodule "src/puredarwin/Foundation"]
 	path = src/puredarwin/Foundation
 	url = https://github.com/xnuports/Foundation.git
+[submodule "python-pip"]
+	path = src/python/pip
+	url = https://github.com/pypa/pip.git
