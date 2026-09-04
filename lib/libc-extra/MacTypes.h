@@ -106,4 +106,21 @@ enum {
 }
 #endif
 
+
+/*
+ * CoreFoundation's public headers reach for these: CFString.h takes
+ * ConstStr255Param and the UTF character types, CFCharacterSet.h takes
+ * UTF32Char, and CFLocale.h still carries the classic LangCode and
+ * RegionCode in its deprecated conversion calls.
+ */
+typedef UInt16                          UTF16Char;
+typedef UInt8                           UTF8Char;
+typedef UInt32                          UTF32Char;
+
+typedef const unsigned char *           ConstStr255Param;
+typedef const unsigned char *           ConstStringPtr;
+
+typedef SInt16                          LangCode;
+typedef SInt16                          RegionCode;
+
 #endif /* __MACTYPES__ */
