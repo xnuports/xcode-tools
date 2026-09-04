@@ -245,3 +245,6 @@
 [submodule "src/apple/IOStorageFamily"]
 	path = src/apple/IOStorageFamily
 	url = https://github.com/apple-oss-distributions/IOStorageFamily.git
+[submodule "src/apple/IONetworkingFamily"]
+	path = src/apple/IONetworkingFamily
+	url = https://github.com/apple-oss-distributions/IONetworkingFamily.git
