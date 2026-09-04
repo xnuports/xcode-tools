@@ -242,3 +242,6 @@
 [submodule "src/extras/xz"]
 	path = src/extras/xz
 	url = https://github.com/tukaani-project/xz.git
+[submodule "src/apple/IOStorageFamily"]
+	path = src/apple/IOStorageFamily
+	url = https://github.com/apple-oss-distributions/IOStorageFamily.git
