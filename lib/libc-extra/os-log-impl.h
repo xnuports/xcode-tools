@@ -28,6 +28,14 @@ __BEGIN_DECLS
 extern void _os_log_impl(void *dso, os_log_t log, os_log_type_t type,
     const char *format, uint8_t *buf, uint32_t size);
 
+/*
+ * Whether a message of this type would be recorded.  os/log.h uses it in
+ * os_log_debug_enabled() and friends, and os/log_private.h needs it to
+ * decide whether to set OS_LOG_F_SEND, but the kernel header this tree
+ * installs never declares it.
+ */
+extern bool os_log_type_enabled(os_log_t oslog, os_log_type_t type);
+
 __END_DECLS
 
 #endif /* __XNUPORTS_OS_LOG_IMPL_H__ */
