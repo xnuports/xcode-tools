@@ -11,6 +11,18 @@
 # go.mod names 257 dependencies, so the build fetches them.  Everything
 # else here builds from what is checked out; this one does not, and Go
 # modules are simply built that way.
+#
+# Vendoring them to stop that has been looked at and does not work.
+# "go mod vendor" resolves every package in the module under every build
+# tag, not just the ones a build compiles, and upstream gitignores
+# pkg/sandbox/ while keeping files that import it behind "//go:build
+# sandbox" -- cmd/ipsw/cmd/sb/sb_reach.go and sb_diff.go, and
+# internal/diff/sandbox.go.  So it fails on a package the public checkout
+# is never given.  Deleting those five files in the build copy does let it
+# through, and the result builds offline, but the tree is 230MB (129MB of
+# it modernc.org's transpiled-C sqlite) and that is a poor trade for a
+# fetch that go.sum already pins and verifies by hash, and that Go caches
+# after the first build.
 P_BUILDSYS=	make
 P_NOSTAGE=	yes
 
