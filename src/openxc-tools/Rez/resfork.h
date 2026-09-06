@@ -52,4 +52,23 @@ void	resfork_free(struct resfork *rf);
 /* The fork of a file, or its data fork with datafork set. */
 uint8_t	*resfork_read_file(const char *path, bool datafork, size_t *len);
 
+/*
+ * Serialise resources back into a fork, grouped by type in the order the
+ * types first appear.  Returns the buffer and its length, or NULL.
+ */
+uint8_t	*resfork_build(const struct resource *items, size_t count,
+	    uint16_t fileref, size_t *len);
+
+/*
+ * The file reference number Apple's tools leave in the map.  It is runtime
+ * state -- the refnum the Resource Manager happened to hand out -- and they
+ * write 0x0900 for a destination they created, 0x0800 when the destination
+ * was already there and had to be opened first.  Reproduced rather than
+ * computed, so the output compares equal to theirs.
+ */
+#define RESFORK_FILEREF_NEW	0x0900
+#define RESFORK_FILEREF_REOPEN	0x0800
+int	resfork_write_file(const char *path, bool datafork,
+	    const uint8_t *bytes, size_t len);
+
 #endif /* REZ_RESFORK_H */

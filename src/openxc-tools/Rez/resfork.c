@@ -235,3 +235,171 @@ resfork_free(struct resfork *rf)
 	rf->items = NULL;
 	rf->count = 0;
 }
+
+static void
+wbe16(uint8_t *p, uint16_t v)
+{
+	p[0] = (uint8_t)(v >> 8);
+	p[1] = (uint8_t)v;
+}
+
+static void
+wbe32(uint8_t *p, uint32_t v)
+{
+	p[0] = (uint8_t)(v >> 24);
+	p[1] = (uint8_t)(v >> 16);
+	p[2] = (uint8_t)(v >> 8);
+	p[3] = (uint8_t)v;
+}
+
+/*
+ * The shape Apple's writers produce, which is the classic one: the data area
+ * begins at 256 with the bytes before it left zero, the map follows it, and
+ * the map's own first sixteen bytes are a copy of the file header.  The
+ * caller supplies the file reference number; see resfork.h for why it is
+ * copied rather than computed.
+ */
+#define RES_DATA_START	256
+#define RES_MAP_HEADER	28
+
+uint8_t *
+resfork_build(const struct resource *items, size_t count, uint16_t fileref,
+    size_t *out_len)
+{
+	size_t order[4096], ntypes = 0;
+	size_t i, j, data_len = 0, names_len = 0, total_refs = 0;
+	size_t map_off, type_list_len, name_list_off, map_len, total;
+	uint8_t *b, *map;
+	size_t at, ref_at, name_at;
+
+	if (count > sizeof(order) / sizeof(order[0]))
+		return (NULL);
+
+	/* Types in first-seen order; order[] indexes the first of each. */
+	for (i = 0; i < count; i++) {
+		bool seen = false;
+
+		for (j = 0; j < ntypes; j++)
+			if (memcmp(items[order[j]].type, items[i].type, 4) == 0) {
+				seen = true;
+				break;
+			}
+		if (!seen)
+			order[ntypes++] = i;
+
+		data_len += 4 + items[i].length;
+		if (items[i].name != NULL)
+			names_len += 1 + strlen(items[i].name);
+		total_refs++;
+	}
+
+	map_off = RES_DATA_START + data_len;
+	type_list_len = 2 + ntypes * 8;
+	name_list_off = RES_MAP_HEADER + type_list_len + total_refs * 12;
+	map_len = name_list_off + names_len;
+	total = map_off + map_len;
+
+	b = calloc(1, total);
+	if (b == NULL)
+		return (NULL);
+
+	wbe32(b, RES_DATA_START);
+	wbe32(b + 4, (uint32_t)map_off);
+	wbe32(b + 8, (uint32_t)data_len);
+	wbe32(b + 12, (uint32_t)map_len);
+
+	at = RES_DATA_START;
+	for (i = 0; i < count; i++) {
+		wbe32(b + at, items[i].length);
+		if (items[i].length > 0)
+			memcpy(b + at + 4, items[i].data, items[i].length);
+		at += 4 + items[i].length;
+	}
+
+	map = b + map_off;
+	memcpy(map, b, 16);
+	/* A file with no resources carries no reference number either. */
+	wbe16(map + 20, count == 0 ? 0 : fileref);
+	wbe16(map + 24, RES_MAP_HEADER);
+	wbe16(map + 26, (uint16_t)name_list_off);
+
+	/* Counts are stored one less, so none of them is 0xffff. */
+	wbe16(map + RES_MAP_HEADER, (uint16_t)(ntypes - 1));
+
+	ref_at = RES_MAP_HEADER + type_list_len;
+	name_at = name_list_off;
+
+	for (j = 0; j < ntypes; j++) {
+		uint8_t *t = map + RES_MAP_HEADER + 2 + j * 8;
+		size_t nres = 0;
+
+		memcpy(t, items[order[j]].type, 4);
+		/* refOff is measured from the start of the type list. */
+		wbe16(t + 6, (uint16_t)(ref_at - RES_MAP_HEADER));
+
+		for (i = 0; i < count; i++) {
+			uint8_t *r;
+			size_t off;
+
+			if (memcmp(items[i].type, items[order[j]].type, 4) != 0)
+				continue;
+
+			r = map + ref_at;
+			wbe16(r, (uint16_t)items[i].id);
+
+			if (items[i].name != NULL) {
+				size_t nlen = strlen(items[i].name);
+
+				wbe16(r + 2, (uint16_t)(name_at - name_list_off));
+				map[name_at] = (uint8_t)nlen;
+				memcpy(map + name_at + 1, items[i].name, nlen);
+				name_at += 1 + nlen;
+			} else {
+				wbe16(r + 2, 0xffff);
+			}
+
+			r[4] = items[i].attrs;
+
+			/* Three-byte offset into the data area. */
+			off = 0;
+			for (size_t k = 0; k < i; k++)
+				off += 4 + items[k].length;
+			r[5] = (uint8_t)(off >> 16);
+			r[6] = (uint8_t)(off >> 8);
+			r[7] = (uint8_t)off;
+
+			ref_at += 12;
+			nres++;
+		}
+		wbe16(t + 4, (uint16_t)(nres - 1));
+	}
+
+	*out_len = total;
+	return (b);
+}
+
+int
+resfork_write_file(const char *path, bool datafork, const uint8_t *bytes,
+    size_t len)
+{
+	int fd;
+
+	if (datafork) {
+		fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+		if (fd < 0)
+			return (-1);
+		if (write(fd, bytes, len) != (ssize_t)len) {
+			(void)close(fd);
+			return (-1);
+		}
+		return (close(fd));
+	}
+
+	/* The file has to exist before it can be given a fork. */
+	fd = open(path, O_WRONLY | O_CREAT, 0644);
+	if (fd < 0)
+		return (-1);
+	(void)close(fd);
+
+	return (setxattr(path, XATTR_RESOURCEFORK_NAME, bytes, len, 0, 0));
+}

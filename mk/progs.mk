@@ -37,6 +37,7 @@ PROGS+=	openxc-tools/Rez GetFileInfo usr/bin
 PROGS+=	openxc-tools/Rez SetFile usr/bin
 PROGS+=	openxc-tools/Rez SplitForks usr/bin
 PROGS+=	openxc-tools/Rez DeRez usr/bin
+PROGS+=	openxc-tools/Rez ResMerger usr/bin
 
 .if ${MK_TOOLCHAIN:tl} == "yes"
 # ------------------------------------------------------------------

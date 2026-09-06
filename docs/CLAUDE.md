@@ -274,7 +274,7 @@ so these are ours, written against the behaviour of Apple's binaries.
 |------|-------------|--------|
 | DeRez | Resource de-compiler | ✅ Ours, `src/openxc-tools/Rez/` (data statements; type-directed output waits on Rez) |
 | Rez | Resource compiler | ❌ Binary-only, no source |
-| ResMerger | Resource merger | ❌ Binary-only, no source |
+| ResMerger | Resource merger | ✅ Ours, `src/openxc-tools/Rez/` |
 | GetFileInfo | File metadata query | ✅ Ours, `src/openxc-tools/Rez/` |
 | SetFile | File attribute setter | ✅ Ours, `src/openxc-tools/Rez/` |
 | SplitForks | Fork splitter | ✅ Ours, `src/openxc-tools/Rez/` |
