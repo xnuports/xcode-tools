@@ -323,3 +323,6 @@
 [submodule "src/extras/mootool"]
 	path = src/extras/mootool
 	url = https://github.com/hack-different/mootool
+[submodule "src/extras/unxip"]
+	path = src/extras/unxip
+	url = https://github.com/saagarjha/unxip
