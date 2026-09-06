@@ -382,6 +382,12 @@ bundle-aliases: bundle-dirs
 		${ECHO} "alias: Tools/${t} -> ../usr/bin/${t}"; \
 	 fi
 .endfor
+	# genstrings is installed twice: Apple ship extractLocStrings as a
+	# symlink to it, one program answering to both names.
+	@if [ -e ${RELEASE}/usr/bin/genstrings ]; then \
+		ln -sfn genstrings ${RELEASE}/usr/bin/extractLocStrings; \
+		${ECHO} "alias: usr/bin/extractLocStrings -> genstrings"; \
+	 fi
 .for a t in nm llvm-nm otool llvm-otool ld.lld lld \
 	    swift swift-frontend swiftc swift-frontend \
 	    llvm-readelf llvm-readobj llvm-strip llvm-objcopy \

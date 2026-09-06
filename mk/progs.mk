@@ -43,6 +43,10 @@ PROGS+=	openxc-tools/Rez Rez usr/bin
 # TextureAtlas, the SpriteKit atlas compiler.
 PROGS+=	openxc-tools/TextureAtlas TextureAtlas usr/bin
 
+# genstrings, which Apple also install as extractLocStrings.  The second
+# name is a symlink in their tree; mk/bundle.mk makes it here.
+PROGS+=	openxc-tools/genstrings genstrings usr/bin
+
 # agvtool, which moves an Xcode project's version numbers along.
 PROGS+=	openxc-tools/agvtool agvtool usr/bin
 

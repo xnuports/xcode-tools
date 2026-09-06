@@ -112,7 +112,10 @@ as valid and as satisfying its designated requirement), `xcrun`,
 tools, each checked case by case against Apple's own binaries; Rez and
 ResMerger produce byte-identical resource forks, and Rez compiles the `data`
 and `read` statements — `type`/`resource` declarations are still to come),
-`agvtool` (Apple-generic
+`genstrings` (and
+`extractLocStrings`, which is the same program under Apple's second name for
+it: the localization macros scanned out of C, Objective-C and Swift into
+byte-identical `.strings` files), `agvtool` (Apple-generic
 versioning: what-version, bump, new-version, the marketing-version pair, and
 the same in-place edits to the project file and Info.plists), `xarsigner`
 (both halves of the detached

@@ -105,6 +105,7 @@ xcode-tools/
 │   │   ├── PlistBuddy/             # Submodule: open-source PlistBuddy
 │   │   ├── pngcrush/               # Submodule: pngcrush v1.8.1
 │   │   ├── agvtool/                # OURS: apple-generic versioning (1 file)
+│   │   ├── genstrings/             # OURS: .strings extraction (1 file)
 │   │   ├── TextureAtlas/           # OURS: SpriteKit atlas compiler (4 files)
 │   │   ├── xarsigner/              # OURS: detached xar signing (1 file)
 │   │   ├── TextureConverter/       # OURS: header stub

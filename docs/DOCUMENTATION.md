@@ -57,6 +57,7 @@ xcode-tools/
 │   │   ├── PlistBuddy/               # Submodule: open-source PlistBuddy
 │   │   ├── pngcrush/                 # Submodule: PNG optimization tool
 │   │   ├── agvtool/                  # OURS: apple-generic versioning
+│   │   ├── genstrings/               # OURS: .strings extraction
 │   │   ├── TextureAtlas/             # OURS: SpriteKit atlas compiler
 │   │   ├── TextureConverter/         # OURS: header stub (not yet built)
 │   │   ├── xarsigner/                # OURS: detached xar signing
@@ -923,7 +924,7 @@ We currently have **10 open-source reimaginations** of Apple's command-line tool
 | Debugging tools | ❌ | ✅ Full | lldb, leaks, vmmap, etc. |
 | App Store delivery | ❌ | ✅ Full | altool, iTMSTransporter, ipatool |
 | Coverage tools | ❌ | ✅ Full | xccov, llvm-cov |
-| Localization | ❌ | ✅ Full | genstrings, actool, etc. |
+| Localization | ⚪ Partial | ✅ Full | genstrings is ours; actool is not |
 | Python tools | ✅ Source available | ✅ Full | CPython 3.14.7 + build system |
 | Git | ✅ Source available | ✅ Full | Git v2.55.0 (`src/git/`) |
 | Binary tools (ar, strip, lipo, otool, nm, etc.) | ✅ Source available | ✅ Full | Via `src/apple-oss-distributions/distribution-Developer_Tools/cctools/` |
