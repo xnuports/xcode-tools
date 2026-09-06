@@ -111,6 +111,27 @@ fi
 x86count=$(wc -l < "$TMP_X86" | tr -d ' ')
 count=$(wc -l < "$TMP" | tr -d ' ')
 
+# The library's own versions, out of its LC_ID_DYLIB.  These were hardcoded
+# to 1, which is not cosmetic: the linker copies them into every binary built
+# against the stub, so anything linked here recorded a compatibility version
+# of 1.0.0 where Apple's SDK gives the real one.
+#
+# tapi writes them the way Apple's stubs read: a trailing ".0" trimmed, so
+# dyld_info's 9.0 becomes 9 and 1356.0 becomes 1356, while 1.2.12 and 5.4
+# stay as they are.  A compatibility version of 1 is the default and is left
+# out, and so is a current version of 1 -- libcharset and libresolv carry
+# neither field in Apple's SDK, which is what a 1.0 in both places looks like.
+_idcmd=$(dyld_info -load_commands "$INSTALL_NAME" 2>/dev/null |
+	awk '/LC_ID_DYLIB/ { in_id = 1; next }
+	     in_id && $1 == "cur-vers:"    { cur = $2 }
+	     in_id && $1 == "compat-vers:" { compat = $2; exit }
+	     END { print cur, compat }')
+
+CURRENT_VERSION=$(echo "$_idcmd" | awk '{ print $1 }' | sed 's/\.0$//')
+COMPAT_VERSION=$(echo "$_idcmd" | awk '{ print $2 }' | sed 's/\.0$//')
+[ -n "$CURRENT_VERSION" ] || CURRENT_VERSION=1
+[ -n "$COMPAT_VERSION" ] || COMPAT_VERSION=1
+
 if [ "$count" -eq 0 ]; then
 	rm -f "$TMP"
 	echo "$0: no exports found for $INSTALL_NAME" >&2
@@ -122,8 +143,12 @@ fi
 	echo "tbd-version:           4"
 	echo "targets:               [ arm64-macos, arm64e-macos, x86_64-macos ]"
 	echo "install-name:          $INSTALL_NAME"
-	echo "current-version:       1"
-	echo "compatibility-version: 1"
+	if [ "$CURRENT_VERSION" != "1" ]; then
+		echo "current-version:       $CURRENT_VERSION"
+	fi
+	if [ "$COMPAT_VERSION" != "1" ]; then
+		echo "compatibility-version: $COMPAT_VERSION"
+	fi
 	echo "exports:"
 	echo "  - targets:              [ arm64-macos, arm64e-macos, x86_64-macos ]"
 	printf "    symbols:              [ "
