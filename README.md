@@ -112,7 +112,10 @@ as valid and as satisfying its designated requirement), `xcrun`,
 tools, each checked case by case against Apple's own binaries; Rez and
 ResMerger produce byte-identical resource forks, and Rez compiles the `data`
 and `read` statements — `type`/`resource` declarations are still to come),
-`xarsigner` (both halves of the detached
+`agvtool` (Apple-generic
+versioning: what-version, bump, new-version, the marketing-version pair, and
+the same in-place edits to the project file and Info.plists), `xarsigner`
+(both halves of the detached
 package-signing flow, byte-identical on real Installer packages; a signature
 it embeds over its own `--simulate` digest is one `pkgutil --check-signature`
 verifies), `xcdebug`, `xcresulttool`
