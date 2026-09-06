@@ -796,20 +796,53 @@ local format to read instead of the framework, and nothing checkable against
 Apple's binary without an Apple developer account and their servers
 answering.
 
-#### Why TextureConverter is only partly tractable
+#### TextureConverter: the compressor ports
 
 At 7 MB it is the largest tool in Developer/usr/bin, and almost all of that
-is other people's compressors: it names ARM, ETC2COMP, ISPC, NVTT, PVRTC and
-STB as selectable back ends, and offers ASTC in every block size, BC1 through
-BC7, EAC, ETC2 and PVRTC, reading BMP, DDS, EXR, HDR, HEIC, JPG, KTX, KTX2,
-PNG, TGA, TIFF and WEBP.
+is other people's compressors.  Apple name six selectable back ends -- ARM,
+ETC2COMP, ISPC, NVTT, PVRTC and STB -- and offer ASTC in every block size,
+BC1 through BC7, EAC, ETC2 and PVRTC.  Writing those from scratch would be
+writing five worse texture compressors, so the encoders are ports and the
+container, the CLI and the uncompressed paths will be ours.
 
-Reimplementing that from scratch would mean writing five texture compressors,
-which is not what a drop-in replacement needs: astc-encoder, etc2comp,
-ispc_texcomp and stb are all open source under licences this tree can carry,
-and the tractable shape of the work is to wire them in as ports and write the
-container, the CLI and the uncompressed paths ourselves.  That is a real
-project and a bounded one; it has not been started.
+Four are in and building, each pinned and each its own submodule:
+
+| Port | Version | Licence | Formats |
+|------|---------|---------|---------|
+| `extras/astc-encoder` | 5.7.0 | Apache-2.0 | ASTC, every block size, LDR and HDR |
+| `extras/stb` | stb_dxt.h v1.12 | MIT / public domain | BC1, BC3, BC4, BC5 |
+| `extras/etc2comp` | commit 39422c1a | Apache-2.0 | EAC_R11, EAC_RG11, EAC_RGBA8, ETC2_RGB8, ETC2_RGB8A1 |
+| `extras/nvidia-texture-tools` | 2.1.2 | MIT + Apache-2.0 | BC6H, BC7 |
+
+Between them that is every format Apple's tool can write except PVRTC.
+Two of the four needed work to build at all, and neither was patched --
+submodule contents are left alone, so both are handled from the command
+line in mk/port.d/:
+
+  - etc2comp's CMakeLists asks for cmake 2.8.9, which cmake has refused
+    since 4.0, and its EtcLib cannot be configured alone because it
+    declares no minimum.  Its fifteen sources are compiled directly.
+  - NVTT 2.1.2 predates Apple Silicon: nvcore/Debug.h tests a macro
+    (NV_CPU_AARCH64) that nvcore.h never defines, so pointer checks took
+    a 32-bit branch that truncates, and the crash handler reaches
+    #error "Unknown CPU" on arm64.  Two defines settle both.
+
+Two back ends are not ported:
+
+  - **ISPC** is Intel's ispc_texcomp, and it offers nothing this tree
+    cannot already write: BC1-BC7, ASTC and ETC2_RGB8 are covered above.
+    It is a *selectable* back end rather than a unique capability, and it
+    needs the ISPC compiler -- an LLVM-based toolchain of its own -- to
+    build.  Worth adding when `--compressor=ISPC` has to answer as Apple's
+    does; not worth it for coverage.
+  - **PVRTC** has no open encoder.  NVTT bundles Imagination's PVRTexTool
+    as prebuilt x86 libraries, which is neither source, nor arm64, nor a
+    licence this tree can carry.  Apple's own help says PVRTC in Metal is
+    deprecated and recommends ASTC, ETC2 or BC instead.
+
+Still to write: the CLI, the KTX/KTX2/DDS containers, the image readers,
+mip generation, resizing and the uncompressed formats -- that is, the tool
+itself, now that the things it would compress with are in place.
 
 #### Why xcsigningtool is not reimplemented
 
