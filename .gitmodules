@@ -335,3 +335,6 @@
 [submodule "src/extras/elfsec"]
 	path = src/extras/elfsec
 	url = https://github.com/gracecondition/elfsec.git
+[submodule "src/extras/machsec"]
+	path = src/extras/machsec
+	url = https://github.com/gracecondition/machsec.git
