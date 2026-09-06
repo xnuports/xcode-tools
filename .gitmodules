@@ -293,3 +293,6 @@
 [submodule "src/extras/stb"]
 	path = src/extras/stb
 	url = https://github.com/nothings/stb.git
+[submodule "src/extras/etc2comp"]
+	path = src/extras/etc2comp
+	url = https://github.com/google/etc2comp.git
