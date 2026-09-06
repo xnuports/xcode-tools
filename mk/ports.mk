@@ -80,6 +80,7 @@ PORTS+=	extras/zstd zstd usr/local/lib
 PORTS+=	extras/astc-encoder astcenc usr/local/lib
 PORTS+=	extras/stb stb usr/local/include
 PORTS+=	extras/etc2comp etc2comp usr/local/lib
+PORTS+=	extras/nvidia-texture-tools nvtt usr/local/lib
 
 # ------------------------------------------------------------------
 # Go, and ipsw which is written in it.  Neither is something Xcode
