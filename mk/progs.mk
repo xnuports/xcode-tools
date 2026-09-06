@@ -40,6 +40,9 @@ PROGS+=	openxc-tools/Rez DeRez usr/bin
 PROGS+=	openxc-tools/Rez ResMerger usr/bin
 PROGS+=	openxc-tools/Rez Rez usr/bin
 
+# xcdebug, which asks Xcode to attach to a process or run a scheme.
+PROGS+=	openxc-tools/xcdebug xcdebug usr/bin
+
 .if ${MK_TOOLCHAIN:tl} == "yes"
 # ------------------------------------------------------------------
 # cctools (src/apple/distribution-Developer_Tools/cctools) -- MK_TOOLCHAIN tier.
