@@ -314,3 +314,6 @@
 [submodule "src/apple/CarbonHeaders"]
 	path = src/apple/CarbonHeaders
 	url = https://github.com/apple-oss-distributions/CarbonHeaders
+[submodule "src/extras/MTool"]
+	path = src/extras/MTool
+	url = https://github.com/beeselmane/MTool
