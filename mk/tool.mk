@@ -42,6 +42,14 @@ T_TARGET?=	${TOP}/build/release/${T_BIN}/${T_PROG}
 T_CFLAGS+=	${XCODE_STRICT_CFLAGS}
 .endif
 
+# Header dependencies.  Without these an object depends only on its own
+# source, so editing a header rebuilds nothing and the link quietly reuses
+# a stale object -- which is the kind of thing that shows up as a test
+# failing against a fix that is already in the file.  -MD writes the list
+# beside each object and -MP adds a phony target per header, so that a
+# header which is later deleted does not leave a rule nothing can satisfy.
+T_CFLAGS+=	-MD -MP
+
 # Per-tool fragment loads before everything so T_SRCS/T_SCRIPT/
 # T_NOBUILD/etc. influence which branch below runs.
 sinclude ${TOP}/mk/tool.d/${T_PROG}.mk
@@ -185,6 +193,17 @@ _LINKER=	${CC}
 . if ${s:M*.cc} != "" || ${s:M*.cpp} != ""
 _LINKER=	${CXX}
 . endif
+.endfor
+
+# Pull in what the last compile recorded.  sinclude so that a first build,
+# with no .d files yet, is not an error.
+# ":=" so the paths are flattened now.  SRCS comes from a "!=" command and
+# its words carry bmake's own quoting; a ".for" over them expands to nested
+# expressions, which a shell command resolves later but an include
+# directive, needing its path while the makefile is being read, does not.
+_DEPS:=		${_GEN:@g@${T_OBJDIR}/${g:R}.d@}
+.for d in ${_DEPS}
+.sinclude "${d}"
 .endfor
 
 ${T_TARGET}: ${OBJS}
