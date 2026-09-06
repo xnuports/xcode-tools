@@ -74,6 +74,11 @@ PORTS+=	extras/sqlite sqlite usr/local/lib
 # system provides.  Library only; see mk/port.d/zstd.mk.
 PORTS+=	extras/zstd zstd usr/local/lib
 
+# The texture compressors TextureConverter offers as back ends.  Each is
+# the encoder Apple's own build links for that family of formats, and each
+# is library-only: the command line tool being replaced is ours.
+PORTS+=	extras/astc-encoder astcenc usr/local/lib
+
 # ------------------------------------------------------------------
 # Go, and ipsw which is written in it.  Neither is something Xcode
 # ships, so both go to usr/local.  Go is pinned to a release tag --
