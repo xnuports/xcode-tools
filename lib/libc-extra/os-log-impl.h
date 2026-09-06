@@ -11,6 +11,18 @@
  * libSystem exports the symbol -- it is in the stub this SDK generates
  * -- so all that is wanted is the declaration.
  *
+ * The signature below was read off a disassembly.  PureDarwin's Libtrace,
+ * which reimplements os_log for a Darwin that has no libSystem to borrow
+ * from, defines it with the same six parameters in the same order under the
+ * same names, which is a second and independent source for it.
+ *
+ * That project is not vendored here.  It supplies no public os/log.h -- the
+ * one thing missing -- and its implementation is one this tree cannot use:
+ * it logs through ASL, which is a working stand-in on a system without
+ * libtrace but is not what Apple's does, and it has no
+ * _os_log_send_and_compose_impl, which Apple's git needs.  On macOS the real
+ * implementation is already under the SDK's stub.
+ *
  * Copyright (c) 2026 Sunneva N. Mariu <sunnevanattsol@gmail.com>
  * SPDX-License-Identifier: BSD-3-Clause
  */
