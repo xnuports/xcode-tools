@@ -70,6 +70,10 @@ PORTS+=	apple/ncurses ncurses usr/local/lib
 # publish theirs.  Headers only; the library is the OS's.
 PORTS+=	extras/sqlite sqlite usr/local/lib
 
+# zstd, which a .xcresult bundle is compressed with and nothing on the
+# system provides.  Library only; see mk/port.d/zstd.mk.
+PORTS+=	extras/zstd zstd usr/local/lib
+
 # ------------------------------------------------------------------
 # Go, and ipsw which is written in it.  Neither is something Xcode
 # ships, so both go to usr/local.  Go is pinned to a release tag --

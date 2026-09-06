@@ -43,6 +43,14 @@ PROGS+=	openxc-tools/Rez Rez usr/bin
 # xcdebug, which asks Xcode to attach to a process or run a scheme.
 PROGS+=	openxc-tools/xcdebug xcdebug usr/bin
 
+# xcresulttool needs libzstd, which the zstd port builds -- a .xcresult
+# bundle stores its objects compressed and nothing on the system provides
+# the library.  Gated for the same reason libtapi's consumer is: without
+# the port there is nothing to link against.
+.if ${MK_PORTS:tl} == "yes"
+PROGS+=	openxc-tools/xcresulttool xcresulttool usr/bin
+.endif
+
 .if ${MK_TOOLCHAIN:tl} == "yes"
 # ------------------------------------------------------------------
 # cctools (src/apple/distribution-Developer_Tools/cctools) -- MK_TOOLCHAIN tier.
