@@ -317,3 +317,6 @@
 [submodule "src/extras/MTool"]
 	path = src/extras/MTool
 	url = https://github.com/beeselmane/MTool
+[submodule "src/extras/ktool"]
+	path = src/extras/ktool
+	url = https://github.com/0cyn/ktool
