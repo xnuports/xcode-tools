@@ -840,9 +840,36 @@ Two back ends are not ported:
     licence this tree can carry.  Apple's own help says PVRTC in Metal is
     deprecated and recommends ASTC, ETC2 or BC instead.
 
-Still to write: the CLI, the KTX/KTX2/DDS containers, the image readers,
-mip generation, resizing and the uncompressed formats -- that is, the tool
-itself, now that the things it would compress with are in place.
+The tool itself is under way in `src/openxc-tools/TextureConverter`.  In:
+the option table, both usage banners, the Khronos container reader,
+`--mode=examine` and `--mode=convert`.  The converted files are byte for
+byte Apple's.
+
+Two measurements settled that, and neither was guessable:
+
+  - **The mip chains are NVTT's.**  An impulse through Apple's Kaiser
+    gives weights of 0.006729, 0.013252, -0.033884, -0.054839, 0.139929
+    and 0.428814, and NVTT's PolyphaseKernel over a KaiserFilter of width
+    3 and alpha 4, box-sampled 32 times per tap, gives exactly those.
+    nvimage is built for that reason and every level of every chain tried
+    comes out identical.
+  - **Eight-bit samples are multiplied by 1/255, not divided by 255.**
+    The reciprocal is inexact in binary and carries its rounding through:
+    96 comes out 0x3ec0c0c2 that way and 0x3ec0c0c1 by division.  One unit
+    in the last place, in every file.
+
+One difference is inherent.  TC_Version is what a reader checks --
+`--check_details` compares it -- so it stays Apple's, being the version of
+the format and the options rather than of the binary; KTXwriter names who
+actually wrote the file, and that is us.  So an annotated file is a dozen
+bytes longer than Apple's; `--disable_annotation` turns the block off and
+then they match exactly.
+
+Still to write: `--mode=compress` (which is what the four encoder ports are
+for), decompress and compare, the KTX2 and DDS writers, resizing, and the
+gamma and gamut handling.  One residual: the Box filter's final 1x1 level
+differs by a unit in the last place, a summation-order difference in a
+non-default filter.
 
 #### Why xcsigningtool is not reimplemented
 
