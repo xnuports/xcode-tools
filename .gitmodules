@@ -281,3 +281,6 @@
 [submodule "src/extras/sqlite"]
 	path = src/extras/sqlite
 	url = https://github.com/sqlite/sqlite.git
+[submodule "src/extras/zstd"]
+	path = src/extras/zstd
+	url = https://github.com/facebook/zstd.git
