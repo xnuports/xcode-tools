@@ -221,7 +221,7 @@ These submodules provide source code for tools previously listed as "no source":
 | iTMSTransporter | App Store | ❌ No source (Apple proprietary) |
 | ipatool, ipatool2 | App Store | ❌ No source (Apple proprietary) |
 | cktool | Code Signing | ❌ No source (Apple proprietary) |
-| xcsigningtool | Code Signing | ❌ No source (Apple proprietary) |
+| xcsigningtool | Code Signing | ❌ Not reimplementable — a client for Apple's cloud signing service, see below |
 | stapler | Code Signing | ❌ No source (Apple proprietary) |
 | embeddedBinaryValidationUtility | Code Signing | ❌ No source (Apple proprietary) |
 | xccov | Testing | ✅ Ours, `src/openxc-tools/xccov/` (`view --report`) |
@@ -720,7 +720,22 @@ Enumerated from a stock Xcode `Developer/usr/bin`:
 | `xccov` | `view --report [--json]` done; the tabular view, `diff` and `merge` remain |
 | `xcresulttool` | `get object` done; `get test-results`, `export`, `merge`, `compare` remain |
 | `xcstringstool` | missing — `.xcstrings` catalog processing |
-| `xcsigningtool` | missing — signing identity management, keychain |
+| `xcsigningtool` | not attempted, deliberately — see below |
+
+#### Why xcsigningtool is not reimplemented
+
+It has one subcommand, cloud-sign, and it does not sign anything locally.
+The certificate is a managed one held in an account on developer.apple.com
+and the private key never leaves Apple; the tool authenticates with an App
+Store Connect key and asks their service to sign.  DVTPortal, which it links
+for this, is a client for that service, and builds its endpoints at runtime
+rather than carrying them as strings.
+
+So there is no file format to read instead of the framework, as there was for
+xcresulttool and xccov, and nothing that could be checked against Apple's
+without a developer account and their servers answering.  Local signing --
+ad-hoc, from a keychain identity, or from a .p12 -- is what our own codesign
+already does.
 | `xctest` | missing — XCTest bundle runner |
 | `xcdebug` | missing |
 | `xcindex-test` | not attempted, deliberately — see below |
