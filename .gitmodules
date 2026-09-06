@@ -296,3 +296,6 @@
 [submodule "src/extras/etc2comp"]
 	path = src/extras/etc2comp
 	url = https://github.com/google/etc2comp.git
+[submodule "src/extras/nvidia-texture-tools"]
+	path = src/extras/nvidia-texture-tools
+	url = https://github.com/castano/nvidia-texture-tools.git
