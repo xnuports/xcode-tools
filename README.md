@@ -69,7 +69,7 @@ done.
 
 | Where | What |
 |---|---|
-| `usr/bin` | our 18 reimplementations, plus headerdoc, pngcrush, `xml2man`, `resolveLinks`, `make`/`gnumake`, `bsdmake`, `bmake` |
+| `usr/bin` | our 19 reimplementations, plus headerdoc, pngcrush, `xml2man`, `resolveLinks`, `make`/`gnumake`, `bsdmake`, `bmake` |
 | `Toolchains/XcodeDefault.xctoolchain/usr/bin` | `clang`/`clang++`/`cc`/`c++`/`cpp`, `ld` (Mach-O) and `ld.lld` (ELF), the cctools set, the llvm-* tools, `dsymutil`, developer_cmds, `flex`, `gperf` |
 | `Toolchains/XcodeDefault.xctoolchain/usr/lib` | `libtapi.dylib`, clang's resource directory |
 | `usr/libexec` | `PlistBuddy` |
@@ -113,7 +113,7 @@ tools, each checked case by case against Apple's own binaries; Rez and
 ResMerger produce byte-identical resource forks, and Rez compiles the `data`
 and `read` statements — `type`/`resource` declarations are still to come),
 `xcdebug`, `xcresulttool`
-(`get object`),
+(`get object`), `xccov` (`view --report`),
 (`list` and `export --toc`; recording is
 not implemented and says so — it reads the kernel trace facilities through
 interfaces Apple does not publish, and writes the undocumented `.trace`

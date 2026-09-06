@@ -49,6 +49,7 @@ PROGS+=	openxc-tools/xcdebug xcdebug usr/bin
 # the port there is nothing to link against.
 .if ${MK_PORTS:tl} == "yes"
 PROGS+=	openxc-tools/xcresulttool xcresulttool usr/bin
+PROGS+=	openxc-tools/xccov xccov usr/bin
 .endif
 
 .if ${MK_TOOLCHAIN:tl} == "yes"
