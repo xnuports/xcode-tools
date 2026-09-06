@@ -320,3 +320,6 @@
 [submodule "src/extras/ktool"]
 	path = src/extras/ktool
 	url = https://github.com/0cyn/ktool
+[submodule "src/extras/mootool"]
+	path = src/extras/mootool
+	url = https://github.com/hack-different/mootool
