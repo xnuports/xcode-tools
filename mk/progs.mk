@@ -40,6 +40,9 @@ PROGS+=	openxc-tools/Rez DeRez usr/bin
 PROGS+=	openxc-tools/Rez ResMerger usr/bin
 PROGS+=	openxc-tools/Rez Rez usr/bin
 
+# TextureConverter, the tool around the compressor ports in src/extras.
+PROGS+=	openxc-tools/TextureConverter TextureConverter usr/bin
+
 # TextureAtlas, the SpriteKit atlas compiler.
 PROGS+=	openxc-tools/TextureAtlas TextureAtlas usr/bin
 
