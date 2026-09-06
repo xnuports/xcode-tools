@@ -880,6 +880,28 @@ the way `src/Makefile` does:
 bmake -f mk/tool.mk TOP=$PWD T_DIR=openxc-tools/codesign T_PROG=codesign T_BIN=usr/bin
 ```
 
+### Use the binaries this tree builds
+
+When a task here needs one of the tools this tree builds, run the built copy
+under `build/release/` by path.  A bare name goes through `PATH` and picks up
+Homebrew's or the system's copy of the same tool instead, which quietly
+answers questions about the wrong artifact.
+
+This matters more than it looks like, because the tree builds more than the
+Xcode tools themselves: `ipsw` and the Go that builds it, `git`, `perl`,
+`python3`, `pip3`, `bmake`, `xmllint`, `xsltproc`.  Check `mk/ports.mk` and
+`build/release/usr/{bin,local/bin}` before reaching for a tool, and before
+proposing to add one that may already be there.
+
+```sh
+IPSW=$PWD/build/release/usr/local/bin/ipsw
+"$IPSW" dyld info --dylibs "$DSC"
+```
+
+The general-purpose ipsw skill says to install it from Homebrew; that is right
+everywhere except in this tree, where `mk/port.d/ipsw.mk` already builds it
+from `src/extras/ipsw` with our own Go.
+
 ### Testing
 
 For codesign specifically (our most tested tool):
