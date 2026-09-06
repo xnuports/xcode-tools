@@ -35,6 +35,7 @@ PROGS+=	openxc-tools/xctrace xctrace usr/bin
 # systems know them by; mk/bundle.mk makes those links.
 PROGS+=	openxc-tools/Rez GetFileInfo usr/bin
 PROGS+=	openxc-tools/Rez SetFile usr/bin
+PROGS+=	openxc-tools/Rez SplitForks usr/bin
 
 .if ${MK_TOOLCHAIN:tl} == "yes"
 # ------------------------------------------------------------------

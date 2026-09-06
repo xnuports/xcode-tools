@@ -277,7 +277,7 @@ so these are ours, written against the behaviour of Apple's binaries.
 | ResMerger | Resource merger | ❌ Binary-only, no source |
 | GetFileInfo | File metadata query | ✅ Ours, `src/openxc-tools/Rez/` |
 | SetFile | File attribute setter | ✅ Ours, `src/openxc-tools/Rez/` |
-| SplitForks | Fork splitter | ❌ Binary-only, no source |
+| SplitForks | Fork splitter | ✅ Ours, `src/openxc-tools/Rez/` |
 
 ### 6.3 Xcode Toolchain Tools (no source)
 
