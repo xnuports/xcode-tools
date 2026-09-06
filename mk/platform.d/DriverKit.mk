@@ -29,7 +29,7 @@ XT_SDK_ROOT=		System/DriverKit
 # The C headers are the macOS ones restricted to what a driver may use, so
 # they are installed out of the MacOSX SDK this build has already assembled
 # rather than assembled again.  lib/driverkit-headers.txt is the restriction.
-XT_SDK_HEADERS_CMD=	${TOP}/mk/scripts/install-driverkit-headers.sh \
+XT_SDK_HEADERS_CMD=	${TOP}/mk/scripts/install-sdk-headers.sh DriverKit \
 			${TOP}/lib/driverkit-headers.txt \
 			${RELEASE}/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include \
 			${SDK_CONTENT_DIR}/usr/include

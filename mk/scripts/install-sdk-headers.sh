@@ -1,35 +1,39 @@
 #!/bin/sh
 #
-# install-driverkit-headers.sh -- fill in a DriverKit SDK's usr/include.
+# install-sdk-headers.sh -- fill in a platform SDK's usr/include.
 #
-# DriverKit's C headers are the macOS ones, restricted to what a userspace
-# driver may reach for.  They come from the same open sources, so rather than
-# assembling them a second time this installs them out of the MacOSX SDK that
-# has already been built here, following the manifest in
-# lib/driverkit-headers.txt.
+# The C headers of every Darwin platform are the macOS ones, restricted to
+# what that platform is allowed to reach for -- DriverKit drops everything a
+# userspace driver has no business calling, iPhoneOS and its relatives drop a
+# smaller set.  They come from the same open sources, so rather than
+# assembling them once per platform this installs them out of the MacOSX SDK
+# that has already been built here, following a per-platform manifest under
+# lib/.
 #
-# The two differ a little in content -- Apple's DriverKit stdio.h is three
-# lines from Apple's macOS stdio.h, which is also how far ours is from
-# Apple's DriverKit one -- and in one case a lot: os/log.h is a genuinely
-# different header there.  Those differences are Apple's own SDK-vending
-# edits, not a different source, and closing them is separate work.
+# The copies are not byte-for-byte Apple's.  Apple's DriverKit stdio.h is
+# three lines from Apple's macOS stdio.h, which is also how far ours is from
+# Apple's DriverKit one; in one case it is much further, os/log.h being a
+# genuinely different header there.  Those differences are Apple's own
+# SDK-vending edits, not a different source, and closing them is separate
+# work.
 #
 # Anything the manifest names that this build has not produced is counted and
 # reported rather than passed over, so the shortfall stays in view.
 #
-# Usage: install-driverkit-headers.sh <manifest> <macos-include-dir> <dest>
+# Usage: install-sdk-headers.sh <label> <manifest> <macos-include-dir> <dest>
 #
 # Copyright (c) 2026 Sunneva N. Mariu <sunnevanattsol@gmail.com>
 # SPDX-License-Identifier: BSD-3-Clause
 
 set -e
 
-[ $# -eq 3 ] ||
-	{ echo "usage: $0 <manifest> <macos-include-dir> <dest>" >&2; exit 1; }
+[ $# -eq 4 ] ||
+	{ echo "usage: $0 <label> <manifest> <macos-include-dir> <dest>" >&2; exit 1; }
 
-MANIFEST="$1"
-SRC="$2"
-DEST="$3"
+LABEL="$1"
+MANIFEST="$2"
+SRC="$3"
+DEST="$4"
 
 [ -f "${MANIFEST}" ] || { echo "$0: no manifest at ${MANIFEST}" >&2; exit 1; }
 [ -d "${SRC}" ] || { echo "$0: no macOS include tree at ${SRC}" >&2; exit 1; }
@@ -56,8 +60,8 @@ while read -r header; do
 	fi
 done < "${MANIFEST}"
 
-# Apple's DriverKit headers are not always byte-for-byte the macOS ones, and
-# where they differ they sometimes drop an include: their sys/_types.h does
+# Apple's platform headers are not always byte-for-byte the macOS ones, and
+# where they differ they sometimes drop an include: DriverKit's sys/_types.h does
 # not reach for the pthread types, because a driver has no pthreads, so their
 # manifest has no sys/_pthread/ in it.  Ours does reach for them, and stopping
 # at the manifest would leave the include dangling and the SDK unusable.
@@ -100,16 +104,27 @@ while :; do
 	done < "${DEST}/.wanted.$$"
 
 	rm -f "${DEST}/.wanted.$$"
-	extra=$((extra + added))
 	[ "${added}" -gt 0 ] || break
 done
 
+# Counted from what is on disk rather than from what this run copied: the
+# manifest is installed unconditionally every time, but the closure only adds
+# what is missing, so counting additions made a rebuild report "+ 0" for a
+# tree that still holds all of them.
+present=$(find "${DEST}" -type f ! -name '.*' | wc -l | tr -d ' ')
+extra=$((present - installed))
+
 if [ "${missing}" -gt 0 ]; then
-	where=$(sed 's|/.*||' "${MISSING_LIST}" | sort -u | tr '\n' ' ')
-	echo "    DriverKit: ${installed} headers + ${extra} to close their" \
+	# One line per platform: name the first few and count the rest, rather
+	# than printing three hundred of them across the build log.
+	all=$(sed 's|/.*||' "${MISSING_LIST}" | sort -u)
+	count=$(echo "${all}" | wc -l | tr -d ' ')
+	where=$(echo "${all}" | head -8 | tr '\n' ' ')
+	[ "${count}" -gt 8 ] && where="${where}and $((count - 8)) more"
+	echo "    ${LABEL}: ${installed} headers + ${extra} to close their" \
 	     "includes, ${missing} not built here (${where})"
 else
-	echo "    DriverKit: ${installed} headers + ${extra} to close their includes"
+	echo "    ${LABEL}: ${installed} headers + ${extra} to close their includes"
 fi
 
 rm -f "${MISSING_LIST}"

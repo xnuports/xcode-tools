@@ -21,3 +21,13 @@ XT_SDK_INTERNAL_CANONICAL=	watchos${XT_SDK_VERSION}.internal
 XT_DEPLOYMENT_TARGET=	${XT_SDK_VERSION}
 
 XT_SDK_ARCHS=		arm64_32 arm64
+
+# The C headers are the macOS ones restricted to what this platform may use,
+# so they are installed out of the MacOSX SDK this build has already
+# assembled rather than assembled again.  lib/watchos-headers.txt is the
+# restriction.  Unlike DriverKit this SDK's content sits at the top of the
+# bundle, as macOS's does, so there is no XT_SDK_ROOT.
+XT_SDK_HEADERS_CMD=	${TOP}/mk/scripts/install-sdk-headers.sh WatchOS \
+			${TOP}/lib/watchos-headers.txt \
+			${RELEASE}/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include \
+			${SDK_CONTENT_DIR}/usr/include
