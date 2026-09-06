@@ -284,3 +284,6 @@
 [submodule "src/extras/zstd"]
 	path = src/extras/zstd
 	url = https://github.com/facebook/zstd.git
+[submodule "src/swiftlang-llvm/swift-corelibs-xctest"]
+	path = src/swiftlang-llvm/swift-corelibs-xctest
+	url = https://github.com/swiftlang/swift-corelibs-xctest.git
