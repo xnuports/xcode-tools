@@ -62,6 +62,10 @@ PORTS+=	apple/libxml2 libxml2 usr/local/bin
 PORTS+=	apple/libxslt libxslt usr/local/bin
 PORTS+=	apple/xar xar usr/bin
 
+# ncurses, also Apple's.  Nothing is installed but headers: the SDK needs
+# curses.h and its friends, and the libraries belong to the OS.
+PORTS+=	apple/ncurses ncurses usr/local/lib
+
 # ------------------------------------------------------------------
 # Go, and ipsw which is written in it.  Neither is something Xcode
 # ships, so both go to usr/local.  Go is pinned to a release tag --

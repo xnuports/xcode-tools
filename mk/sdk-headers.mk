@@ -772,7 +772,8 @@ sdk-stubs:
 
 	# and the rest, each its own dylib rather than part of libSystem.
 .for l v in libz 1 libcurl 4 libedit 3 libexpat 1 libbz2 1.0 \
-	     libxml2 2 libxslt 1 libexslt 0 liblzma 5
+	     libxml2 2 libxslt 1 libexslt 0 liblzma 5 \
+	     libncurses 5.4 libform 5.4 libmenu 5.4 libpanel 5.4
 	@${TOP}/mk/scripts/make-tbd.sh /usr/lib/${l}.${v}.dylib \
 	    ${SDK_LIB}/${l}.${v}.tbd 2>/dev/null || true
 	@[ -f ${SDK_LIB}/${l}.${v}.tbd ] && \
@@ -780,6 +781,10 @@ sdk-stubs:
 .endfor
 	@[ -f ${SDK_LIB}/libobjc.A.tbd ] && \
 	    ln -sfn libobjc.A.tbd ${SDK_LIB}/libobjc.tbd || true
+	# ncurses carries a second alias Apple ship and the loop above does
+	# not make: the major-only name beside the unversioned one.
+	@[ -f ${SDK_LIB}/libncurses.5.4.tbd ] && \
+	    ln -sfn libncurses.5.4.tbd ${SDK_LIB}/libncurses.5.tbd || true
 
 # Builds xnu far enough to generate the headers the two blocks above
 # take.  Kept out of sdk-headers because it wants the network, a Kernel

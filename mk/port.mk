@@ -70,6 +70,11 @@
 #			copying and before configure -- the ports-style
 #			post-extract step.  Requires P_COPY (the default),
 #			since it modifies the tree.
+#	P_POST_CONFIGURE  shell command run inside the build directory after
+#			configure and before make.  For a project whose
+#			configure leaves something for a second step to
+#			finish -- ncurses, whose generated curses.head still
+#			carries a marker Apple's generate-syms.py fills in.
 #	P_POST_BUILD	shell command run inside the build directory after
 #			the port's build step and before anything is copied
 #			out of it.  P_POST_STAGE is the equivalent for ports
@@ -268,6 +273,10 @@ ${P_WORKDIR}/.configured: ${P_CONFDEP}
 		${P_CONFIGURE_ARGS} > ${P_WORKDIR}/configure.log 2>&1 || \
 		{ ${ECHO} "port: ${P_NAME}: configure failed, see ${P_WORKDIR}/configure.log"; \
 		  tail -20 ${P_WORKDIR}/configure.log; exit 1; }
+.endif
+.if defined(P_POST_CONFIGURE)
+	@${ECHO} "port: post-configure ${P_NAME}"
+	@cd ${P_OBJDIR} && ${P_POST_CONFIGURE}
 .endif
 	@touch ${.TARGET}
 
