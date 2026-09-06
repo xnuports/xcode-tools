@@ -773,7 +773,8 @@ sdk-stubs:
 	# and the rest, each its own dylib rather than part of libSystem.
 .for l v in libz 1 libcurl 4 libedit 3 libexpat 1 libbz2 1.0 \
 	     libxml2 2 libxslt 1 libexslt 0 liblzma 5 \
-	     libncurses 5.4 libform 5.4 libmenu 5.4 libpanel 5.4
+	     libncurses 5.4 libform 5.4 libmenu 5.4 libpanel 5.4 \
+	     libsqlite3 0
 	@${TOP}/mk/scripts/make-tbd.sh /usr/lib/${l}.${v}.dylib \
 	    ${SDK_LIB}/${l}.${v}.tbd 2>/dev/null || true
 	@[ -f ${SDK_LIB}/${l}.${v}.tbd ] && \

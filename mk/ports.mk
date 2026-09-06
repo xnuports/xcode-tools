@@ -66,6 +66,10 @@ PORTS+=	apple/xar xar usr/bin
 # curses.h and its friends, and the libraries belong to the OS.
 PORTS+=	apple/ncurses ncurses usr/local/lib
 
+# SQLite.  Upstream's, at the version Apple's header declares -- they do not
+# publish theirs.  Headers only; the library is the OS's.
+PORTS+=	extras/sqlite sqlite usr/local/lib
+
 # ------------------------------------------------------------------
 # Go, and ipsw which is written in it.  Neither is something Xcode
 # ships, so both go to usr/local.  Go is pinned to a release tag --
