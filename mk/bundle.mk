@@ -371,6 +371,17 @@ bundle-makefiles: bundle-dirs
 # used as their binutils counterparts.  `ld` is not among them: that is
 # ld64, the Mach-O linker, and it stays.
 bundle-aliases: bundle-dirs
+	# The resource tools.  Apple keep the binaries in Developer/usr/bin
+	# and put a link to each in Developer/Tools, which is the path the
+	# older build systems and .pbproj files reach for.  Only the ones
+	# this tree has actually built get a link.
+.for t in Rez DeRez ResMerger SetFile GetFileInfo SplitForks
+	@if [ -e ${RELEASE}/usr/bin/${t} ]; then \
+		mkdir -p ${RELEASE}/Tools; \
+		ln -sfn ../usr/bin/${t} ${RELEASE}/Tools/${t}; \
+		${ECHO} "alias: Tools/${t} -> ../usr/bin/${t}"; \
+	 fi
+.endfor
 .for a t in nm llvm-nm otool llvm-otool ld.lld lld \
 	    swift swift-frontend swiftc swift-frontend \
 	    llvm-readelf llvm-readobj llvm-strip llvm-objcopy \

@@ -263,15 +263,20 @@ These submodules provide source code for tools previously listed as "no source":
 | mig | IPC | ❌ No source (not in open-source releases) |
 | unwinddump | Debug | ❌ No source (Apple proprietary) |
 
-### 6.2 Resource Fork Tools (binary-only in `Developer/Tools/`)
+### 6.2 Resource Fork Tools (`Developer/Tools/`)
+
+Apple ship no source for any of these.  Retro68 has a Rez, but it is GPLv3,
+needs Boost and a bison newer than the one this tree has, is missing the
+ResourceFiles library it links against, and covers only Rez of the six --
+so these are ours, written against the behaviour of Apple's binaries.
 
 | Tool | Description | Status |
 |------|-------------|--------|
 | DeRez | Resource de-compiler | ❌ Binary-only, no source |
 | Rez | Resource compiler | ❌ Binary-only, no source |
 | ResMerger | Resource merger | ❌ Binary-only, no source |
-| GetFileInfo | File metadata query | ❌ Binary-only, no source |
-| SetFile | File attribute setter | ❌ Binary-only, no source |
+| GetFileInfo | File metadata query | ✅ Ours, `src/openxc-tools/Rez/` |
+| SetFile | File attribute setter | ✅ Ours, `src/openxc-tools/Rez/` |
 | SplitForks | Fork splitter | ❌ Binary-only, no source |
 
 ### 6.3 Xcode Toolchain Tools (no source)

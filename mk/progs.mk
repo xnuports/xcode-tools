@@ -30,6 +30,12 @@ PROGS+=	openxc-tools/xcrun xcrun usr/bin
 PROGS+=	openxc-tools/xcstringstool xcstringstool usr/bin
 PROGS+=	openxc-tools/xctrace xctrace usr/bin
 
+# The resource tools.  Apple keep the binaries in Developer/usr/bin and
+# symlink them into Developer/Tools, which is the name the older build
+# systems know them by; mk/bundle.mk makes those links.
+PROGS+=	openxc-tools/Rez GetFileInfo usr/bin
+PROGS+=	openxc-tools/Rez SetFile usr/bin
+
 .if ${MK_TOOLCHAIN:tl} == "yes"
 # ------------------------------------------------------------------
 # cctools (src/apple/distribution-Developer_Tools/cctools) -- MK_TOOLCHAIN tier.
