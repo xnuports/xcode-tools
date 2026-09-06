@@ -69,7 +69,7 @@ done.
 
 | Where | What |
 |---|---|
-| `usr/bin` | our 13 reimplementations, plus headerdoc, pngcrush, `xml2man`, `resolveLinks`, `make`/`gnumake`, `bsdmake`, `bmake` |
+| `usr/bin` | our 14 reimplementations, plus headerdoc, pngcrush, `xml2man`, `resolveLinks`, `make`/`gnumake`, `bsdmake`, `bmake` |
 | `Toolchains/XcodeDefault.xctoolchain/usr/bin` | `clang`/`clang++`/`cc`/`c++`/`cpp`, `ld` (Mach-O) and `ld.lld` (ELF), the cctools set, the llvm-* tools, `dsymutil`, developer_cmds, `flex`, `gperf` |
 | `Toolchains/XcodeDefault.xctoolchain/usr/lib` | `libtapi.dylib`, clang's resource directory |
 | `usr/libexec` | `PlistBuddy` |
@@ -108,8 +108,8 @@ identity or a `.p12`; Apple's own `codesign --verify` accepts what it produces
 as valid and as satisfying its designated requirement), `xcrun`,
 `xcodebuild`, `xcode-select`, `pkgbuild`, `productbuild`, `simctl`,
 `notarytool`, `devicectl`, `xcstringstool` (`print` and `compile`), `xctrace`, `GetFileInfo`,
-`SetFile` and `SplitForks` (three of the six resource tools, each checked
-case by case against Apple's own binaries),
+`SetFile`, `SplitForks` and `DeRez` (four of the six resource tools, each
+checked case by case against Apple's own binaries),
 (`list` and `export --toc`; recording is
 not implemented and says so — it reads the kernel trace facilities through
 interfaces Apple does not publish, and writes the undocumented `.trace`

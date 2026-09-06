@@ -36,6 +36,7 @@ PROGS+=	openxc-tools/xctrace xctrace usr/bin
 PROGS+=	openxc-tools/Rez GetFileInfo usr/bin
 PROGS+=	openxc-tools/Rez SetFile usr/bin
 PROGS+=	openxc-tools/Rez SplitForks usr/bin
+PROGS+=	openxc-tools/Rez DeRez usr/bin
 
 .if ${MK_TOOLCHAIN:tl} == "yes"
 # ------------------------------------------------------------------
