@@ -287,3 +287,6 @@
 [submodule "src/swiftlang-llvm/swift-corelibs-xctest"]
 	path = src/swiftlang-llvm/swift-corelibs-xctest
 	url = https://github.com/swiftlang/swift-corelibs-xctest.git
+[submodule "src/extras/astc-encoder"]
+	path = src/extras/astc-encoder
+	url = https://github.com/ARM-software/astc-encoder.git
