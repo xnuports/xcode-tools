@@ -308,3 +308,6 @@
 [submodule "src/remorix/PlistBuddy"]
 	path = src/remorix/PlistBuddy
 	url = https://github.com/Remorix/PlistBuddy.git
+[submodule "src/qemu/darwin-vm"]
+	path = src/qemu/darwin-vm
+	url = https://github.com/jprx/darwin-vm
