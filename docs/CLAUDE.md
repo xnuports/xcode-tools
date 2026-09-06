@@ -725,6 +725,67 @@ Enumerated from a stock Xcode `Developer/usr/bin`:
 | `xcstringstool` | missing — `.xcstrings` catalog processing |
 | `xcsigningtool` | not attempted, deliberately — see below |
 
+#### Why actool, ibtool, ictool and ibtoold are not reimplemented
+
+`actool`, `ibtool` and `ictool` are one binary shipped under three names --
+the same 92 KB client, differing only in the program name string, and all
+three report their errors under the `com.apple.actool.errors` key.  None of
+them does any work.  Each one finds `ibtoold`, daemonises it, writes its
+argument vector down a pipe and reads back an exit status; the strings
+`Could not locate ibtoold.` and `ibtool read exit status %ld` are the whole
+job.  Reimplementing the client is a couple of hundred lines and buys
+nothing, because the tool it starts is where the work is.
+
+`ibtoold` links AssetCatalogFoundation, AssetCatalogKit, CoreUI,
+IDEInterfaceBuilderKit, IBAutolayoutFoundation, IDEFoundation, IDEKit,
+DVTFoundation and Cocoa, and imports 395 symbols including 102 Objective-C
+classes.  That is a different measurement from the one taken for xccov and
+xcresulttool, where 37 and 42 imported symbols turned out to be Apple's
+internal factoring in front of a file format we could read directly.  Here
+the imports are the implementation: interface builder documents are compiled
+by IDEInterfaceBuilderKit, their constraints solved by
+IBAutolayoutFoundation, and asset catalogues written by CoreUI.
+
+There is a real format behind `actool` -- `Assets.car` is a BOMStore, and
+compiling one tiny 32x16 PNG produces 14 KB of it -- and reading and writing
+that is a bounded reverse-engineering project.  It is simply a much larger
+one than any tool in this tree so far: the rendition keys, the per-idiom,
+per-scale and per-appearance variants and CoreUI's packed image encodings
+are each their own format.  `ibtool` has no such bottom: compiling a
+storyboard means knowing the archived representation of every AppKit and
+UIKit class that can appear in one.
+
+So these are not documented as impossible, the way xcsigningtool is.  They
+are the two biggest single pieces of Xcode that this tree does not have, and
+they want to be their own projects rather than an afternoon inside somebody
+else's.
+
+#### Why cktool is not reimplemented
+
+Every one of its subcommands is a request to Apple's servers.  `save-token`
+puts an App Store Connect key in the keychain, and `export-schema`,
+`import-schema`, `create-record`, `query-records` and the rest each turn
+into an authenticated call to the CloudKit web service; the answers are
+whatever that service returns.  It is the same shape as xcsigningtool: no
+local format to read instead of the framework, and nothing checkable against
+Apple's binary without an Apple developer account and their servers
+answering.
+
+#### Why TextureConverter is only partly tractable
+
+At 7 MB it is the largest tool in Developer/usr/bin, and almost all of that
+is other people's compressors: it names ARM, ETC2COMP, ISPC, NVTT, PVRTC and
+STB as selectable back ends, and offers ASTC in every block size, BC1 through
+BC7, EAC, ETC2 and PVRTC, reading BMP, DDS, EXR, HDR, HEIC, JPG, KTX, KTX2,
+PNG, TGA, TIFF and WEBP.
+
+Reimplementing that from scratch would mean writing five texture compressors,
+which is not what a drop-in replacement needs: astc-encoder, etc2comp,
+ispc_texcomp and stb are all open source under licences this tree can carry,
+and the tractable shape of the work is to wire them in as ports and write the
+container, the CLI and the uncompressed paths ourselves.  That is a real
+project and a bounded one; it has not been started.
+
 #### Why xcsigningtool is not reimplemented
 
 It has one subcommand, cloud-sign, and it does not sign anything locally.

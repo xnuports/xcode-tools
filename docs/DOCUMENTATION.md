@@ -56,7 +56,10 @@ xcode-tools/
 │   │   │   └── xctrace/              # Trace recording & export
 │   │   ├── PlistBuddy/               # Submodule: open-source PlistBuddy
 │   │   ├── pngcrush/                 # Submodule: PNG optimization tool
+│   │   ├── agvtool/                  # OURS: apple-generic versioning
+│   │   ├── TextureAtlas/             # OURS: SpriteKit atlas compiler
 │   │   ├── TextureConverter/         # OURS: header stub (not yet built)
+│   │   ├── xarsigner/                # OURS: detached xar signing
 │   │   └── vmmap/                    # Submodule: third-party vmmap implementation
 │   ├── python/                       # Python runtime sources
 │   │   ├── cpython/                  # Submodule: CPython 3.14.7 source
@@ -474,16 +477,16 @@ We currently have **10 open-source reimaginations** of Apple's command-line tool
 
 | Tool | Category | Description |
 |------|----------|-------------|
-| actool | Asset Catalog | Compiles `.xcassets` into compiled asset catalogs |
-| ibtool | Interface Builder | Compiles `.xib`/`.xib` files into `.nib` |
-| ibtoold | Interface Builder | Daemon version of ibtool |
+| actool | Asset Catalog | Compiles `.xcassets` into an `Assets.car` | ⚪ Client stub only; the work is in `ibtoold` (docs/CLAUDE.md) |
+| ibtool | Interface Builder | Compiles `.xib`/`.storyboard` into `.nib` | ⚪ Same binary as actool; see docs/CLAUDE.md |
+| ibtoold | Interface Builder | The daemon actool/ibtool/ictool drive | ⚪ Links IDEInterfaceBuilderKit + CoreUI; see docs/CLAUDE.md |
 | coremlc | Core ML | Compiles Core ML models |
 | momc | Core Data | Compiles `.xcdatamodel` files |
 | mapc | Maps | Map template compiler |
 | copypng | Asset | PNG optimization/copy for iOS resources |
 | pngcrush | Asset | PNG optimization | ✅ Source available (`src/other/pngcrush/`) |
-| TextureAtlas | Asset | Texture atlas compiler |
-| TextureConverter | Asset | Texture format conversion |
+| TextureAtlas | Asset | SpriteKit texture atlas compiler | ✅ OURS (`src/openxc-tools/TextureAtlas/`) |
+| TextureConverter | Asset | Texture format conversion | ⚪ Wraps five third-party compressors; see docs/CLAUDE.md |
 | altool | App Store | App Store Transport / upload validation |
 | iTMSTransporter | App Store | App Store delivery tool |
 | bitcode-build-tool | Build | Bitcode linking tool |
@@ -508,15 +511,15 @@ We currently have **10 open-source reimaginations** of Apple's command-line tool
 | copySceneKitAssets | SceneKit | SceneKit asset copier |
 | realitytool | AR | RealityKit asset tool |
 | referenceobjectc | AR | AR reference object compiler |
-| ictool | Asset | Asset catalog inspection |
+| ictool | Asset | Icon compilation | ⚪ Same binary as actool; see docs/CLAUDE.md |
 | instrumentbuilder | Instruments | Trace template builder |
-| agvtool | Version | Version string management |
-| cktool | Code Signing | Key management tool |
+| agvtool | Version | Apple-generic versioning | ✅ OURS (`src/openxc-tools/agvtool/`) |
+| cktool | CloudKit | CloudKit schema and record client | ⚪ A client for Apple's service; see docs/CLAUDE.md |
 | ipatool | App Store | IPA packaging tool |
 | ipatool2 | App Store | IPA packaging (v2) |
 | iphoneos-optimize | Asset | iOS optimization tool |
 | placeholderutil | App Store | Placeholder image utility |
-| xarsigner | Archive | xar signing tool |
+| xarsigner | Archive | Detached xar/package signing | ✅ OURS (`src/openxc-tools/xarsigner/`) |
 | xccov | Testing | Coverage report generator |
 | xcresulttool | Testing | Test result processing |
 | xcsigningtool | Code Signing | Signing identity tool |
@@ -914,7 +917,7 @@ We currently have **10 open-source reimaginations** of Apple's command-line tool
 | Trace recording | ✅ Stub | ✅ Full | No actual tracing backend |
 | Compiler (C/C++/ObjC) | ✅ Via submodule | ✅ Full | LLVM/Clang open source |
 | Swift compiler | ✅ Via submodule | ✅ Full | Open source Swift |
-| Asset compilation | ❌ | ✅ Full | actool, TextureAtlas, etc. |
+| Asset compilation | ⚪ Partial | ✅ Full | TextureAtlas is ours; actool is not |
 | IB compilation | ❌ | ✅ Full | ibtool, ibtoold |
 | Resource fork tools | ❌ | ✅ Full | Rez/DeRez/SetFile/GetFileInfo binary-only, no source |
 | Debugging tools | ❌ | ✅ Full | lldb, leaks, vmmap, etc. |
@@ -948,7 +951,6 @@ We currently have **10 open-source reimaginations** of Apple's command-line tool
 5. **altool/iTMSTransporter** — App Store delivery
 6. **lldb** — Debugger (integrate from llvm-project)
 7. **stapler** — Signature stapling (for notarization workflow)
-8. **agvtool** — Version string management
 
 ### Phase 3: Developer Tools
 1. **atos, vmmap, symbols, leaks** — Debugging and profiling
@@ -962,7 +964,7 @@ We currently have **10 open-source reimaginations** of Apple's command-line tool
 1. **Rez/DeRez/SetFile/GetFileInfo** — Resource fork tools (available in `Tools/`)
 2. **copypng** — PNG optimization for iOS resources
 3. **sdef/sdp** — Scripting definition tools
-4. **TextureAtlas/TextureConverter** — Texture processing
+4. **TextureConverter** — Texture processing (TextureAtlas is done)
 
 ## 9. License Compliance
 
