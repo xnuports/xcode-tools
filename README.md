@@ -113,7 +113,11 @@ tools, each checked case by case against Apple's own binaries; Rez and
 ResMerger produce byte-identical resource forks, and Rez compiles the `data`
 and `read` statements — `type`/`resource` declarations are still to come),
 `xcdebug`, `xcresulttool`
-(`get object`), `xccov` (`view --report`),
+(`get object`), `xccov` (`view --report`), `TextureAtlas` (the SpriteKit
+atlas compiler; byte-identical pages and property lists for every output
+format, with the packer -- MaxRects, best-long-side-fit, the page guessed
+from the total area at a receding occupancy -- and libc++'s unstable sort
+both reproduced so that equal-sized sprites land where Apple puts them),
 (`list` and `export --toc`; recording is
 not implemented and says so — it reads the kernel trace facilities through
 interfaces Apple does not publish, and writes the undocumented `.trace`

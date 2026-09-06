@@ -104,6 +104,7 @@ xcode-tools/
 │   │   │   └── xctrace/            # trace recording (4 files, stub)
 │   │   ├── PlistBuddy/             # Submodule: open-source PlistBuddy
 │   │   ├── pngcrush/               # Submodule: pngcrush v1.8.1
+│   │   ├── TextureAtlas/           # OURS: SpriteKit atlas compiler (4 files)
 │   │   ├── TextureConverter/       # OURS: header stub
 │   │   └── vmmap/                  # Submodule: third-party vmmap implementation
 │   ├── python/                     # Python runtime sources
