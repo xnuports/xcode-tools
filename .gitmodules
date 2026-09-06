@@ -275,3 +275,6 @@
 [submodule "python-pip"]
 	path = src/python/pip
 	url = https://github.com/pypa/pip.git
+[submodule "src/apple/ncurses"]
+	path = src/apple/ncurses
+	url = https://github.com/apple-oss-distributions/ncurses.git
