@@ -332,3 +332,6 @@
 [submodule "src/extras/jonesforth-macos"]
 	path = src/extras/jonesforth-macos
 	url = https://github.com/siraben/jonesforth-macos
+[submodule "src/extras/elfsec"]
+	path = src/extras/elfsec
+	url = https://github.com/gracecondition/elfsec.git
