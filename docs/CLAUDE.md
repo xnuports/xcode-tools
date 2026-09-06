@@ -761,6 +761,30 @@ are the two biggest single pieces of Xcode that this tree does not have, and
 they want to be their own projects rather than an afternoon inside somebody
 else's.
 
+#### Why stapler is not reimplemented
+
+It looked like local format work -- attach a notarization ticket to a
+bundle, a package or a disk image -- and it is not.  Both of its
+subcommands begin by asking Apple for the ticket.
+
+`staple -v` on an unnotarized package says "Cannot download ticket. CDHash
+must be set."; `validate -v` on a notarized application prints the request
+it makes and the answer it gets:
+
+    Domain is api.apple-cloudkit.com
+    .../database/1/com.apple.gk.ticket-delivery/production/public/records/lookup
+
+The record is looked up by the code directory hash, and the ticket comes
+back from Apple's ticket-delivery database.  Nothing on this machine
+carries a stapled ticket to read the format out of either: every signed
+application in /Applications has an ordinary _CodeSignature/CodeResources
+and no ticket beside it, because Gatekeeper resolves them online.
+
+So there is no local artefact to reverse and nothing to check an
+implementation against without a notarized product whose ticket Apple still
+serves.  Our notarytool submits to the same service and can report what it
+says; stapling what comes back is the part that cannot be verified here.
+
 #### Why cktool is not reimplemented
 
 Every one of its subcommands is a request to Apple's servers.  `save-token`
