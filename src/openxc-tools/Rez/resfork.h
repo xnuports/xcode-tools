@@ -33,6 +33,14 @@ struct resource {
 	uint8_t		attrs;
 	uint8_t		*data;
 	uint32_t	length;
+
+	/*
+	 * The four bytes a reference list entry keeps for the Resource
+	 * Manager's handle.  Apple's ResMerger leaves them zero; their Rez
+	 * numbers the resources in the order they were written in the
+	 * source, in the top byte.  Carried here so both can be reproduced.
+	 */
+	uint32_t	reserved;
 };
 
 struct resfork {
@@ -68,6 +76,7 @@ uint8_t	*resfork_build(const struct resource *items, size_t count,
  */
 #define RESFORK_FILEREF_NEW	0x0900
 #define RESFORK_FILEREF_REOPEN	0x0800
+#define RESFORK_FILEREF_REZ	0x0a00
 int	resfork_write_file(const char *path, bool datafork,
 	    const uint8_t *bytes, size_t len);
 

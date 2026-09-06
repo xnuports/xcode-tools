@@ -176,6 +176,7 @@ resfork_parse(const uint8_t *b, size_t len, struct resfork *out,
 			res->type[4] = '\0';
 			res->id = (int16_t)be16(r);
 			res->attrs = r[4];
+			res->reserved = be32(r + 8);
 
 			if (off + 4 > len) {
 				*why = "a resource points outside the file";
@@ -367,6 +368,8 @@ resfork_build(const struct resource *items, size_t count, uint16_t fileref,
 			r[5] = (uint8_t)(off >> 16);
 			r[6] = (uint8_t)(off >> 8);
 			r[7] = (uint8_t)off;
+
+			wbe32(r + 8, items[i].reserved);
 
 			ref_at += 12;
 			nres++;
