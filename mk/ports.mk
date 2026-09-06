@@ -79,6 +79,7 @@ PORTS+=	extras/zstd zstd usr/local/lib
 # is library-only: the command line tool being replaced is ours.
 PORTS+=	extras/astc-encoder astcenc usr/local/lib
 PORTS+=	extras/stb stb usr/local/include
+PORTS+=	extras/etc2comp etc2comp usr/local/lib
 
 # ------------------------------------------------------------------
 # Go, and ipsw which is written in it.  Neither is something Xcode
