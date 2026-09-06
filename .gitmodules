@@ -278,3 +278,6 @@
 [submodule "src/apple/ncurses"]
 	path = src/apple/ncurses
 	url = https://github.com/apple-oss-distributions/ncurses.git
+[submodule "src/extras/sqlite"]
+	path = src/extras/sqlite
+	url = https://github.com/sqlite/sqlite.git
