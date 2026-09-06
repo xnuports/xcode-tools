@@ -224,13 +224,13 @@ These submodules provide source code for tools previously listed as "no source":
 | xcsigningtool | Code Signing | ❌ No source (Apple proprietary) |
 | stapler | Code Signing | ❌ No source (Apple proprietary) |
 | embeddedBinaryValidationUtility | Code Signing | ❌ No source (Apple proprietary) |
-| xccov | Testing | ❌ No source (Apple proprietary) |
-| xcresulttool | Testing | ❌ No source (Apple proprietary) |
+| xccov | Testing | ✅ Ours, `src/openxc-tools/xccov/` (`view --report`) |
+| xcresulttool | Testing | ✅ Ours, `src/openxc-tools/xcresulttool/` (`get object`) |
 | xcstringstool | Localization | ❌ No source (Apple proprietary) |
 | xctest | Testing | ❌ No source (Apple proprietary) |
 | xed | IDE | ❌ GUI app, not a CLI tool |
 | xcdebug | Debug | ❌ No source (Apple proprietary) |
-| xcindex-test | Debug | ❌ No source (Apple proprietary) |
+| xcindex-test | Debug | ❌ Not reimplementable — drives Xcode's build service, see below |
 | xcdevice | Device | ❌ No source (Apple proprietary) |
 | xcdiagnose | Debug | ❌ No source (Apple proprietary) |
 | atos | Debug | ❌ No source (Apple proprietary) |
@@ -717,13 +717,29 @@ Enumerated from a stock Xcode `Developer/usr/bin`:
 |------|--------|
 | `xcodebuild` | have (orchestration only — no compilation) |
 | `xctrace` | have (stub — no tracing backend) |
-| `xccov` | missing — parse LLVM coverage data, report text/JSON/HTML |
-| `xcresulttool` | missing — bundle/unbundle test results, export attachments |
+| `xccov` | `view --report [--json]` done; the tabular view, `diff` and `merge` remain |
+| `xcresulttool` | `get object` done; `get test-results`, `export`, `merge`, `compare` remain |
 | `xcstringstool` | missing — `.xcstrings` catalog processing |
 | `xcsigningtool` | missing — signing identity management, keychain |
 | `xctest` | missing — XCTest bundle runner |
 | `xcdebug` | missing |
-| `xcindex-test` | missing |
+| `xcindex-test` | not attempted, deliberately — see below |
+
+#### Why xcindex-test is not reimplemented
+
+It is a diagnostic REPL over the build-system APIs the index service calls,
+and Apple's own help says it may be renamed or removed.  Eleven of its twelve
+actions -- create-build-description, print-index-build-settings, index-files,
+prepare and the rest -- drive Xcode's build service live; there is no file
+format standing behind them the way the .xcresult store stands behind
+xcresulttool, so there is nothing to read instead of the frameworks.  It
+links DVTFoundation and IDEFoundation for workspace loading, and its output
+carries per-run timings, so most of it cannot be compared byte for byte
+either.
+
+The one action that does not need any of that, list-schemes, reads .xcscheme
+files -- which `xcodebuild -list` already does here, in
+src/openxc-tools/xcodebuild/project.c.
 | `xcdevice` | missing |
 | `xcdiagnose` | missing |
 
