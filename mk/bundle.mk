@@ -61,6 +61,26 @@ INTERNAL_SDK_SUBDIRS=	usr/include \
 			usr/local/lib \
 			System/Library/Frameworks \
 			System/Library/PrivateFrameworks
+SDK_SUBDIRS=		usr/include \
+			usr/lib \
+			System/Library/Frameworks
+
+# Where the SDK's own usr/ and System/ begin inside the .sdk bundle.  Empty
+# for the OS platforms, whose content sits at the top.  DriverKit describes a
+# runtime rooted at /System/DriverKit rather than at /, and its SDK is laid
+# out to say so: everything is one System/DriverKit/ deeper, and there is no
+# usr/ at the top at all.  SDKSettings stays where it is either way.
+XT_SDK_ROOT?=
+
+.if empty(XT_SDK_ROOT)
+SDK_CONTENT=		${XT_SDK}.sdk
+INTERNAL_SDK_CONTENT=	${XT_SDK_INTERNAL}.sdk
+.else
+SDK_CONTENT=		${XT_SDK}.sdk/${XT_SDK_ROOT}
+INTERNAL_SDK_CONTENT=	${XT_SDK_INTERNAL}.sdk/${XT_SDK_ROOT}
+.endif
+
+SDK_CONTENT_DIR=	${PLATFORM_DIR}/Developer/SDKs/${SDK_CONTENT}
 TC_DIR=		${RELEASE}/${XCTOOLCHAIN}
 
 # Version and deployment target are taken from the host SDK, so the
@@ -115,6 +135,8 @@ platforms:
 	@${MAKE} -f ${TOP}/mk/bundle.mk TOP=${TOP} \
 	    XT_PLATFORM_MK=${TOP}/mk/platform.d/${p}.mk \
 	    bundle-dirs bundle-platform bundle-sdk > /dev/null
+	@${MAKE} -f ${TOP}/mk/bundle.mk TOP=${TOP} \
+	    XT_PLATFORM_MK=${TOP}/mk/platform.d/${p}.mk bundle-sdk-content
 	@${ECHO} "   platform:  ${p}.platform"
 .endfor
 
@@ -132,10 +154,8 @@ bundles: bundle-dirs bundle-toolchain bundle-platform bundle-sdk bundle-shims bu
 
 bundle-dirs:
 .for d in ${XCTOOLCHAIN}/usr/bin ${XCTOOLCHAIN}/usr/lib ${XCTOOLCHAIN}/usr/libexec \
-	  Platforms/${XT_PLATFORM}.platform/Developer/SDKs/${XT_SDK}.sdk/usr/include \
-	  Platforms/${XT_PLATFORM}.platform/Developer/SDKs/${XT_SDK}.sdk/usr/lib \
-	  Platforms/${XT_PLATFORM}.platform/Developer/SDKs/${XT_SDK}.sdk/System/Library/Frameworks \
-	  ${INTERNAL_SDK_SUBDIRS:S|^|Platforms/${XT_PLATFORM}.platform/Developer/SDKs/${XT_SDK_INTERNAL}.sdk/|} \
+	  ${SDK_SUBDIRS:S|^|Platforms/${XT_PLATFORM}.platform/Developer/SDKs/${SDK_CONTENT}/|} \
+	  ${INTERNAL_SDK_SUBDIRS:S|^|Platforms/${XT_PLATFORM}.platform/Developer/SDKs/${INTERNAL_SDK_CONTENT}/|} \
 	  Platforms/${XT_PLATFORM}.platform/Developer/Library
 	@mkdir -p ${RELEASE}/${d}
 .endfor
@@ -240,6 +260,20 @@ ${PLATFORM_DIR}/Info.plist:
 
 bundle-sdk: ${SDK_DIR}/SDKSettings.plist ${INTERNAL_SDK_DIR}/SDKSettings.plist \
 	${SDK_DIR}/SDKSettings.json ${INTERNAL_SDK_DIR}/SDKSettings.json
+
+# Content for a platform whose SDK this build can fill in.  MacOSX is done by
+# mk/sdk-headers.mk, which knows how to assemble the headers from source; a
+# platform that only has to select from what that produced says so here.
+bundle-sdk-content:
+.if defined(XT_SDK_HEADERS_CMD) || defined(XT_SDK_FRAMEWORKS_CMD)
+	@${ECHO} "sdk: populating ${XT_SDK}.sdk"
+.endif
+.if defined(XT_SDK_HEADERS_CMD)
+	@${XT_SDK_HEADERS_CMD}
+.endif
+.if defined(XT_SDK_FRAMEWORKS_CMD)
+	@${XT_SDK_FRAMEWORKS_CMD}
+.endif
 
 # Both bundles come out of one emitter so their contents cannot drift
 # apart; what differs is the identity passed to it.
@@ -378,4 +412,5 @@ bundle-shims: bundle-dirs
 	@chmod 755 ${RELEASE}/usr/bin/xcrun-tool
 
 .PHONY: bundles bundle-dirs bundle-toolchain bundle-platform bundle-sdk \
+	bundle-sdk-content \
 	bundle-shims bundle-config bundle-aliases bundle-makefiles
