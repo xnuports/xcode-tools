@@ -78,6 +78,7 @@ PORTS+=	extras/zstd zstd usr/local/lib
 # the encoder Apple's own build links for that family of formats, and each
 # is library-only: the command line tool being replaced is ours.
 PORTS+=	extras/astc-encoder astcenc usr/local/lib
+PORTS+=	extras/stb stb usr/local/include
 
 # ------------------------------------------------------------------
 # Go, and ipsw which is written in it.  Neither is something Xcode
