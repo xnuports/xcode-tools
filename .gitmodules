@@ -290,3 +290,6 @@
 [submodule "src/extras/astc-encoder"]
 	path = src/extras/astc-encoder
 	url = https://github.com/ARM-software/astc-encoder.git
+[submodule "src/extras/stb"]
+	path = src/extras/stb
+	url = https://github.com/nothings/stb.git
