@@ -38,229 +38,9 @@
 #include <string.h>
 #include <unistd.h>
 
-#include <zstd.h>
-
-#include "plist.h"
+#include "xcresult.h"
 
 static const char *progname = "xcresulttool";
-
-/* --- the object tree ---------------------------------------------- */
-
-struct node;
-
-struct member {
-	char		*key;
-	struct node	*value;		/* NULL when the member is text */
-	char		*text;		/* set for K...V... members */
-};
-
-struct node {
-	char		*type;		/* _n of the type, or NULL */
-	struct node	*supertype;	/* _s: a type object of its own */
-	struct member	*members;
-	size_t		nmembers;
-	struct node	**values;	/* Array elements */
-	size_t		nvalues;
-};
-
-/* --- parsing ------------------------------------------------------ */
-
-struct parser {
-	const char	*p;
-	const char	*end;
-	bool		 failed;
-	int		 bad_byte;	/* what stopped it, for the message */
-};
-
-static struct node	*parse_value(struct parser *ps);
-
-/*
- * Types are spelled out once and referred to by name after that, so what a
- * type derives from is only stated at its first mention.  This remembers it,
- * because Apple's output repeats the supertype at every mention.
- */
-static struct {
-	char		*name;
-	struct node	*supertype;
-} seen_types[256];
-static size_t	nseen_types;
-
-static void
-remember_type(const char *name, struct node *supertype)
-{
-	size_t i;
-
-	if (name == NULL || supertype == NULL)
-		return;
-
-	for (i = 0; i < nseen_types; i++)
-		if (strcmp(seen_types[i].name, name) == 0)
-			return;
-
-	if (nseen_types < sizeof(seen_types) / sizeof(seen_types[0])) {
-		seen_types[nseen_types].name = strdup(name);
-		seen_types[nseen_types].supertype = supertype;
-		nseen_types++;
-	}
-}
-
-static struct node *
-recall_supertype(const char *name)
-{
-	size_t i;
-
-	if (name == NULL)
-		return (NULL);
-	for (i = 0; i < nseen_types; i++)
-		if (strcmp(seen_types[i].name, name) == 0)
-			return (seen_types[i].supertype);
-	return (NULL);
-}
-
-static bool
-eat(struct parser *ps, char c)
-{
-	if (ps->p < ps->end && *ps->p == c) {
-		ps->p++;
-		return (true);
-	}
-	return (false);
-}
-
-/*
- * A counted token: a letter, a decimal length, a colon, then that many
- * bytes.  Returns them as a fresh string.
- */
-static char *
-parse_counted(struct parser *ps, char letter)
-{
-	size_t len = 0;
-	char *out;
-
-	if (ps->p >= ps->end || *ps->p != letter)
-		return (NULL);
-	ps->p++;
-
-	while (ps->p < ps->end && *ps->p >= '0' && *ps->p <= '9')
-		len = len * 10 + (size_t)(*ps->p++ - '0');
-
-	if (!eat(ps, ':') || (size_t)(ps->end - ps->p) < len) {
-		ps->failed = true;
-		return (NULL);
-	}
-
-	out = malloc(len + 1);
-	if (out == NULL) {
-		ps->failed = true;
-		return (NULL);
-	}
-	memcpy(out, ps->p, len);
-	out[len] = '\0';
-	ps->p += len;
-	return (out);
-}
-
-static void
-add_member(struct node *n, char *key, struct node *value, char *text)
-{
-	struct member *grown = realloc(n->members,
-	    (n->nmembers + 1) * sizeof(*grown));
-
-	if (grown == NULL)
-		return;
-	n->members = grown;
-	n->members[n->nmembers].key = key;
-	n->members[n->nmembers].value = value;
-	n->members[n->nmembers].text = text;
-	n->nmembers++;
-}
-
-static void
-add_value(struct node *n, struct node *v)
-{
-	struct node **grown = realloc(n->values,
-	    (n->nvalues + 1) * sizeof(*grown));
-
-	if (grown == NULL)
-		return;
-	n->values = grown;
-	n->values[n->nvalues++] = v;
-}
-
-static struct node *
-parse_value(struct parser *ps)
-{
-	struct node *n;
-
-	if (!eat(ps, '[')) {
-		ps->failed = true;
-		if (ps->bad_byte < 0 && ps->p < ps->end)
-			ps->bad_byte = (unsigned char)*ps->p;
-		return (NULL);
-	}
-
-	n = calloc(1, sizeof(*n));
-	if (n == NULL) {
-		ps->failed = true;
-		return (NULL);
-	}
-
-	/*
-	 * The type, spelled out once and referred to by name afterwards.
-	 * Only _n and _s are ever in it.
-	 */
-	if (ps->p < ps->end && *ps->p == 'T') {
-		struct node *t;
-
-		ps->p++;
-		t = parse_value(ps);
-		if (t != NULL) {
-			size_t i;
-
-			for (i = 0; i < t->nmembers; i++) {
-				if (strcmp(t->members[i].key, "_n") == 0)
-					n->type = strdup(
-					    t->members[i].text ?
-					    t->members[i].text : "");
-				else if (strcmp(t->members[i].key, "_s") == 0)
-					/*
-					 * _s is not a string but a type
-					 * object like the one around it,
-					 * and it can carry an _s of its
-					 * own.
-					 */
-					n->supertype = t->members[i].value;
-			}
-		}
-		remember_type(n->type, n->supertype);
-	} else if (ps->p < ps->end && *ps->p == 'S') {
-		n->type = parse_counted(ps, 'S');
-		n->supertype = recall_supertype(n->type);
-	}
-
-	while (!ps->failed && ps->p < ps->end && *ps->p != ']') {
-		if (*ps->p == 'K') {
-			char *key = parse_counted(ps, 'K');
-
-			if (key == NULL)
-				break;
-			if (ps->p < ps->end && *ps->p == 'V')
-				add_member(n, key, NULL,
-				    parse_counted(ps, 'V'));
-			else
-				add_member(n, key, parse_value(ps), NULL);
-		} else if (*ps->p == '[') {
-			add_value(n, parse_value(ps));	/* Array element */
-		} else {
-			ps->failed = true;
-			ps->bad_byte = (unsigned char)*ps->p;
-			break;
-		}
-	}
-
-	(void)eat(ps, ']');
-	return (n);
-}
 
 /* --- JSON ---------------------------------------------------------- */
 
@@ -298,11 +78,11 @@ print_json_string(const char *s)
 	(void)putchar('"');
 }
 
-static void	print_node(const struct node *n, int depth);
+static void	print_node(const struct xcresult_node *n, int depth);
 
 /* The name a type object carries, and the type it derives from. */
 static const char *
-type_name_of(const struct node *t)
+type_name_of(const struct xcresult_node *t)
 {
 	size_t i;
 
@@ -314,8 +94,8 @@ type_name_of(const struct node *t)
 	return (NULL);
 }
 
-static const struct node *
-type_super_of(const struct node *t)
+static const struct xcresult_node *
+type_super_of(const struct xcresult_node *t)
 {
 	size_t i;
 
@@ -328,9 +108,9 @@ type_super_of(const struct node *t)
 }
 
 static void
-print_supertype(const struct node *t, int depth)
+print_supertype(const struct xcresult_node *t, int depth)
 {
-	const struct node *super = type_super_of(t);
+	const struct xcresult_node *super = type_super_of(t);
 
 	(void)fputs("{\n", stdout);
 	indent(depth + 1);
@@ -349,7 +129,7 @@ print_supertype(const struct node *t, int depth)
 }
 
 static void
-print_type(const struct node *n, int depth)
+print_type(const struct xcresult_node *n, int depth)
 {
 	indent(depth);
 	(void)fputs("\"_type\" : {\n", stdout);
@@ -369,7 +149,7 @@ print_type(const struct node *n, int depth)
 }
 
 static void
-print_node(const struct node *n, int depth)
+print_node(const struct xcresult_node *n, int depth)
 {
 	bool first = true;
 	size_t i;
@@ -426,153 +206,6 @@ print_node(const struct node *n, int depth)
 
 /* --- the bundle ---------------------------------------------------- */
 
-static char *
-read_whole(const char *path, size_t *len)
-{
-	struct stat st;
-	char *buf;
-	FILE *fp = fopen(path, "rb");
-
-	if (fp == NULL)
-		return (NULL);
-	if (fstat(fileno(fp), &st) != 0 || st.st_size < 0) {
-		(void)fclose(fp);
-		return (NULL);
-	}
-	buf = malloc((size_t)st.st_size + 1);
-	if (buf == NULL || fread(buf, 1, (size_t)st.st_size, fp) !=
-	    (size_t)st.st_size) {
-		(void)fclose(fp);
-		free(buf);
-		return (NULL);
-	}
-	(void)fclose(fp);
-	*len = (size_t)st.st_size;
-	buf[*len] = '\0';
-	return (buf);
-}
-
-/* The id of the root object, out of the bundle's Info.plist. */
-static char *
-bundle_root_id(const char *bundle)
-{
-	char path[PATH_MAX];
-	plist_node *root, *id, *hash;
-	char *text, *out = NULL;
-	size_t len;
-
-	(void)snprintf(path, sizeof(path), "%s/Info.plist", bundle);
-	text = read_whole(path, &len);
-	if (text == NULL)
-		return (NULL);
-
-	root = plist_parse_any(text, len);
-	if (root != NULL &&
-	    (id = plist_dict_get(root, "rootId")) != NULL &&
-	    (hash = plist_dict_get(id, "hash")) != NULL &&
-	    hash->string != NULL)
-		out = strdup(hash->string);
-
-	plist_free(root);
-	free(text);
-	return (out);
-}
-
-static struct node *
-load_object(const char *bundle, const char *id, int *bad_byte)
-{
-	char path[PATH_MAX];
-	struct parser ps;
-	struct node *n;
-	char *raw, *plain;
-	size_t len;
-
-	(void)snprintf(path, sizeof(path), "%s/Data/data.%s", bundle, id);
-	raw = read_whole(path, &len);
-	if (raw == NULL)
-		return (NULL);
-
-	/*
-	 * Small objects are stored as they are -- compressing forty bytes
-	 * makes them bigger -- so anything without the zstd magic is
-	 * already the serialisation.
-	 */
-	if (len < 4 || memcmp(raw, "\x28\xb5\x2f\xfd", 4) != 0) {
-		plain = raw;
-		goto parse;
-	}
-
-	/*
-	 * Streaming rather than one shot: these frames do not all declare
-	 * their content size, and a frame that does not would otherwise be
-	 * unreadable.
-	 */
-	{
-		ZSTD_DStream *ds = ZSTD_createDStream();
-		ZSTD_inBuffer in = { raw, len, 0 };
-		size_t cap = len * 4 + 4096;
-		size_t used = 0;
-
-		plain = malloc(cap);
-		if (ds == NULL || plain == NULL) {
-			free(raw);
-			free(plain);
-			if (ds != NULL)
-				(void)ZSTD_freeDStream(ds);
-			return (NULL);
-		}
-		(void)ZSTD_initDStream(ds);
-
-		for (;;) {
-			ZSTD_outBuffer out = { plain, cap, used };
-			size_t rc = ZSTD_decompressStream(ds, &out, &in);
-
-			used = out.pos;
-			if (ZSTD_isError(rc)) {
-				free(raw);
-				free(plain);
-				(void)ZSTD_freeDStream(ds);
-				return (NULL);
-			}
-			if (rc == 0 && in.pos == in.size)
-				break;
-			if (out.pos == cap) {
-				char *grown = realloc(plain, cap * 2);
-
-				if (grown == NULL) {
-					free(raw);
-					free(plain);
-					(void)ZSTD_freeDStream(ds);
-					return (NULL);
-				}
-				plain = grown;
-				cap *= 2;
-			} else if (in.pos == in.size && rc != 0) {
-				break;		/* truncated frame */
-			}
-		}
-		(void)ZSTD_freeDStream(ds);
-		len = used;
-	}
-parse:
-	plain[len] = '\0';
-
-	ps.p = plain;
-	ps.end = plain + len;
-	ps.failed = false;
-	ps.bad_byte = -1;
-	n = parse_value(&ps);
-	if (ps.failed) {
-		*bad_byte = ps.bad_byte;
-		free(plain);
-		return (NULL);
-	}
-	/* The tree keeps copies; the buffer is not needed past here. */
-	free(plain);
-	return (n);
-}
-
-/* The two lines an error prints; --help prints the long form. */
 static void
 usage_short(void)
 {
@@ -597,7 +230,7 @@ int
 main(int argc, char *argv[])
 {
 	const char *bundle = NULL, *id = NULL;
-	struct node *n;
+	struct xcresult_node *n;
 	char *root_id = NULL;
 	int bad_byte, i;
 
@@ -637,7 +270,7 @@ main(int argc, char *argv[])
 	}
 
 	if (id == NULL) {
-		root_id = bundle_root_id(bundle);
+		root_id = xcresult_root_id(bundle);
 		if (root_id == NULL) {
 			(void)fprintf(stderr, "Error: %s is not a result "
 			    "bundle.\n", bundle);
@@ -661,7 +294,7 @@ main(int argc, char *argv[])
 	}
 
 	bad_byte = -1;
-	n = load_object(bundle, id, &bad_byte);
+	n = xcresult_load(bundle, id, &bad_byte);
 	if (n == NULL) {
 		/*
 		 * Not every object in the store is one of these: logs and
