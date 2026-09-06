@@ -311,3 +311,6 @@
 [submodule "src/qemu/darwin-vm"]
 	path = src/qemu/darwin-vm
 	url = https://github.com/jprx/darwin-vm
+[submodule "src/apple/CarbonHeaders"]
+	path = src/apple/CarbonHeaders
+	url = https://github.com/apple-oss-distributions/CarbonHeaders
