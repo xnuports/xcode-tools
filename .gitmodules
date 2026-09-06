@@ -326,3 +326,6 @@
 [submodule "src/extras/unxip"]
 	path = src/extras/unxip
 	url = https://github.com/saagarjha/unxip
+[submodule "tools/xnu-build"]
+	path = tools/xnu-build
+	url = https://github.com/TheArchitectEngineer/xnu-build
