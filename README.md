@@ -69,7 +69,7 @@ done.
 
 | Where | What |
 |---|---|
-| `usr/bin` | our 15 reimplementations, plus headerdoc, pngcrush, `xml2man`, `resolveLinks`, `make`/`gnumake`, `bsdmake`, `bmake` |
+| `usr/bin` | our 16 reimplementations, plus headerdoc, pngcrush, `xml2man`, `resolveLinks`, `make`/`gnumake`, `bsdmake`, `bmake` |
 | `Toolchains/XcodeDefault.xctoolchain/usr/bin` | `clang`/`clang++`/`cc`/`c++`/`cpp`, `ld` (Mach-O) and `ld.lld` (ELF), the cctools set, the llvm-* tools, `dsymutil`, developer_cmds, `flex`, `gperf` |
 | `Toolchains/XcodeDefault.xctoolchain/usr/lib` | `libtapi.dylib`, clang's resource directory |
 | `usr/libexec` | `PlistBuddy` |
@@ -108,9 +108,10 @@ identity or a `.p12`; Apple's own `codesign --verify` accepts what it produces
 as valid and as satisfying its designated requirement), `xcrun`,
 `xcodebuild`, `xcode-select`, `pkgbuild`, `productbuild`, `simctl`,
 `notarytool`, `devicectl`, `xcstringstool` (`print` and `compile`), `xctrace`, `GetFileInfo`,
-`SetFile`, `SplitForks`, `DeRez` and `ResMerger` (five of the six resource
-tools, each checked case by case against Apple's own binaries, and ResMerger
-producing byte-identical resource forks),
+`SetFile`, `SplitForks`, `DeRez`, `ResMerger` and `Rez` (all six resource
+tools, each checked case by case against Apple's own binaries; Rez and
+ResMerger produce byte-identical resource forks, and Rez compiles the `data`
+and `read` statements — `type`/`resource` declarations are still to come),
 (`list` and `export --toc`; recording is
 not implemented and says so — it reads the kernel trace facilities through
 interfaces Apple does not publish, and writes the undocumented `.trace`

@@ -14,6 +14,11 @@
  * What this does cover is the round trip: DeRez writes data statements, and
  * these read them back into the same fork.
  *
+ * One known divergence, in a corner: with three or more successive -a runs,
+ * where an earlier one replaced a resource, the bytes in the data area come
+ * out in a different order than Apple's, though the map and every resource
+ * are the same.  A single -a matches across every combination tried.
+ *
  * Copyright (c) 2026 Sunneva N. Mariu <sunnevanattsol@gmail.com>
  * SPDX-License-Identifier: BSD-3-Clause
  */

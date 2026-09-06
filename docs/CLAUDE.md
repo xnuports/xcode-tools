@@ -273,7 +273,7 @@ so these are ours, written against the behaviour of Apple's binaries.
 | Tool | Description | Status |
 |------|-------------|--------|
 | DeRez | Resource de-compiler | ✅ Ours, `src/openxc-tools/Rez/` (data statements; type-directed output waits on Rez) |
-| Rez | Resource compiler | ❌ Binary-only, no source |
+| Rez | Resource compiler | ✅ Ours, `src/openxc-tools/Rez/` (`data`/`read`; `type`/`resource` not yet) |
 | ResMerger | Resource merger | ✅ Ours, `src/openxc-tools/Rez/` |
 | GetFileInfo | File metadata query | ✅ Ours, `src/openxc-tools/Rez/` |
 | SetFile | File attribute setter | ✅ Ours, `src/openxc-tools/Rez/` |
