@@ -112,7 +112,10 @@ as valid and as satisfying its designated requirement), `xcrun`,
 tools, each checked case by case against Apple's own binaries; Rez and
 ResMerger produce byte-identical resource forks, and Rez compiles the `data`
 and `read` statements — `type`/`resource` declarations are still to come),
-`xcdebug`, `xcresulttool`
+`xarsigner` (both halves of the detached
+package-signing flow, byte-identical on real Installer packages; a signature
+it embeds over its own `--simulate` digest is one `pkgutil --check-signature`
+verifies), `xcdebug`, `xcresulttool`
 (`get object`), `xccov` (`view --report`), `TextureAtlas` (the SpriteKit
 atlas compiler; byte-identical pages and property lists for every output
 format, with the packer -- MaxRects, best-long-side-fit, the page guessed

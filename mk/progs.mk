@@ -43,6 +43,9 @@ PROGS+=	openxc-tools/Rez Rez usr/bin
 # TextureAtlas, the SpriteKit atlas compiler.
 PROGS+=	openxc-tools/TextureAtlas TextureAtlas usr/bin
 
+# xarsigner, which puts a detached signature into a xar archive.
+PROGS+=	openxc-tools/xarsigner xarsigner usr/bin
+
 # xcdebug, which asks Xcode to attach to a process or run a scheme.
 PROGS+=	openxc-tools/xcdebug xcdebug usr/bin
 

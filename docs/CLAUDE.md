@@ -105,6 +105,7 @@ xcode-tools/
 │   │   ├── PlistBuddy/             # Submodule: open-source PlistBuddy
 │   │   ├── pngcrush/               # Submodule: pngcrush v1.8.1
 │   │   ├── TextureAtlas/           # OURS: SpriteKit atlas compiler (4 files)
+│   │   ├── xarsigner/              # OURS: detached xar signing (1 file)
 │   │   ├── TextureConverter/       # OURS: header stub
 │   │   └── vmmap/                  # Submodule: third-party vmmap implementation
 │   ├── python/                     # Python runtime sources
