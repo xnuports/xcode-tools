@@ -8,6 +8,7 @@
 #ifndef TEXTURECONVERTER_DECODE_H
 #define TEXTURECONVERTER_DECODE_H
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -38,6 +39,13 @@ uint8_t	*decode_astc_u8(const uint8_t *blocks, size_t len, int w, int h,
 	    int block_x, int block_y);
 float	*decode_blocks(const uint8_t *blocks, size_t len, int w, int h,
 	    enum tc_decode);
+
+/*
+ * EAC_R11 and EAC_RG11, which neither library here will read back.  "two"
+ * selects the dual-channel form.  See eac.c.
+ */
+float	*decode_eac(const uint8_t *blocks, size_t len, int w, int h,
+	    bool two);
 
 #ifdef __cplusplus
 }

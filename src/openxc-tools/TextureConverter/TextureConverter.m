@@ -1203,7 +1203,7 @@ do_decompress(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 	enum tc_decode dec = TC_DEC_BC1;
 	uint32_t gl, base, metal, ogl, obase, ometal;
 	int bx, by, obx, oby, i, n;
-	bool astc, hdr;
+	bool astc, eac, hdr;
 	const char *oname;
 
 	if (out.length == 0) {
@@ -1224,8 +1224,9 @@ do_decompress(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 		return (255);
 	}
 	astc = strncmp(name, "ASTC", 4) == 0;
+	eac = strcmp(name, "EAC_R11") == 0 || strcmp(name, "EAC_RG11") == 0;
 	hdr = strcmp(name, "BC6U") == 0 || strcmp(name, "BC6S") == 0;
-	if (!astc && !decode_format_of(name, &dec)) {
+	if (!astc && !eac && !decode_format_of(name, &dec)) {
 		printf("Error: Decompressing \"%s\" is not implemented in "
 		    "this build!\n", name);
 		ktx_free(&k);
@@ -1276,8 +1277,12 @@ do_decompress(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 			    channels, &sizes[i]);
 			free(px);
 		} else {
-			float *pixels = decode_blocks(k.level[i].data,
-			    k.level[i].len, widths[i], heights[i], dec);
+			float *pixels = eac ?
+			    decode_eac(k.level[i].data, k.level[i].len,
+			        widths[i], heights[i],
+			        strcmp(name, "EAC_RG11") == 0) :
+			    decode_blocks(k.level[i].data, k.level[i].len,
+			        widths[i], heights[i], dec);
 
 			if (pixels == NULL) {
 				printf("Error: Decompression failed!\n");
