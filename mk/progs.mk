@@ -228,16 +228,6 @@ PROGS+=	remorix/AKCmds/tiff2icns tiff2icns usr/bin
 PROGS+=	remorix/AKCmds/tops tops usr/bin
 
 # ------------------------------------------------------------------
-# bsdmake (src/extras/bsdmake/) -- Apple's BSD make.
-#
-# Xcode ships this as Developer/usr/bin/bsdmake.  Its own Makefile
-# depends on <bsd.prog.mk> and the full BSD make include chain, so
-# we compile it directly via mk/tool.mk with an explicit source list.
-# The mk/ files it ships are copied into usr/share/mk/ by the
-# tool fragment (mk/tool.d/bsdmake.mk).
-# ------------------------------------------------------------------
-
-# ------------------------------------------------------------------
 # jonesforth (src/extras/jonesforth-macos) -- a FORTH compiler that is
 # also a tutorial, ported to arm64 macOS.
 #
