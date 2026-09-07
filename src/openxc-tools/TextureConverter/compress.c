@@ -72,11 +72,27 @@ compress_astc(const float *rgba, int w, int h,
 		flags |= ASTCENC_FLG_MAP_NORMAL;
 	else if (opt->alpha_weight)
 		flags |= ASTCENC_FLG_USE_ALPHA_WEIGHT;
+	/*
+	 * RGBM keeps the multiplier in alpha, and astcenc has to be told:
+	 * its heuristics and its error metric both change, and it wants the
+	 * reconstruction scale as well.  Six is the scale the encoding step
+	 * uses, and astcenc's own -rgbm weighs alpha at twice it.
+	 *
+	 * The flag and a normal map do not go together -- astcenc refuses
+	 * the pair -- but the scale and the weight still take effect, and
+	 * Apple set them there too.
+	 */
+	if (opt->rgbm && !opt->normal)
+		flags |= ASTCENC_FLG_MAP_RGBM;
 
 	if (astcenc_config_init(ASTCENC_PRF_LDR, (unsigned)opt->block_x,
 	    (unsigned)opt->block_y, 1, astc_quality(opt->quality), flags,
 	    &config) != ASTCENC_SUCCESS)
 		return (NULL);
+	if (opt->rgbm) {
+		config.rgbm_m_scale = TC_RGBM_RANGE;
+		config.cw_a_weight = 2.0f * TC_RGBM_RANGE;
+	}
 	if (astcenc_context_alloc(&config, 1, &ctx, NULL) != ASTCENC_SUCCESS)
 		return (NULL);
 

@@ -74,7 +74,7 @@ char *
 header_write(void **levels, const size_t *sizes, const int *widths,
     const int *heights, int nlevels, const char *name,
     const char *atc_format, const char *gamut, const char *ident,
-    _Bool srgb, size_t *out_len)
+    _Bool srgb, _Bool normal, size_t *out_len)
 {
 	struct text t = { NULL, 0, 0, 0 };
 	int i;
@@ -138,9 +138,14 @@ header_write(void **levels, const size_t *sizes, const int *widths,
 
 	addf(&t, "const ATC_Texture* Get%s()\n{\n", ident);
 	addf(&t, "\tconst ATC_Texture* pTexture = NULL;\n");
-	addf(&t, "\tATC_CreateTexture2D( NULL, %d, %d, %d, %s, %s, false, "
+	/*
+	 * The last argument of ATC_CreateTexture2D is whether the texture
+	 * is a normal map, which is also what takes the colour gamut to
+	 * None: a direction has no gamut, and --gamut_out is ignored there.
+	 */
+	addf(&t, "\tATC_CreateTexture2D( NULL, %d, %d, %d, %s, %s, %s, "
 	    "&pTexture );\n", widths[0], heights[0], nlevels, atc_format,
-	    gamut);
+	    gamut, normal ? "true" : "false");
 	for (i = 0; i < nlevels; i++)
 		addf(&t, "\n\tSetSurface%s(pTexture, 0, %d, %d, %d, %zu, "
 		    "%s_Mip%d);\n", ident, i, widths[i], heights[i], sizes[i],

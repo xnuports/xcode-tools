@@ -96,6 +96,56 @@ flip_image(float *rgba, int w, int h, bool flip_x, bool flip_y)
 }
 
 /*
+ * --rgbm_encoding.  The colour is divided by six and normalised against a
+ * multiplier kept in alpha, which is where the extra range comes from: a
+ * decoder multiplies the three channels by alpha and by six to get back
+ * what went in.
+ *
+ * The multiplier is quantised up to eight bits and floored at an eighth,
+ * so alpha never drops below 32/255 however dark the texel.  The range and
+ * the floor are not options -- Apple expose neither -- and both were read
+ * off their output: every reconstruction comes back to exactly six times
+ * the encoded colour, and the darkest texels all land on the same 32.
+ *
+ * The scale is a multiply by the reciprocal rather than a divide.  It
+ * matters at the boundary: a texel whose sixth lands exactly on a
+ * multiple of 1/255 rounds up either way with the reciprocal, and stays
+ * put with the divide, which is one step low for one texel in seven.
+ */
+static void
+rgbm_encode(float *rgba, int w, int h)
+{
+	static const float inv6 = 1.0f / TC_RGBM_RANGE;
+	size_t n = (size_t)w * (size_t)h, i;
+	int c;
+
+	for (i = 0; i < n; i++) {
+		float *px = &rgba[i * 4];
+		float mx = px[0] > px[1] ? px[0] : px[1];
+		float m;
+		int q;
+
+		if (px[2] > mx)
+			mx = px[2];
+		m = mx * inv6;
+		if (!(m > 0.125f))
+			m = 0.125f;
+		q = (int)ceilf(m * 255.0f);
+		if (q < 0)
+			q = 0;
+		if (q > 255)
+			q = 255;
+		m = (float)q / 255.0f;
+		for (c = 0; c < 3; c++) {
+			float v = px[c] * inv6 / m;
+
+			px[c] = v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v);
+		}
+		px[3] = m;
+	}
+}
+
+/*
  * --max_extent, which is not a resize: Apple halve the image with the
  * mipmap filter, over and over, until neither side is longer than the
  * extent.  The result is bit for bit the level of the mip chain that
@@ -137,7 +187,7 @@ static NSData *write_dds_generic(void **levels, const size_t *sizes,
     bool srgb);
 static NSData *write_header_generic(void **levels, const size_t *sizes,
     const int *widths, const int *heights, int nlevels, const char *name,
-    bool srgb, NSString *output,
+    bool srgb, bool normal, NSString *output,
     NSDictionary<NSString *, NSString *> *opts);
 
 /*
@@ -855,7 +905,8 @@ do_convert(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 	 * --alpha_mode=Premultiply writes the same texels as --normal_map
 	 * alone, so the premultiply is simply not done.
 	 */
-	if (!normal && alpha_mode_of(opts) == ALPHA_PREMULTIPLY)
+	if (!normal && opts[@"rgbm_encoding"] == nil &&
+	    alpha_mode_of(opts) == ALPHA_PREMULTIPLY)
 		premultiply_base(levels[0], widths[0], heights[0]);
 
 	/*
@@ -868,6 +919,18 @@ do_convert(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 		for (i = 0; i < n; i++)
 			image_gamma(levels[i], widths[i], heights[i],
 			    [opts[@"gamma_out"] floatValue], 0);
+	}
+
+	/*
+	 * Not for a normal map, for the reason nothing else here is: the
+	 * channels are a direction.  And it makes --alpha_mode=Premultiply
+	 * a no-op, since alpha stops being coverage the moment it carries
+	 * the multiplier: Apple write the same file with the two together
+	 * as with --rgbm_encoding alone.
+	 */
+	if (!normal && opts[@"rgbm_encoding"] != nil) {
+		for (i = 0; i < n; i++)
+			rgbm_encode(levels[i], widths[i], heights[i]);
 	}
 
 	{
@@ -888,7 +951,7 @@ do_convert(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 		        "RGBA32", false) :
 		    wants_header(output) ?
 		    write_header_generic(ptrs, sizes, widths, heights, n,
-		        "RGBA32", false, output, opts) :
+		        "RGBA32", false, normal, output, opts) :
 		    wants_ktx2(output) ?
 		    write_ktx2_generic(ptrs, sizes, widths, heights, n,
 		        "RGBA32", prem, false, options, annotate) :
@@ -982,23 +1045,27 @@ write_dds_generic(void **levels, const size_t *sizes, const int *widths,
 static NSData *
 write_header_generic(void **levels, const size_t *sizes, const int *widths,
     const int *heights, int nlevels, const char *name, bool srgb,
-    NSString *output, NSDictionary<NSString *, NSString *> *opts)
+    bool normal, NSString *output,
+    NSDictionary<NSString *, NSString *> *opts)
 {
 	NSString *gamut = opts[@"gamut_out"];
-	const char *gname = "atcColorGamutUnknown";
+	const char *gname = normal ? "atcColorGamutNone" :
+	    "atcColorGamutUnknown";
 	char buf[64];
 	char *text;
 	size_t len;
 	NSData *out;
 
-	if ([gamut caseInsensitiveCompare:@"sRGB"] == NSOrderedSame)
+	if (normal)
+		;			/* a direction has no gamut */
+	else if ([gamut caseInsensitiveCompare:@"sRGB"] == NSOrderedSame)
 		gname = "atcColorGamutSRGB";
 	else if ([gamut caseInsensitiveCompare:@"DisplayP3"] == NSOrderedSame)
 		gname = "atcColorGamutDisplayP3";
 	text = header_write(levels, sizes, widths, heights, nlevels, name,
 	    format_atc_for(name, srgb, buf, sizeof(buf)), gname,
 	    [[[output lastPathComponent] stringByDeletingPathExtension]
-	    UTF8String], srgb, &len);
+	    UTF8String], srgb, normal, &len);
 	if (text == NULL)
 		return (nil);
 	out = [NSData dataWithBytes:text length:len];
@@ -1315,6 +1382,7 @@ do_compress(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 	    caseInsensitiveCompare:@"Linear"] != NSOrderedSame;
 	aopt.alpha_weight = opts[@"alpha_weight"] != nil;
 	aopt.normal = normal;
+	aopt.rgbm = opts[@"rgbm_encoding"] != nil;
 
 	if ([filter caseInsensitiveCompare:@"Box"] == NSOrderedSame)
 		which = MIP_FILTER_BOX;
@@ -1374,7 +1442,8 @@ do_compress(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 	 * --alpha_mode=Premultiply writes the same texels as --normal_map
 	 * alone, so the premultiply is simply not done.
 	 */
-	if (!normal && alpha_mode_of(opts) == ALPHA_PREMULTIPLY)
+	if (!normal && opts[@"rgbm_encoding"] == nil &&
+	    alpha_mode_of(opts) == ALPHA_PREMULTIPLY)
 		premultiply_base(levels[0], widths[0], heights[0]);
 
 	/*
@@ -1387,6 +1456,18 @@ do_compress(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 		for (i = 0; i < n; i++)
 			image_gamma(levels[i], widths[i], heights[i],
 			    [opts[@"gamma_out"] floatValue], 0);
+	}
+
+	/*
+	 * Not for a normal map, for the reason nothing else here is: the
+	 * channels are a direction.  And it makes --alpha_mode=Premultiply
+	 * a no-op, since alpha stops being coverage the moment it carries
+	 * the multiplier: Apple write the same file with the two together
+	 * as with --rgbm_encoding alone.
+	 */
+	if (!normal && opts[@"rgbm_encoding"] != nil) {
+		for (i = 0; i < n; i++)
+			rgbm_encode(levels[i], widths[i], heights[i]);
 	}
 
 	for (i = 0; i < n; i++) {
@@ -1444,7 +1525,7 @@ do_compress(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 		        [fmt UTF8String], srgb) :
 		    wants_header(output) ?
 		    write_header_generic(blocks, sizes, widths, heights, n,
-		        [fmt UTF8String], srgb, output, opts) :
+		        [fmt UTF8String], srgb, normal, output, opts) :
 		    wants_ktx2(output) ?
 		    write_ktx2_generic(blocks, sizes, widths, heights, n,
 		        [fmt UTF8String],
@@ -1836,7 +1917,7 @@ do_decompress(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 			    heights, n, oname, false);
 		} else if (wants_header(out)) {
 			file = write_header_generic(outs, sizes, widths,
-			    heights, n, oname, false, out, opts);
+			    heights, n, oname, false, false, out, opts);
 		} else if (wants_ktx2(out)) {
 			file = write_ktx2_generic(outs, sizes, widths,
 			    heights, n, oname, false, false, options,

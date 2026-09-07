@@ -25,12 +25,16 @@ enum tc_quality {
 	TC_QUALITY_HIGHEST
 };
 
+/* The range --rgbm_encoding packs into, measured from Apple's output. */
+#define	TC_RGBM_RANGE	6.0f
+
 struct tc_astc_options {
 	int		block_x, block_y;
 	enum tc_quality	quality;
 	bool		perceptual;	/* --channel_weighting=Perceptual */
 	bool		alpha_weight;	/* --alpha_weight */
 	bool		normal;		/* --normal_map */
+	bool		rgbm;		/* --rgbm_encoding */
 };
 
 /*
