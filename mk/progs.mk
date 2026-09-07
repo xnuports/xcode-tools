@@ -240,3 +240,15 @@ PROGS+=	remorix/AKCmds/tops tops usr/bin
 # it, which is what makes the binary usable.
 # ------------------------------------------------------------------
 PROGS+=	extras/jonesforth-macos jonesforth usr/local/bin
+
+# ------------------------------------------------------------------
+# machsec (src/extras/machsec) -- reports the hardening a Mach-O binary
+# was built with.
+#
+# The toolchain, not usr/local: by the rule mk/ports.mk states for
+# src/extras, a tool that works on Mach-O belongs beside clang and ld.
+#
+# Needs the capstone port, which mk/ports.mk builds; every port is
+# built before any program, so the ordering holds.
+# ------------------------------------------------------------------
+PROGS+=	extras/machsec machsec ${XCTOOLCHAIN}/usr/bin

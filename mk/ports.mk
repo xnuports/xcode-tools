@@ -87,6 +87,11 @@ PORTS+=	extras/stb stb usr/local/include
 PORTS+=	extras/etc2comp etc2comp usr/local/lib
 PORTS+=	extras/nvidia-texture-tools nvtt usr/local/lib
 
+# Capstone, which machsec disassembles __TEXT with.  Library only, and it
+# has to come before machsec in mk/progs.mk -- which it does, since every
+# port is built before any program.
+PORTS+=	extras/capstone capstone usr/local/lib
+
 # ------------------------------------------------------------------
 # Go, and ipsw which is written in it.  Neither is something Xcode
 # ships, so both go to usr/local.  Go is pinned to a release tag --
