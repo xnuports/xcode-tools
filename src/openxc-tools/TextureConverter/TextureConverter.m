@@ -1324,6 +1324,270 @@ do_decompress(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 }
 
 /* ------------------------------------------------------------------ */
+/* Compare.                                                            */
+/* ------------------------------------------------------------------ */
+
+enum { CMP_MAX_LEVELS = 32 };
+
+/*
+ * Levels held as RGBA float.  Not bytes: BC6 decodes above 1.0 and Apple do
+ * not clamp it before measuring, so clamping here would report a smaller
+ * error than theirs.  Everything that arrives as eight bits is divided by
+ * 255 and multiplied back by 255 for the measure, which is exact.
+ */
+struct cmp_image {
+	float	*level[CMP_MAX_LEVELS];		/* w*h*4, no row padding */
+	int	 w[CMP_MAX_LEVELS], h[CMP_MAX_LEVELS];
+	int	 n;
+};
+
+static void
+cmp_free(struct cmp_image *im)
+{
+	int i;
+
+	for (i = 0; i < im->n; i++)
+		free(im->level[i]);
+	im->n = 0;
+}
+
+/* Bytes to the floats that name them exactly.  Frees what it is given. */
+static float *
+bytes_to_float(uint8_t *px, size_t n)
+{
+	float *out = malloc(n * sizeof(*out));
+	size_t i;
+
+	if (out != NULL) {
+		for (i = 0; i < n; i++)
+			out[i] = px[i] * (1.0f / 255.0f);
+	}
+	free(px);
+	return (out);
+}
+
+/*
+ * One level of an uncompressed container, whatever it stores, as RGBA.
+ * Rows are padded to four bytes on the way in and not on the way out.
+ */
+static float *
+unpack_level(const struct ktx_level *lv, bool is_float, int channels)
+{
+	float *out = calloc((size_t)lv->width * lv->height * 4, sizeof(*out));
+	size_t stride;
+	uint32_t x, y;
+	int c;
+
+	if (out == NULL)
+		return (NULL);
+	stride = is_float ?
+	    (size_t)lv->width * (size_t)channels * sizeof(float) :
+	    (((size_t)lv->width * (size_t)channels + 3) & ~(size_t)3);
+	if (stride * lv->height > lv->len) {
+		free(out);
+		return (NULL);
+	}
+	for (y = 0; y < lv->height; y++) {
+		for (x = 0; x < lv->width; x++) {
+			float *o = out + ((size_t)y * lv->width + x) * 4;
+
+			o[3] = 1.0f;
+			for (c = 0; c < channels; c++) {
+				if (is_float)
+					memcpy(&o[c], lv->data + y * stride +
+					    ((size_t)x * channels + c) *
+					    sizeof(float), sizeof(o[c]));
+				else
+					o[c] = lv->data[y * stride +
+					    (size_t)x * channels + c] *
+					    (1.0f / 255.0f);
+			}
+		}
+	}
+	return (out);
+}
+
+/*
+ * Load anything this tool can read as a stack of RGBA levels: a container,
+ * compressed or not, or an image file, which has one level.
+ */
+static bool
+cmp_load(NSString *path, struct cmp_image *im)
+{
+	NSData *data = [NSData dataWithContentsOfFile:path];
+	struct ktx k;
+	const char *name;
+	uint32_t gl, base, metal;
+	int bx, by, i;
+
+	memset(im, 0, sizeof(*im));
+	if (data == nil)
+		return (false);
+
+	if (!ktx_parse([data bytes], [data length], &k)) {
+		float *px;
+		int w, h;
+
+		/* Not a container: an image file, and one level of it. */
+		if ((px = load_rgba(path, ALPHA_PRESERVE, &w, &h)) == NULL)
+			return (false);
+		im->level[0] = px;
+		im->w[0] = w;
+		im->h[0] = h;
+		im->n = 1;
+		return (true);
+	}
+
+	name = k.version == 1 ? format_name_for_gl(k.gl_internal_format) :
+	    format_name_for_vk(k.vk_format);
+	if (name == NULL || !format_lookup(name, &gl, &base, &bx, &by,
+	    &metal)) {
+		ktx_free(&k);
+		return (false);
+	}
+	im->n = (int)k.nlevel;
+	if (im->n > CMP_MAX_LEVELS)
+		im->n = CMP_MAX_LEVELS;
+	for (i = 0; i < im->n; i++) {
+		const struct ktx_level *lv = &k.level[i];
+
+		im->w[i] = (int)lv->width;
+		im->h[i] = (int)lv->height;
+		if (bx == 1) {
+			int channels = base == 0x1903 ? 1 :
+			    base == 0x8227 ? 2 : base == 0x1907 ? 3 : 4;
+
+			im->level[i] = unpack_level(lv, format_is_float(name),
+			    channels);
+		} else if (strncmp(name, "ASTC", 4) == 0) {
+			/*
+			 * Through the eight bit decode, not the float one.
+			 * The two are not the same answer and Apple's is
+			 * this one, the same quantisation their
+			 * --mode=decompress writes.
+			 */
+			uint8_t *px = decode_astc_u8(lv->data, lv->len,
+			    im->w[i], im->h[i], bx, by);
+
+			im->level[i] = px == NULL ? NULL :
+			    bytes_to_float(px,
+			        (size_t)im->w[i] * im->h[i] * 4);
+		} else if (strcmp(name, "EAC_R11") == 0 ||
+		    strcmp(name, "EAC_RG11") == 0) {
+			im->level[i] = decode_eac(lv->data, lv->len,
+			    im->w[i], im->h[i],
+			    strcmp(name, "EAC_RG11") == 0);
+		} else {
+			enum tc_decode dec;
+
+			im->level[i] = decode_format_of(name, &dec) ?
+			    decode_blocks(lv->data, lv->len, im->w[i],
+			        im->h[i], dec) : NULL;
+		}
+		if (im->level[i] == NULL) {
+			im->n = i;
+			cmp_free(im);
+			ktx_free(&k);
+			return (false);
+		}
+	}
+	ktx_free(&k);
+	return (true);
+}
+
+/*
+ * Report how far apart two images are.
+ *
+ * The measure is Apple's, read off their tool: the mean squared error of
+ * red, green and blue in eight bit units, pooled over every mip level
+ * rather than taken per level and averaged, with alpha ignored entirely --
+ * two images whose colour matches and whose alpha does not are reported
+ * identical.  RMS is its square root and PSNR is 10*log10(255^2/MSE).
+ *
+ * A mismatch in size or level count is named and nothing is measured; their
+ * tool still prints the zeroed line after it, so this does too.
+ *
+ * Where their own compare is self-consistent this agrees with it exactly.
+ * It is not always self-consistent: asked to compare a compressed file with
+ * the very file its own --mode=decompress produced from it, their tool
+ * answers "identical" for ASTC, BC1 and BC3 but reports an error for BC4,
+ * ETC2_RGB8, EAC_R11 and EAC_RG11, so its compare reads those through
+ * something other than its own decompressor.  For BC5 it reports a
+ * difference of exactly zero and then prints PSNR:1.79...e308, which is
+ * 10*log10(255^2/0) -- its identity test and its measure disagree and the
+ * divide by zero is not guarded.  None of that is reproduced here.
+ */
+static int
+do_compare(NSString *path, NSDictionary<NSString *, NSString *> *opts)
+{
+	NSString *other = opts[@"compare"];
+	struct cmp_image a, b;
+	double se = 0.0, mse;
+	size_t count = 0;
+	int i;
+
+	if (other.length == 0) {
+		printf("Error: No comparison path specified!\n");
+		short_usage();
+		return (255);
+	}
+	/*
+	 * A format with no decoder here cannot be measured, and cmp_load
+	 * says so by failing.  Those are the same four --mode=decompress
+	 * refuses, for the same reason.
+	 */
+	if (!cmp_load(path, &a)) {
+		printf("Error: Could not read input file!\n");
+		return (255);
+	}
+	if (!cmp_load(other, &b)) {
+		cmp_free(&a);
+		printf("Error: Could not read comparison file!\n");
+		return (255);
+	}
+
+	if (a.n != b.n)
+		printf("NumMipmaps Differ: (%d != %d)\n", a.n, b.n);
+	else if (a.w[0] != b.w[0])
+		printf("Widths Differ: (%d != %d)\n", a.w[0], b.w[0]);
+	else if (a.h[0] != b.h[0])
+		printf("Heights Differ: (%d != %d)\n", a.h[0], b.h[0]);
+	else {
+		for (i = 0; i < a.n; i++) {
+			size_t j, n = (size_t)a.w[i] * a.h[i];
+
+			for (j = 0; j < n; j++) {
+				int c;
+
+				for (c = 0; c < 3; c++) {
+					double d = 255.0 *
+					    ((double)a.level[i][j * 4 + c] -
+					    (double)b.level[i][j * 4 + c]);
+
+					se += d * d;
+					count++;
+				}
+			}
+		}
+	}
+	cmp_free(&a);
+	cmp_free(&b);
+
+	if (count == 0) {
+		printf("Images differ. RMS:0.00 MSE:0.00 PSNR:0.00\n");
+		return (0);
+	}
+	mse = se / (double)count;
+	if (mse == 0.0) {
+		printf("Images are identical\n");
+		return (0);
+	}
+	printf("Images differ. RMS:%.2f MSE:%.2f PSNR:%.2f\n", sqrt(mse), mse,
+	    10.0 * log10(255.0 * 255.0 / mse));
+	return (0);
+}
+
+/* ------------------------------------------------------------------ */
 
 int
 main(int argc, char *argv[])
@@ -1386,10 +1650,9 @@ main(int argc, char *argv[])
 	if ([mode caseInsensitiveCompare:@"decompress"] == NSOrderedSame)
 		return (do_decompress(inputs[0], opts));
 
-	/*
-	 * Compare is the one mode still to write.  Saying so beats
-	 * pretending.
-	 */
+	if ([mode caseInsensitiveCompare:@"compare"] == NSOrderedSame)
+		return (do_compare(inputs[0], opts));
+
 	printf("Error: Mode \"%s\" is not implemented in this build!\n",
 	    [mode UTF8String]);
 	return (255);
