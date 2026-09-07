@@ -54,12 +54,11 @@ xcode-tools/
 │   │   │   ├── xcodebuild/           # Build orchestration
 │   │   │   ├── xcrun/                # Tool locator & executor
 │   │   │   └── xctrace/              # Trace recording & export
-│   │   ├── PlistBuddy/               # Submodule: open-source PlistBuddy
 │   │   ├── pngcrush/                 # Submodule: PNG optimization tool
 │   │   ├── agvtool/                  # OURS: apple-generic versioning
 │   │   ├── genstrings/               # OURS: .strings extraction
 │   │   ├── TextureAtlas/             # OURS: SpriteKit atlas compiler
-│   │   ├── TextureConverter/         # OURS: header stub (not yet built)
+│   │   ├── TextureConverter/         # OURS: examine, convert, ASTC compress
 │   │   ├── xarsigner/                # OURS: detached xar signing
 │   │   └── vmmap/                    # Submodule: third-party vmmap implementation
 │   ├── python/                       # Python runtime sources
@@ -975,7 +974,7 @@ We currently have **10 open-source reimaginations** of Apple's command-line tool
 | LLVM/Clang | Apache-2.0 + LLVM Exception | `src/swiftlang-llvm/llvm-project/` |
 | Swift | Apache-2.0 + BSD Runtime | `src/swiftlang-llvm/swift/` |
 | Objective-C runtime | Apple Public Source License | `src/apple-oss-distributions/objc4/` |
-| PlistBuddy | Apple Public Source License | `src/other/PlistBuddy/` |
+| PlistBuddy | Apple Public Source License | `src/remorix/PlistBuddy/` |
 | distribution-Developer_Tools | Mixed (Apple APL, GPL, BSD) | `src/apple-oss-distributions/distribution-Developer_Tools/` |
 | Git | GPL-2.0 | `src/git/` |
 | CPython | PSF-2.0 | `src/python/cpython/` |

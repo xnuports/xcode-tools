@@ -2,9 +2,6 @@
 	path = src/swiftlang-llvm/llvm-project
 	url = https://github.com/swiftlang/llvm-project.git
 	branch = swift/release/6.3
-[submodule "src/openxc-tools/PlistBuddy"]
-	path = src/other/PlistBuddy
-	url = https://github.com/xnuports/PlistBuddy
 [submodule "src/apple/distribution-Developer_Tools"]
 	path = src/apple/distribution-Developer_Tools
 	url = https://github.com/apple-oss-distributions/distribution-Developer_Tools.git

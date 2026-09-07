@@ -174,14 +174,14 @@ PROGS+=	other/vmmap/src vmmap usr/bin
 PROGS+=	extras/bsdmake bsdmake usr/local/bin
 
 # ------------------------------------------------------------------
-# PlistBuddy (src/other/PlistBuddy).
+# PlistBuddy (src/remorix/PlistBuddy).
 #
 # Note this one is not part of Xcode's Developer directory at all --
 # stock macOS ships it at /usr/libexec/PlistBuddy.  It is carried here
 # because the project added it as a submodule; usr/libexec is the
 # closest match to where the system keeps it.
 # ------------------------------------------------------------------
-PROGS+=	other/PlistBuddy PlistBuddy usr/libexec
+PROGS+=	remorix/PlistBuddy PlistBuddy usr/libexec
 
 # ------------------------------------------------------------------
 # bsdmake (src/extras/bsdmake/) -- Apple's BSD make.
