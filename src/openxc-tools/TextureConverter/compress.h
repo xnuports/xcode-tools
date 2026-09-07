@@ -58,6 +58,15 @@ uint8_t	*compress_astc(const float *rgba, int w, int h,
 uint8_t	*compress_bc(const float *rgba, int w, int h, enum tc_bc,
 	    enum tc_quality, size_t *out_len);
 
+/* The ETC2 and EAC formats, which all go through etc2comp. */
+enum tc_etc {
+	TC_ETC2_RGB8, TC_ETC2_RGB8A1, TC_EAC_RGBA8, TC_EAC_R11, TC_EAC_RG11
+};
+
+/* The same contract again, for those five.  See etc2.cpp. */
+uint8_t	*compress_etc(const float *rgba, int w, int h, enum tc_etc,
+	    enum tc_quality, bool perceptual, size_t *out_len);
+
 /* And through stb_dxt, which Apple reach for BC1 at Highest.  See stb.c. */
 uint8_t	*compress_bc_stb(const float *rgba, int w, int h, enum tc_bc,
 	    enum tc_quality, size_t *out_len);

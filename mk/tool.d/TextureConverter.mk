@@ -5,7 +5,7 @@
 # usr/local come from src/extras (see mk/port.d/{astcenc,stb,etc2comp,nvtt});
 # nothing links them yet, because the modes that would are still to write.
 T_SRCS=		TextureConverter.m ktx.c formats.c compress.c mipmap.cpp \
-		nvtt.cpp stb.c
+		nvtt.cpp stb.c etc2.cpp
 T_CFLAGS+=	-fobjc-arc
 T_LDADD+=	-framework Foundation
 T_LDADD+=	-framework CoreGraphics
@@ -21,3 +21,7 @@ T_LDADD+=	${TOP}/build/release/usr/local/lib/libnvtt-bc.a
 
 # ARM's astc-encoder, which is what Apple's ASTC back end is.
 T_LDADD+=	${TOP}/build/release/usr/local/lib/libastcenc.a
+
+# Google's etc2comp, which is Apple's back end for every ETC2 and EAC
+# format at every quality.
+T_LDADD+=	${TOP}/build/release/usr/local/lib/libEtcLib.a

@@ -756,6 +756,32 @@ tc_options_string(NSDictionary<NSString *, NSString *> *opts,
 }
 
 /*
+ * The ETC2 and EAC formats, by Apple's names for them.  All five go to the
+ * same encoder, and Auto sends them there at every quality.
+ */
+static bool
+etc_format_of(NSString *name, enum tc_etc *out)
+{
+	static const struct { const char *name; enum tc_etc etc; } etcs[] = {
+		{ "ETC2_RGB8", TC_ETC2_RGB8 },
+		{ "ETC2_RGB8A1", TC_ETC2_RGB8A1 },
+		{ "EAC_RGBA8", TC_EAC_RGBA8 },
+		{ "EAC_R11", TC_EAC_R11 },
+		{ "EAC_RG11", TC_EAC_RG11 }
+	};
+	size_t i;
+
+	for (i = 0; i < sizeof(etcs) / sizeof(etcs[0]); i++) {
+		if ([name isEqualToString:
+		    [NSString stringWithUTF8String:etcs[i].name]]) {
+			*out = etcs[i].etc;
+			return (true);
+		}
+	}
+	return (false);
+}
+
+/*
  * The BC formats, by the names Apple's tool uses for them.  BC6 is one
  * format inside NVTT under two names; the split is Apple's, and theirs is
  * the spelling that has to be accepted.
@@ -799,6 +825,7 @@ do_compress(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 	struct tc_astc_options aopt;
 	enum mip_filter which = MIP_FILTER_KAISER;
 	enum tc_bc bc = TC_BC1;
+	enum tc_etc etc = TC_ETC2_RGB8;
 	NSString *compressor;
 	uint32_t gl, base, metal;
 	NSData *data;
@@ -827,6 +854,12 @@ do_compress(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 
 	if ([fmt hasPrefix:@"ASTC"]) {
 		compressor = @"ARM";
+	} else if (etc_format_of(fmt, &etc)) {
+		compressor = @"ETC2COMP";
+		if (opts[@"compressor"] != nil &&
+		    [opts[@"compressor"] caseInsensitiveCompare:@"Auto"] !=
+		    NSOrderedSame)
+			compressor = [opts[@"compressor"] uppercaseString];
 	} else if (bc_format_of(fmt, &bc)) {
 		/*
 		 * --compressor defaults to Auto, and Auto is a table rather
@@ -909,6 +942,10 @@ do_compress(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 		else if ([compressor isEqualToString:@"STB"])
 			blocks[i] = compress_bc_stb(levels[i], widths[i],
 			    heights[i], bc, aopt.quality, &sizes[i]);
+		else if ([compressor isEqualToString:@"ETC2COMP"])
+			blocks[i] = compress_etc(levels[i], widths[i],
+			    heights[i], etc, aopt.quality, aopt.perceptual,
+			    &sizes[i]);
 		else
 			blocks[i] = compress_astc(levels[i], widths[i],
 			    heights[i], &aopt, &sizes[i]);
