@@ -23,9 +23,9 @@
 # "!=" command is not continued across backslash-newlines, and the "#" of
 # each #define is escaped or it would start a comment.
 #
-# Apple also ship 2to3 and 2to3-3.9.  There is nothing to point those at:
-# 2to3 was removed from CPython in 3.13, so a tree building 3.14 has no such
-# program, and inventing one would be worse than not shipping it.
+# Apple also ship 2to3 and 2to3-3.9.  There is nothing here to point those
+# at -- 2to3 was removed from CPython in 3.13 -- so they are a port of their
+# own, built from fissix; see mk/port.d/2to3.mk.
 PY_VERSION!=	awk '/^\#define PY_MAJOR_VERSION/{maj=$$3} /^\#define PY_MINOR_VERSION/{min=$$3} END{print maj "." min}' ${TOP}/src/python/cpython/Include/patchlevel.h
 
 # pydoc is a generated script, and cpython writes the prefix into its
