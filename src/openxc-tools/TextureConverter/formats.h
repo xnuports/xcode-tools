@@ -51,14 +51,13 @@ struct format_sample {
 struct format_dfd {
 	uint8_t			color_model;
 	int			nsamples;
-	struct format_sample	sample[2];
+	struct format_sample	sample[4];	/* one per channel, at most */
 };
 
 /* The Vulkan enumerant a name is written as, or zero. */
 uint32_t format_vk_for(const char *name);
 
-/* False for a name with no descriptor here, which is every uncompressed
- * one: KTX2 output is only written for the block formats. */
+/* False only for a name this tool does not know at all. */
 _Bool	format_dfd_for(const char *name, struct format_dfd *);
 
 #endif /* TEXTURECONVERTER_FORMATS_H */

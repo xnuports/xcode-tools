@@ -47,9 +47,13 @@
 
 static const char *progpath;
 
-/* Defined below, beside the compression path it mostly describes. */
+/* Defined below, beside the compression path they mostly describe. */
 static NSString *tc_options_string(NSDictionary<NSString *, NSString *> *,
     NSString *compressor, NSString *fmt);
+static bool wants_ktx2(NSString *output);
+static NSData *write_ktx2_generic(void **levels, const size_t *sizes,
+    const int *widths, const int *heights, int nlevels, const char *name,
+    bool premultiplied, NSString *options, bool annotate);
 
 /*
  * Every option the tool takes, with the default the usage text advertises.
@@ -732,11 +736,16 @@ do_convert(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 			sizes[i] = (size_t)widths[i] * heights[i] * 4 *
 			    sizeof(float);
 		}
-		data = write_ktx_generic(ptrs, sizes, widths, heights, n,
-		    0x8814, 0x1908, GL_FLOAT, 4, 0x1908, 0,
-		    alpha_mode_of(opts) == ALPHA_PREMULTIPLY,
-		    tc_options_string(opts, nil, nil),
-		    opts[@"disable_annotation"] == nil);
+		NSString *options = tc_options_string(opts, nil, nil);
+		bool annotate = opts[@"disable_annotation"] == nil;
+		bool prem = alpha_mode_of(opts) == ALPHA_PREMULTIPLY;
+
+		data = wants_ktx2(output) ?
+		    write_ktx2_generic(ptrs, sizes, widths, heights, n,
+		        "RGBA32", prem, options, annotate) :
+		    write_ktx_generic(ptrs, sizes, widths, heights, n,
+		        0x8814, 0x1908, GL_FLOAT, 4, 0x1908, 0, prem,
+		        options, annotate);
 	}
 	for (i = 0; i < n; i++)
 		free(levels[i]);
@@ -776,7 +785,7 @@ write_ktx2_generic(void **levels, const size_t *sizes, const int *widths,
 {
 	struct format_dfd dfd;
 	uint32_t gl, base, metal;
-	int bx, by, block_bytes;
+	int bx, by, block_bytes, type_size;
 	uint8_t *bytes;
 	size_t len;
 	NSData *out;
@@ -785,19 +794,27 @@ write_ktx2_generic(void **levels, const size_t *sizes, const int *widths,
 	    !format_lookup(name, &gl, &base, &bx, &by, &metal))
 		return (nil);
 	/*
-	 * How big one block is, which sets the alignment the levels are
-	 * padded to.  Counted from the base level rather than taken from the
-	 * smallest, which is only one block when the chain runs all the way
-	 * down: --max_mipmaps=2 stops it at four.
+	 * How big one texel block is, which sets the alignment the levels
+	 * are padded to.  Counted from the base level rather than taken from
+	 * the smallest, which is only one block when the chain runs all the
+	 * way down: --max_mipmaps=2 stops it at four.
 	 */
 	block_bytes = (int)(sizes[0] /
 	    ((size_t)((widths[0] + bx - 1) / bx) *
 	     (size_t)((heights[0] + by - 1) / by)));
+	type_size = format_is_float(name) ? 4 : 1;
 	bytes = ktx2_write(levels, sizes, widths, heights, nlevels,
-	    format_vk_for(name), block_bytes, bx, by, &dfd, premultiplied,
+	    format_vk_for(name), block_bytes, bx, by, type_size, &dfd,
+	    premultiplied,
 	    annotate ? "Apple TextureConverter " TC_VERSION " / libktx v4.0" :
 	    "Unidentified app / libktx v4.0",
-	    annotate ? [options UTF8String] : NULL,
+	    /*
+	     * An empty options string is no options, and the key is left
+	     * out rather than written empty -- the same rule version 1
+	     * follows, and the conversion path is where it shows, since it
+	     * drives no compressor and so names none.
+	     */
+	    annotate && options.length != 0 ? [options UTF8String] : NULL,
 	    annotate ? TC_VERSION : NULL, &len);
 	if (bytes == NULL)
 		return (nil);
@@ -1372,14 +1389,50 @@ do_decompress(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 	ktx_free(&k);
 
 	{
-		NSData *file = write_ktx_generic(outs, sizes, widths, heights,
-		    n, ogl, obase, hdr ? GL_FLOAT : GL_UNSIGNED_BYTE,
-		    hdr ? 4 : 1, obase, 0, false,
-		    tc_options_string(opts, nil, nil),
-		    opts[@"disable_annotation"] == nil);
+		NSString *options = tc_options_string(opts, nil, nil);
+		bool annotate = opts[@"disable_annotation"] == nil;
+		NSData *file;
+
+		if (wants_ktx2(out)) {
+			/*
+			 * Version 2 packs its levels tight, where version 1
+			 * pads every row to four bytes.  The padding is put
+			 * in by pack_bytes, so it is taken back out here
+			 * rather than the packer being taught two layouts.
+			 */
+			int channels = strcmp(oname, "R8") == 0 ? 1 :
+			    strcmp(oname, "RG8") == 0 ? 2 :
+			    strcmp(oname, "RGB8") == 0 ? 3 : 4;
+
+			if (!hdr) {
+				for (i = 0; i < n; i++) {
+					size_t row = (size_t)widths[i] *
+					    (size_t)channels;
+					size_t stride = (row + 3) & ~(size_t)3;
+					uint8_t *p = outs[i];
+					int y;
+
+					for (y = 1; y < heights[i]; y++)
+						memmove(p + (size_t)y * row,
+						    p + (size_t)y * stride,
+						    row);
+					sizes[i] = row * (size_t)heights[i];
+				}
+			}
+			file = write_ktx2_generic(outs, sizes, widths,
+			    heights, n, oname, false, options, annotate);
+		} else {
+			file = write_ktx_generic(outs, sizes, widths, heights,
+			    n, ogl, obase, hdr ? GL_FLOAT : GL_UNSIGNED_BYTE,
+			    hdr ? 4 : 1, obase, 0, false, options, annotate);
+		}
 
 		for (i = 0; i < n; i++)
 			free(outs[i]);
+		if (file == nil) {
+			printf("Error: Could not write output file!\n");
+			return (255);
+		}
 		if (![file writeToFile:out atomically:NO]) {
 			printf("Error: Could not write output file!\n");
 			return (255);

@@ -181,7 +181,38 @@ format_vk_for(const char *name)
 _Bool
 format_dfd_for(const char *name, struct format_dfd *out)
 {
-	size_t i;
+	uint32_t gl, base, metal;
+	int bx, by, i;
+
+	/*
+	 * The uncompressed formats need no table.  Their descriptor is the
+	 * RGBSDA model with one sample per channel, laid end to end, and the
+	 * only thing that varies is how many channels there are and whether
+	 * the samples are bytes or floats.
+	 *
+	 * Two details are not the obvious ones: alpha's channel type is 15
+	 * rather than 3, and a float sample carries the signed and float
+	 * bits (0xc0) and is bounded by the patterns of -1.0f and 1.0f
+	 * rather than by its integer range.
+	 */
+	if (format_lookup(name, &gl, &base, &bx, &by, &metal) && bx == 1) {
+		_Bool flt = format_is_float(name);
+		int channels = base == GL_RED ? 1 : base == GL_RG ? 2 :
+		    base == GL_RGB ? 3 : 4;
+		int bits = flt ? 32 : 8;
+
+		out->color_model = 1;		/* KHR_DF_MODEL_RGBSDA */
+		out->nsamples = channels;
+		for (i = 0; i < channels; i++) {
+			out->sample[i].bit_offset = (uint16_t)(bits * i);
+			out->sample[i].bit_length = (uint8_t)(bits - 1);
+			out->sample[i].channel_type =
+			    (uint8_t)((i == 3 ? 15 : i) | (flt ? 0xc0 : 0));
+			out->sample[i].lower = flt ? 0xbf800000 : 0x00000000;
+			out->sample[i].upper = flt ? 0x3f800000 : 0x000000ff;
+		}
+		return (1);
+	}
 
 	/* Every ASTC block size shares one descriptor. */
 	if (strncmp(name, "ASTC", 4) == 0) {

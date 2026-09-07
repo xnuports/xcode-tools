@@ -97,7 +97,7 @@ put_kv(struct buf *b, const char *key, const char *value)
 uint8_t *
 ktx2_write(void **levels, const size_t *sizes, const int *widths,
     const int *heights, int nlevels, uint32_t vk_format, int block_bytes,
-    int block_x, int block_y, const struct format_dfd *dfd,
+    int block_x, int block_y, int type_size, const struct format_dfd *dfd,
     bool premultiplied, const char *writer, const char *options,
     const char *version, size_t *out_len)
 {
@@ -122,18 +122,32 @@ ktx2_write(void **levels, const size_t *sizes, const int *widths,
 		return (NULL);
 	}
 
+	/*
+	 * Levels start at a multiple of the least common multiple of the
+	 * texel block size and four.  Four alone is not enough: a three byte
+	 * texel wants twelve, and only the uncompressed formats have one.
+	 */
+	{
+		size_t x = align < 1 ? 1 : align, y = 4, t;
+
+		while (y != 0) {
+			t = x % y;
+			x = y;
+			y = t;
+		}
+		align = (align < 1 ? 1 : (size_t)align) * 4 / x;
+	}
+
 	dfd_len = 4 + 24 + (size_t)dfd->nsamples * 16;
 	index_off = 12 + 36 + 32;
 	dfd_off = index_off + (size_t)nlevels * 24;
 	kv_off = dfd_off + dfd_len;
 	data_off = kv_off + kv.len;
-	if (align < 4)
-		align = 4;
 	data_off = (data_off + align - 1) / align * align;
 
 	put(&b, ktx2_id, sizeof(ktx2_id));
 	put32(&b, vk_format);
-	put32(&b, 1);				/* typeSize */
+	put32(&b, (uint32_t)type_size);
 	put32(&b, (uint32_t)widths[0]);
 	put32(&b, (uint32_t)heights[0]);
 	put32(&b, 0);				/* pixelDepth */
@@ -152,14 +166,17 @@ ktx2_write(void **levels, const size_t *sizes, const int *widths,
 	 * The index runs level 0 first, as version 1 does, but the levels it
 	 * points at are stored the other way round -- smallest at the lowest
 	 * offset -- so a reader can take the small ones without seeking past
-	 * the large.  So the offsets in the index descend.
+	 * the large.  So the offsets in the index descend.  Every level
+	 * starts on the same boundary the first one does, so a level whose
+	 * bytes do not fill out to it is followed by padding the index does
+	 * not count: byteLength stays the level's own size.
 	 */
 	for (i = 0; i < nlevels; i++) {
 		int j;
 
 		off = data_off;
 		for (j = nlevels - 1; j > i; j--)
-			off += sizes[j];
+			off += (sizes[j] + align - 1) / align * align;
 		put64(&b, off);
 		put64(&b, sizes[i]);
 		put64(&b, sizes[i]);		/* uncompressed: the same */
@@ -208,8 +225,11 @@ ktx2_write(void **levels, const size_t *sizes, const int *widths,
 	free(kv.p);
 	pad_to(&b, align);
 
-	for (i = nlevels - 1; i >= 0; i--)
+	for (i = nlevels - 1; i >= 0; i--) {
 		put(&b, levels[i], sizes[i]);
+		if (i > 0)
+			pad_to(&b, align);
+	}
 
 	if (b.failed) {
 		free(b.p);
