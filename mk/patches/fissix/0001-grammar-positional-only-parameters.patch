@@ -1,0 +1,87 @@
+Restore the positional-only parameter syntax to fissix's grammar.
+
+fissix forked lib2to3 from CPython at 3.9.0a5 and its Grammar.txt predates
+the change that taught the lib2to3 parser PEP 570.  The two productions for
+parameter lists therefore have no place for the '/' separator, and any
+source that uses one -- which by now is most of the Python 3 standard
+library -- fails to parse with
+
+    ParseError: bad input: type=17, value='/'
+
+where Apple's 2to3, running CPython 3.9's lib2to3, reads it fine.  2to3 is
+for Python 2 source, which never had positional-only parameters, but it is
+routinely pointed at a mixed tree, and a tool that stops on a file Apple's
+converts is not a drop-in replacement for it.
+
+The two productions here are CPython's own, from Lib/lib2to3/Grammar.txt as
+of 3.9 (PSF License 2.0), which is what fissix is a fork of and what Apple
+ship.  With them applied the file is identical to CPython's; nothing else
+in the grammar had drifted.
+
+Applied to the installed copy by mk/scripts/install-2to3.sh.  The submodule
+itself is not touched.
+
+--- a/fissix/Grammar.txt	2026-09-07 03:02:42
++++ b/fissix/Grammar.txt	2026-09-07 03:02:42
+@@ -18,15 +18,55 @@
+ async_funcdef: ASYNC funcdef
+ funcdef: 'def' NAME parameters ['->' test] ':' suite
+ parameters: '(' [typedargslist] ')'
+-typedargslist: ((tfpdef ['=' test] ',')*
+-                ('*' [tname] (',' tname ['=' test])* [',' ['**' tname [',']]] | '**' tname [','])
+-                | tfpdef ['=' test] (',' tfpdef ['=' test])* [','])
++
++# The following definition for typedarglist is equivalent to this set of rules:
++#
++#     arguments = argument (',' argument)*
++#     argument = tfpdef ['=' test]
++#     kwargs = '**' tname [',']
++#     args = '*' [tname]
++#     kwonly_kwargs = (',' argument)* [',' [kwargs]]
++#     args_kwonly_kwargs = args kwonly_kwargs | kwargs
++#     poskeyword_args_kwonly_kwargs = arguments [',' [args_kwonly_kwargs]]
++#     typedargslist_no_posonly  = poskeyword_args_kwonly_kwargs | args_kwonly_kwargs
++#     typedarglist = arguments ',' '/' [',' [typedargslist_no_posonly]])|(typedargslist_no_posonly)"
++#
++# It needs to be fully expanded to allow our LL(1) parser to work on it.
++
++typedargslist: tfpdef ['=' test] (',' tfpdef ['=' test])* ',' '/' [
++                     ',' [((tfpdef ['=' test] ',')* ('*' [tname] (',' tname ['=' test])*
++                            [',' ['**' tname [',']]] | '**' tname [','])
++                     | tfpdef ['=' test] (',' tfpdef ['=' test])* [','])]
++                ] | ((tfpdef ['=' test] ',')* ('*' [tname] (',' tname ['=' test])*
++                     [',' ['**' tname [',']]] | '**' tname [','])
++                     | tfpdef ['=' test] (',' tfpdef ['=' test])* [','])
++
+ tname: NAME [':' test]
+ tfpdef: tname | '(' tfplist ')'
+ tfplist: tfpdef (',' tfpdef)* [',']
+-varargslist: ((vfpdef ['=' test] ',')*
+-              ('*' [vname] (',' vname ['=' test])*  [',' ['**' vname [',']]] | '**' vname [','])
+-              | vfpdef ['=' test] (',' vfpdef ['=' test])* [','])
++
++# The following definition for varargslist is equivalent to this set of rules:
++#
++#     arguments = argument (',' argument )*
++#     argument = vfpdef ['=' test]
++#     kwargs = '**' vname [',']
++#     args = '*' [vname]
++#     kwonly_kwargs = (',' argument )* [',' [kwargs]]
++#     args_kwonly_kwargs = args kwonly_kwargs | kwargs
++#     poskeyword_args_kwonly_kwargs = arguments [',' [args_kwonly_kwargs]]
++#     vararglist_no_posonly = poskeyword_args_kwonly_kwargs | args_kwonly_kwargs
++#     varargslist = arguments ',' '/' [','[(vararglist_no_posonly)]] | (vararglist_no_posonly)
++#
++# It needs to be fully expanded to allow our LL(1) parser to work on it.
++
++varargslist: vfpdef ['=' test ](',' vfpdef ['=' test])* ',' '/' [',' [
++                     ((vfpdef ['=' test] ',')* ('*' [vname] (',' vname ['=' test])*
++                            [',' ['**' vname [',']]] | '**' vname [','])
++                            | vfpdef ['=' test] (',' vfpdef ['=' test])* [','])
++                     ]] | ((vfpdef ['=' test] ',')*
++                     ('*' [vname] (',' vname ['=' test])*  [',' ['**' vname [',']]]| '**' vname [','])
++                     | vfpdef ['=' test] (',' vfpdef ['=' test])* [','])
++
+ vname: NAME
+ vfpdef: vname | '(' vfplist ')'
+ vfplist: vfpdef (',' vfpdef)* [',']

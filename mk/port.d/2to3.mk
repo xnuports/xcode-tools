@@ -12,10 +12,29 @@
 # backslash-newlines, and the "#" of each #define is escaped or it would
 # start a comment.
 #
-# One difference from Apple's worth knowing: "2to3 -l" lists one extra
-# fixer, "sorted", which fissix added and lib2to3 never had.  Everything
-# else -- the diffs, the log lines, the rewritten source -- matches Apple's
-# byte for byte.
+# Where this differs from Apple's, measured over 149 files of CPython 3.9's
+# own standard library, rewritten by both and compared:
+#
+#	147 of the 149 come out byte for byte identical.  The two that do
+#	not are the same difference twice -- Apple's wraps zip() in list()
+#	even inside dict(), where nothing needs a list, and fissix does
+#	not.  Both are correct Python 3; fissix's is the tidier.
+#
+#	Apple's logs "No changes to <file>" for a file it did not touch and
+#	then lists it under "Files that need to be modified" anyway.  fissix
+#	fixed that, so it says neither.
+#
+#	"2to3 -l" and "-v" mention a fixer called "sorted" that fissix added
+#	and lib2to3 never had.
+#
+# All three are places where fissix deliberately improved on lib2to3, and
+# undoing them would mean shipping the bugs on purpose.  The one place it
+# was behind rather than ahead -- a grammar with no room for positional-only
+# parameters, which made it fail on files Apple's converts -- is fixed by
+# mk/patches/fissix, applied to the installed copy and not to the submodule.
+#
+# Everything else checked matches: plain, -p, -e, -v, -f, -x, -d, -W,
+# --add-suffix with --output-dir, and -h.
 PY_VERSION!=	awk '/^\#define PY_MAJOR_VERSION/{maj=$$3} /^\#define PY_MINOR_VERSION/{min=$$3} END{print maj "." min}' ${TOP}/src/python/cpython/Include/patchlevel.h
 
 P_COPY=			no
@@ -24,7 +43,8 @@ P_MAKE=			sh ${TOP}/mk/scripts/install-2to3.sh
 P_MAKE_ARGS=		${TOP}/src/python/fissix \
 			${TOP}/src/python/platformdirs \
 			${PY_VERSION} \
-			${P_OBJDIR}
+			${P_OBJDIR} \
+			${TOP}/mk/patches/fissix
 P_NOSTAGE=		yes
 
 P_PROGS=		bin/2to3 bin/2to3-${PY_VERSION}

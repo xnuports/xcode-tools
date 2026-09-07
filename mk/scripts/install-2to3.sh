@@ -13,7 +13,8 @@
 # neither gets a dist-info directory: they stand in for a standard library
 # module, which had none either, and nothing is meant to upgrade them.
 #
-# Usage: install-2to3.sh <fissix-checkout> <platformdirs-checkout> <x.y> <destdir>
+# Usage: install-2to3.sh <fissix-checkout> <platformdirs-checkout> <x.y> \
+#	     <destdir> <patchdir>
 #
 set -e
 
@@ -21,9 +22,11 @@ FISSIX_SRC=$1
 PD_SRC=$2
 PYVER=$3
 DEST=$4
+PATCHDIR=$5
 
-if [ $# -ne 4 ]; then
-	echo "usage: $0 <fissix-checkout> <platformdirs-checkout> <x.y> <destdir>" >&2
+if [ $# -ne 5 ]; then
+	echo "usage: $0 <fissix-checkout> <platformdirs-checkout> <x.y>" \
+	    "<destdir> <patchdir>" >&2
 	exit 1
 fi
 
@@ -47,6 +50,18 @@ mkdir -p "${SITE}" "${DEST}/bin"
 # keyed to a magic number that need not be the target's.
 rsync -a --exclude '__pycache__' "${FISSIX_SRC}/fissix/" "${SITE}/fissix/"
 rsync -a --exclude '__pycache__' "${PD_SRC}/src/platformdirs/" "${SITE}/platformdirs/"
+
+# The patches, against the copy rather than the checkout -- the submodule
+# stays read-only, the way ports here are patched in their work directory.
+# --forward is not passed: a patch that no longer applies means fissix has
+# changed under us and the reason for it needs looking at, not skipping.
+for p in "${PATCHDIR}"/*.patch; do
+	[ -e "${p}" ] || continue
+	(cd "${SITE}" && patch -s -p1 < "${p}") || {
+		echo "$0: failed to apply ${p}" >&2
+		exit 1
+	}
+done
 
 # platformdirs takes its version from the git tag, through hatch-vcs, which
 # writes the file its __init__ imports.  We are not running hatchling, so
