@@ -13,9 +13,26 @@
 # too, and the mip chains here are bit for bit the ones Apple writes rather
 # than a second implementation that has to be argued about.
 #
-# stb covers BC1/BC3/BC4/BC5 and etc2comp covers ETC2/EAC, so of the
-# encoders only src/bc6h and src/bc7 are built, with the nvcore and nvmath
-# they all lean on.
+# All of src/nvtt is built, not just the two block encoders.  The reason is
+# what Apple's tool actually does: asked for any of BC1 through BC7 with the
+# default --compressor=Auto, it prints "Using Compressor: NVTT".  stb and
+# ISPC are reachable only by naming them, so matching Apple on the BC family
+# means going through NVTT's own compressor, not a second implementation of
+# the same formats.
+#
+# That pulls in src/nvthread, which Context uses to spread blocks across
+# cores, and six files of the bundled squish.  Six and not eleven: the rest
+# of that directory -- alpha.cpp, clusterfit.cpp, rangefit.cpp,
+# singlecolourfit.cpp, squish.cpp -- declares "namespace squish" while
+# squish.h declares "namespace nvsquish", so it does not compile, and NVTT's
+# own CMakeLists does not build it either.  The six here are exactly its
+# SQUISH_SRCS list.
+#
+# The two .cpp files under cuda/ come along even with no CUDA anywhere:
+# without HAVE_CUDA they compile to the stubs that say there is no hardware,
+# and Context.cpp constructs a CudaContext and asks unconditionally.  The .cu
+# kernels beside them are not built and there is nothing here to build them
+# with.
 #
 # MIT for the core, Apache-2.0 for the two encoders (nVidia), BSD for
 # poshlib.  extern/pvrtextool is deliberately not built and not staged: it
@@ -52,12 +69,17 @@ P_MAKE_ARGS=	'set -e; \
 		     "\#define HAVE_DISPATCH_H" "\#define NV_HAVE_STBIMAGE" \
 		     "\#endif" > gen/nvconfig.h; \
 		 srcs=`ls src/nvcore/*.cpp src/nvmath/*.cpp src/bc6h/*.cpp \
-		     src/bc7/*.cpp src/nvimage/*.cpp | \
-		     grep -vE "PackedFloat|nvimage/ColorSpace"`; \
+		     src/bc7/*.cpp src/nvimage/*.cpp src/nvthread/*.cpp \
+		     src/nvtt/*.cpp src/nvtt/cuda/*.cpp | \
+		     grep -vE "PackedFloat|nvimage/ColorSpace|nvtt_wrapper"`; \
+		 for f in fastclusterfit weightedclusterfit colourblock \
+		     colourfit colourset maths; do \
+		     srcs="$$srcs src/nvtt/squish/$$f.cpp"; \
+		 done; \
 		 c++ -std=c++11 -O2 -DNV_CPU_AARCH64=1 -DNV_CPU_ARM=1 \
 		     -Igen -Isrc -Iextern/poshlib -Iextern/stb -c $$srcs; \
 		 ar rcs dest/lib/libnvtt-bc.a *.o; \
-		 for d in nvcore nvmath nvimage bc6h bc7; do \
+		 for d in nvcore nvmath nvimage bc6h bc7 nvthread nvtt; do \
 		     mkdir -p dest/include/$$d; \
 		     cp -f src/$$d/*.h dest/include/$$d/; \
 		     cp -f src/$$d/*.inl dest/include/$$d/ 2>/dev/null || true; \

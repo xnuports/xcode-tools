@@ -40,12 +40,16 @@ mip_downsample(const float *rgba, int w, int h, enum mip_filter which,
 	 * what the impulse response showed their filter doing.
 	 */
 	switch (which) {
-	case MIP_FILTER_BOX: {
-		nv::BoxFilter f;
-
-		half = img.downSample(f, nv::FloatImage::WrapMode_Mirror);
+	case MIP_FILTER_BOX:
+		/*
+		 * fastDownSample, not downSample(BoxFilter).  The two agree
+		 * to within a unit in the last place and Apple's answer is
+		 * this one: their Box chain matches it exactly, where the
+		 * polyphase path is off by one ULP in a few dozen samples.
+		 * It is the same average, summed in a different order.
+		 */
+		half = img.fastDownSample();
 		break;
-	}
 	case MIP_FILTER_TRIANGLE: {
 		nv::TriangleFilter f;
 

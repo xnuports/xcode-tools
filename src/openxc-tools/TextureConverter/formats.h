@@ -23,12 +23,16 @@ const char *format_name_for_vk(uint32_t vk_format);
 _Bool	format_is_float(const char *name);
 
 /*
- * The OpenGL internal format a name compresses to, the block it packs
- * pixels into, and the MTLPixelFormat a Khronos container records beside
- * it (zero for a format Apple record none for).  Returns false for a name
- * this tool does not write.
+ * The OpenGL internal format a name compresses to, the base internal format
+ * recorded beside it, the block it packs pixels into, and the MTLPixelFormat
+ * a Khronos container carries (zero for a format Apple record none for).
+ * Returns false for a name this tool does not write.
+ *
+ * The base format is not derivable from the internal one: it says how many
+ * channels the format actually carries, so BC4 and EAC_R11 are GL_RED, BC5
+ * and EAC_RG11 GL_RG, BC6 and ETC2_RGB8 GL_RGB, and the rest GL_RGBA.
  */
-_Bool	format_lookup(const char *name, uint32_t *gl, int *block_x,
-	    int *block_y, uint32_t *metal);
+_Bool	format_lookup(const char *name, uint32_t *gl, uint32_t *base,
+	    int *block_x, int *block_y, uint32_t *metal);
 
 #endif /* TEXTURECONVERTER_FORMATS_H */

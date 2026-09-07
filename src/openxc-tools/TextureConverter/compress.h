@@ -33,11 +33,37 @@ struct tc_astc_options {
 };
 
 /*
+ * The BC formats, which go through NVTT.  BC6 is one format there under two
+ * names; the signed and unsigned variants are separate here because that is
+ * how Apple's tool names them.
+ */
+enum tc_bc {
+	TC_BC1, TC_BC1A, TC_BC2, TC_BC3, TC_BC4, TC_BC5, TC_BC6U, TC_BC6S,
+	TC_BC7
+};
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/*
  * Compress one tightly packed RGBA float image.  The caller owns the result
  * and frees it with free(); *out_len is the byte count.  Returns NULL when
  * the encoder refuses the settings.
  */
 uint8_t	*compress_astc(const float *rgba, int w, int h,
 	    const struct tc_astc_options *, size_t *out_len);
+
+/* The same contract, for the BC family.  See nvtt.cpp. */
+uint8_t	*compress_bc(const float *rgba, int w, int h, enum tc_bc,
+	    enum tc_quality, size_t *out_len);
+
+/* And through stb_dxt, which Apple reach for BC1 at Highest.  See stb.c. */
+uint8_t	*compress_bc_stb(const float *rgba, int w, int h, enum tc_bc,
+	    enum tc_quality, size_t *out_len);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* TEXTURECONVERTER_COMPRESS_H */
