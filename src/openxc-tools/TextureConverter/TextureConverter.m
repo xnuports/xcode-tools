@@ -42,6 +42,7 @@
 #include "header.h"
 #include "dds.h"
 #include "mipmap.h"
+#include "gamma.h"
 #include "usage.h"
 
 /* Our own build, not Apple's; see the note at the top of the file. */
@@ -815,6 +816,20 @@ do_convert(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 	}
 	flip_image(levels[0], widths[0], heights[0],
 	    opts[@"flip_x"] != nil, opts[@"flip_y"] != nil);
+	/*
+	 * --gamma_in takes the colour to linear before anything samples it,
+	 * so the chain is filtered in linear space; --gamma_out puts every
+	 * level back afterwards, the premultiply included.
+	 *
+	 * Neither runs for a normal map, for the reason the premultiply
+	 * does not: the channels are a direction rather than a colour, and
+	 * a transfer function over them means nothing.  Apple write the
+	 * same texels with --normal_map --gamma_in=2.2 as with --normal_map
+	 * alone, at every level.
+	 */
+	if (!normal && [opts[@"gamma_in"] floatValue] != 1.0f)
+		image_gamma(levels[0], widths[0], heights[0],
+		    [opts[@"gamma_in"] floatValue], 1);
 	levels[0] = fit_extent(levels[0], &widths[0], &heights[0],
 	    [opts[@"max_extent"] intValue], which, wrap);
 	if (normal)
@@ -842,6 +857,18 @@ do_convert(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 	 */
 	if (!normal && alpha_mode_of(opts) == ALPHA_PREMULTIPLY)
 		premultiply_base(levels[0], widths[0], heights[0]);
+
+	/*
+	 * A gamma of one is no gamma at all, and skipping it is not just an
+	 * optimisation: the exponentiation clamps at zero, and the Kaiser
+	 * filter undershoots there, so running it would quietly lift every
+	 * negative sample the chain produced.
+	 */
+	if (!normal && [opts[@"gamma_out"] floatValue] != 1.0f) {
+		for (i = 0; i < n; i++)
+			image_gamma(levels[i], widths[i], heights[i],
+			    [opts[@"gamma_out"] floatValue], 0);
+	}
 
 	{
 		void *ptrs[MAX_LEVELS];
@@ -1309,6 +1336,20 @@ do_compress(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 	}
 	flip_image(levels[0], widths[0], heights[0],
 	    opts[@"flip_x"] != nil, opts[@"flip_y"] != nil);
+	/*
+	 * --gamma_in takes the colour to linear before anything samples it,
+	 * so the chain is filtered in linear space; --gamma_out puts every
+	 * level back afterwards, the premultiply included.
+	 *
+	 * Neither runs for a normal map, for the reason the premultiply
+	 * does not: the channels are a direction rather than a colour, and
+	 * a transfer function over them means nothing.  Apple write the
+	 * same texels with --normal_map --gamma_in=2.2 as with --normal_map
+	 * alone, at every level.
+	 */
+	if (!normal && [opts[@"gamma_in"] floatValue] != 1.0f)
+		image_gamma(levels[0], widths[0], heights[0],
+		    [opts[@"gamma_in"] floatValue], 1);
 	levels[0] = fit_extent(levels[0], &widths[0], &heights[0],
 	    [opts[@"max_extent"] intValue], which, wrap);
 	if (normal)
@@ -1335,6 +1376,18 @@ do_compress(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 	 */
 	if (!normal && alpha_mode_of(opts) == ALPHA_PREMULTIPLY)
 		premultiply_base(levels[0], widths[0], heights[0]);
+
+	/*
+	 * A gamma of one is no gamma at all, and skipping it is not just an
+	 * optimisation: the exponentiation clamps at zero, and the Kaiser
+	 * filter undershoots there, so running it would quietly lift every
+	 * negative sample the chain produced.
+	 */
+	if (!normal && [opts[@"gamma_out"] floatValue] != 1.0f) {
+		for (i = 0; i < n; i++)
+			image_gamma(levels[i], widths[i], heights[i],
+			    [opts[@"gamma_out"] floatValue], 0);
+	}
 
 	for (i = 0; i < n; i++) {
 		if ([compressor isEqualToString:@"RAW"])
