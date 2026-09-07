@@ -188,6 +188,46 @@ PROGS+=	extras/bsdmake bsdmake usr/local/bin
 PROGS+=	remorix/PlistBuddy PlistBuddy usr/libexec
 
 # ------------------------------------------------------------------
+# foundation_cmds (src/remorix/foundation_cmds) and AKCmds
+# (src/remorix/AKCmds) -- reimplementations of the property-list and
+# Cocoa command line tools.
+#
+# Like PlistBuddy above, none of these belong to Xcode's Developer
+# directory: stock macOS ships every one of them in /usr/bin, which is
+# where they go here.  Each submodule builds its programs with a
+# Makefile per subdirectory; we compile the sources directly instead,
+# the way every other imported component in this tree is built, with
+# the frameworks each Makefile names in mk/tool.d/<program>.mk.
+#
+# tiffutil is the one program of the eight left out.  Its Makefile
+# bootstraps a private copy of libtiff, downloading and patching it,
+# which is not something a build here can do.
+#
+# Two places where these do not yet match the system's, both in the
+# submodules and so not ours to fix here:
+#
+#	plutil	a plist holding a <data> value fails to convert to JSON
+#		with a differently worded message than Apple's, and
+#		-extract of an unrelated key in the same file fails as
+#		well -- the whole plist is checked against the output
+#		format, not the object being extracted.
+#	open	does not accept --arch.
+#
+# Everything else checked matches: plutil's -lint, -p, -convert to xml1,
+# binary1 and json, and -extract to json and raw; defaults read and
+# domains; pl; textutil -convert; tops replace; pbcopy and pbpaste.
+# ------------------------------------------------------------------
+PROGS+=	remorix/foundation_cmds/defaults defaults usr/bin
+PROGS+=	remorix/foundation_cmds/pl pl usr/bin
+PROGS+=	remorix/foundation_cmds/plutil plutil usr/bin
+
+PROGS+=	remorix/AKCmds/open open usr/bin
+PROGS+=	remorix/AKCmds/pbcopy pbcopy usr/bin
+PROGS+=	remorix/AKCmds/textutil textutil usr/bin
+PROGS+=	remorix/AKCmds/tiff2icns tiff2icns usr/bin
+PROGS+=	remorix/AKCmds/tops tops usr/bin
+
+# ------------------------------------------------------------------
 # bsdmake (src/extras/bsdmake/) -- Apple's BSD make.
 #
 # Xcode ships this as Developer/usr/bin/bsdmake.  Its own Makefile
