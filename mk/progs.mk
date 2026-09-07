@@ -236,3 +236,17 @@ PROGS+=	remorix/AKCmds/tops tops usr/bin
 # The mk/ files it ships are copied into usr/share/mk/ by the
 # tool fragment (mk/tool.d/bsdmake.mk).
 # ------------------------------------------------------------------
+
+# ------------------------------------------------------------------
+# jonesforth (src/extras/jonesforth-macos) -- a FORTH compiler that is
+# also a tutorial, ported to arm64 macOS.
+#
+# usr/local/bin, by the rule mk/ports.mk states for src/extras: this
+# works on neither Mach-O nor a build, so it is a general utility and
+# goes beside arm64th's "forth" rather than into the toolchain.
+#
+# One assembly source, nothing linked.  mk/tool.d/jonesforth.mk also
+# installs the FORTH half of the language and the wrapper that reads
+# it, which is what makes the binary usable.
+# ------------------------------------------------------------------
+PROGS+=	extras/jonesforth-macos jonesforth usr/local/bin
