@@ -74,12 +74,12 @@ char *
 header_write(void **levels, const size_t *sizes, const int *widths,
     const int *heights, int nlevels, const char *name,
     const char *atc_format, const char *gamut, const char *ident,
-    _Bool srgb, _Bool normal, size_t *out_len)
+    _Bool srgb, _Bool normal, int faces, size_t *out_len)
 {
 	struct text t = { NULL, 0, 0, 0 };
 	int i;
 
-	if (nlevels <= 0)
+	if (nlevels <= 0 || faces < 1)
 		return (NULL);
 	if ((t.p = malloc(t.cap = 4096)) == NULL)
 		return (NULL);
@@ -88,7 +88,8 @@ header_write(void **levels, const size_t *sizes, const int *widths,
 	addf(&t, "// %s.h\n\n", ident);
 	addf(&t, "#include <stdint.h>\n");
 	addf(&t, "#include \"AppleTextureConverter.h\"\n\n");
-	addf(&t, "const uint32_t %s_type = atcTextureType2D;\n", ident);
+	addf(&t, "const uint32_t %s_type = atcTextureType%s;\n", ident,
+	    faces > 1 ? "Cube" : "2D");
 	addf(&t, "const uint32_t %s_format = %s;\n", ident, atc_format);
 	addf(&t, "const uint32_t %s_colorGamut = %s;\n", ident, gamut);
 	addf(&t, "const uint32_t %s_width = %d;\n", ident, widths[0]);
@@ -99,7 +100,7 @@ header_write(void **levels, const size_t *sizes, const int *widths,
 	addf(&t, "const uint32_t %s_numChannels = %d;\n\n", ident,
 	    format_atc_channels(name, srgb));
 
-	for (i = 0; i < nlevels; i++) {
+	for (i = 0; i < nlevels * faces; i++) {
 		const uint8_t *b = levels[i];
 		size_t j;
 
@@ -111,14 +112,19 @@ header_write(void **levels, const size_t *sizes, const int *widths,
 		 * that and a reader would never notice, but a byte compare
 		 * does.
 		 */
-		addf(&t, "uint8_t %s_Mip%d[%zu] = { \n", ident, i, sizes[i]);
-		for (j = 0; j <= sizes[i]; j++) {
+		if (faces > 1)
+			addf(&t, "uint8_t %s_Mip%dFace%d[%zu] = { \n", ident,
+			    i / faces, i % faces, sizes[i / faces]);
+		else
+			addf(&t, "uint8_t %s_Mip%d[%zu] = { \n", ident, i,
+			    sizes[i]);
+		for (j = 0; j <= sizes[i / faces]; j++) {
 			if (j % 20 == 0) {
 				if (j != 0)
 					addf(&t, "\n");
 				addf(&t, "\t");
 			}
-			if (j < sizes[i])
+			if (j < sizes[i / faces])
 				addf(&t, "0x%02x, ", b[j]);
 		}
 		addf(&t, "\n};\n\n");
@@ -139,17 +145,35 @@ header_write(void **levels, const size_t *sizes, const int *widths,
 	addf(&t, "const ATC_Texture* Get%s()\n{\n", ident);
 	addf(&t, "\tconst ATC_Texture* pTexture = NULL;\n");
 	/*
-	 * The last argument of ATC_CreateTexture2D is whether the texture
-	 * is a normal map, which is also what takes the colour gamut to
-	 * None: a direction has no gamut, and --gamut_out is ignored there.
+	 * The last argument is whether the texture is a normal map, which
+	 * is also what takes the colour gamut to None: a direction has no
+	 * gamut, and --gamut_out is ignored there.  A cubemap is made by a
+	 * call of its own, which takes one side rather than two, and its
+	 * surfaces are addressed by face where a plain texture's element
+	 * is always zero.
 	 */
-	addf(&t, "\tATC_CreateTexture2D( NULL, %d, %d, %d, %s, %s, %s, "
-	    "&pTexture );\n", widths[0], heights[0], nlevels, atc_format,
-	    gamut, normal ? "true" : "false");
-	for (i = 0; i < nlevels; i++)
-		addf(&t, "\n\tSetSurface%s(pTexture, 0, %d, %d, %d, %zu, "
-		    "%s_Mip%d);\n", ident, i, widths[i], heights[i], sizes[i],
-		    ident, i);
+	if (faces > 1)
+		addf(&t, "\tATC_CreateTextureCube( NULL, %d, %d, %s, %s, "
+		    "%s, &pTexture );\n", widths[0], nlevels, atc_format,
+		    gamut, normal ? "true" : "false");
+	else
+		addf(&t, "\tATC_CreateTexture2D( NULL, %d, %d, %d, %s, %s, "
+		    "%s, &pTexture );\n", widths[0], heights[0], nlevels,
+		    atc_format, gamut, normal ? "true" : "false");
+	for (i = 0; i < nlevels * faces; i++) {
+		int lvl = i / faces;
+
+		if (faces > 1)
+			addf(&t, "%s\tSetSurface%s(pTexture, %d, %d, %d, "
+			    "%d, %zu, %s_Mip%dFace%d);\n",
+			    i % faces == 0 ? "\n" : "", ident, i % faces,
+			    lvl, widths[lvl], heights[lvl], sizes[lvl],
+			    ident, lvl, i % faces);
+		else
+			addf(&t, "\n\tSetSurface%s(pTexture, 0, %d, %d, "
+			    "%d, %zu, %s_Mip%d);\n", ident, lvl, widths[lvl],
+			    heights[lvl], sizes[lvl], ident, lvl);
+	}
 	addf(&t, "\n\treturn pTexture;\n}\n");
 
 	if (t.failed) {

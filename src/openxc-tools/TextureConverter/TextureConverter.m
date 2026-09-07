@@ -176,8 +176,9 @@ static NSString *tc_options_string(NSDictionary<NSString *, NSString *> *,
     NSString *compressor, NSString *fmt);
 static bool wants_ktx2(NSString *output);
 static NSData *write_ktx2_generic(void **levels, const size_t *sizes,
-    const int *widths, const int *heights, int nlevels, const char *name,
-    bool premultiplied, bool srgb, NSString *options, bool annotate);
+    const int *widths, const int *heights, int nlevels, int faces,
+    const char *name, bool premultiplied, bool srgb, NSString *options,
+    bool annotate);
 static void *pack_raw(const float *rgba, int w, int h, const char *name,
     size_t *out_len);
 static float *unpack_level(const struct ktx_level *, bool bgra,
@@ -185,11 +186,11 @@ static float *unpack_level(const struct ktx_level *, bool bgra,
 static bool wants_header(NSString *output);
 static bool wants_dds(NSString *output);
 static NSData *write_dds_generic(void **levels, const size_t *sizes,
-    const int *widths, const int *heights, int nlevels, const char *name,
-    bool srgb);
+    const int *widths, const int *heights, int nlevels, int faces,
+    const char *name, bool srgb);
 static NSData *write_header_generic(void **levels, const size_t *sizes,
-    const int *widths, const int *heights, int nlevels, const char *name,
-    bool srgb, bool normal, NSString *output,
+    const int *widths, const int *heights, int nlevels, int faces,
+    const char *name, bool srgb, bool normal, NSString *output,
     NSDictionary<NSString *, NSString *> *opts);
 
 /*
@@ -794,10 +795,10 @@ static const uint8_t ktx1_id[12] = {
  */
 static NSData *
 write_ktx_generic(void **levels, const size_t *sizes, const int *widths,
-    const int *heights, int nlevels, uint32_t gl_internal, uint32_t gl_base,
-    uint32_t gl_type, uint32_t gl_type_size, uint32_t gl_format,
-    uint32_t texel_bytes, uint32_t metal, bool premultiplied,
-    NSString *options, bool annotate)
+    const int *heights, int nlevels, int faces, uint32_t gl_internal,
+    uint32_t gl_base, uint32_t gl_type, uint32_t gl_type_size,
+    uint32_t gl_format, uint32_t texel_bytes, uint32_t metal,
+    bool premultiplied, NSString *options, bool annotate)
 {
 	NSMutableData *out = [NSMutableData data];
 	NSMutableData *kvd = [NSMutableData data];
@@ -861,7 +862,7 @@ write_ktx_generic(void **levels, const size_t *sizes, const int *widths,
 	put32(out, (uint32_t)heights[0]);
 	put32(out, 0);			/* pixelDepth */
 	put32(out, 0);			/* numberOfArrayElements */
-	put32(out, 1);			/* numberOfFaces */
+	put32(out, (uint32_t)faces);	/* numberOfFaces */
 	put32(out, (uint32_t)nlevels);
 	put32(out, (uint32_t)[kvd length]);
 	[out appendData:kvd];
@@ -881,29 +882,53 @@ write_ktx_generic(void **levels, const size_t *sizes, const int *widths,
 		size_t total = texel_bytes == 0 ? sizes[i] :
 		    stride * (size_t)heights[i];
 		size_t y;
+		int j;
 
+		/*
+		 * imageSize counts one face, not the level: a cubemap
+		 * writes it once and then the six faces behind it, each
+		 * padded to four bytes of its own.
+		 */
 		put32(out, (uint32_t)total);
-		if (row == stride) {
-			[out appendBytes:levels[i] length:sizes[i]];
-		} else {
-			for (y = 0; y < (size_t)heights[i]; y++) {
-				[out appendBytes:(const uint8_t *)levels[i] +
-				    y * row length:row];
-				[out appendBytes:pad length:stride - row];
+		for (j = 0; j < faces; j++) {
+			const uint8_t *p = levels[i * faces + j];
+
+			if (row == stride) {
+				[out appendBytes:p length:sizes[i]];
+			} else {
+				for (y = 0; y < (size_t)heights[i]; y++) {
+					[out appendBytes:p + y * row
+					    length:row];
+					[out appendBytes:pad
+					    length:stride - row];
+				}
 			}
+			[out appendBytes:pad length:(4 - total % 4) % 4];
 		}
-		/* Each level is padded to a four byte boundary. */
-		[out appendBytes:pad length:(4 - total % 4) % 4];
 	}
 	return (out);
 }
 
+/*
+ * --build_cubemap turns six inputs into a texture of six faces.  They are
+ * six independent chains: a face is bit for bit what converting that image
+ * on its own gives, and only the container puts them together.  Version 1
+ * writes the level's imageSize once and then each face behind it, padded
+ * to four bytes; version 2 counts the whole level, faces and all.
+ */
+enum { MAX_FACES = 6 };
+
 static int
-do_convert(NSString *path, NSDictionary<NSString *, NSString *> *opts)
+do_convert(NSArray<NSString *> *paths,
+    NSDictionary<NSString *, NSString *> *opts)
 {
 	enum { MAX_LEVELS = 32 };
-	float *levels[MAX_LEVELS];
+	NSString *path = paths[0];
+	float *levels[MAX_LEVELS], *all[MAX_LEVELS * MAX_FACES];
 	int widths[MAX_LEVELS], heights[MAX_LEVELS];
+	int faces = opts[@"build_cubemap"] != nil ? (int)paths.count : 1;
+	int face;
+	bool cube = opts[@"build_cubemap"] != nil;
 	NSString *output = opts[@"output"];
 	NSString *filter = opts[@"mipmap_filter"];
 	enum mip_filter which = MIP_FILTER_KAISER;
@@ -926,23 +951,36 @@ do_convert(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 	    NSOrderedSame)
 		wrap = MIP_WRAP_REPEAT;
 
+	/* Six faces exactly: Apple refuse any other count outright. */
+	if (cube && faces != MAX_FACES) {
+		printf("Error: A cubemap needs six input files!\n");
+		return (255);
+	}
+
+	for (face = 0; face < faces; face++) {
+	float *f[MAX_LEVELS];
+	int fn;
+
 	/*
 	 * A container carries its own format, and converting one keeps it:
 	 * an RGBA8 container in comes out RGBA8, where an image file comes
 	 * out RGBA32.
 	 */
-	n = load_container(path, levels, widths, heights, MAX_LEVELS,
+	fn = load_container(paths[face], f, widths, heights, MAX_LEVELS,
 	    &oname);
-	if (n == 0) {
+	if (fn == 0) {
 		oname = "RGBA32";
-		levels[0] = load_rgba(path, alpha_mode_of(opts), &widths[0],
+		f[0] = load_rgba(paths[face], alpha_mode_of(opts), &widths[0],
 		    &heights[0]);
-		n = levels[0] != NULL ? 1 : 0;
+		fn = f[0] != NULL ? 1 : 0;
 	}
-	if (n == 0) {
+	if (fn == 0) {
 		printf("Error: Could not read input file!\n");
 		return (255);
 	}
+	n = fn;
+	for (i = 0; i < n; i++)
+		levels[i] = f[i];
 	/*
 	 * A container's own levels are kept, and the chain is only extended
 	 * past them: converting a two level container gives a full chain
@@ -1027,8 +1065,12 @@ do_convert(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 			rgbm_encode(levels[i], widths[i], heights[i]);
 	}
 
+	for (i = 0; i < n; i++)
+		all[i * faces + face] = levels[i];
+	}
+
 	{
-		void *ptrs[MAX_LEVELS];
+		void *ptrs[MAX_LEVELS * MAX_FACES];
 		size_t sizes[MAX_LEVELS];
 		uint32_t gl, base, metal, type, texel;
 		int bx, by, bits;
@@ -1044,9 +1086,9 @@ do_convert(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 		    bits == 16 ? GL_HALF_FLOAT : GL_FLOAT;
 		texel = (uint32_t)(bits / 8) * (uint32_t)(base == 0x1903 ?
 		    1 : base == 0x8227 ? 2 : base == 0x1907 ? 3 : 4);
-		for (i = 0; i < n; i++) {
-			ptrs[i] = pack_raw(levels[i], widths[i], heights[i],
-			    oname, &sizes[i]);
+		for (i = 0; i < n * faces; i++) {
+			ptrs[i] = pack_raw(all[i], widths[i / faces],
+			    heights[i / faces], oname, &sizes[i / faces]);
 			if (ptrs[i] == NULL) {
 				printf("Error: Could not write output "
 				    "file!\n");
@@ -1055,22 +1097,22 @@ do_convert(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 		}
 
 		data = wants_dds(output) ?
-		    write_dds_generic(ptrs, sizes, widths, heights, n,
+		    write_dds_generic(ptrs, sizes, widths, heights, n, faces,
 		        oname, false) :
 		    wants_header(output) ?
 		    write_header_generic(ptrs, sizes, widths, heights, n,
-		        oname, false, normal, output, opts) :
+		        faces, oname, false, normal, output, opts) :
 		    wants_ktx2(output) ?
-		    write_ktx2_generic(ptrs, sizes, widths, heights, n,
+		    write_ktx2_generic(ptrs, sizes, widths, heights, n, faces,
 		        oname, prem, false, options, annotate) :
-		    write_ktx_generic(ptrs, sizes, widths, heights, n,
+		    write_ktx_generic(ptrs, sizes, widths, heights, n, faces,
 		        gl, base, type, (uint32_t)(bits / 8), base, texel,
 		        0, prem, options, annotate);
-		for (i = 0; i < n; i++)
+		for (i = 0; i < n * faces; i++)
 			free(ptrs[i]);
 	}
-	for (i = 0; i < n; i++)
-		free(levels[i]);
+	for (i = 0; i < n * faces; i++)
+		free(all[i]);
 
 	/*
 	 * A DDS the format has no DXGI name for has already said so, on
@@ -1124,7 +1166,7 @@ wants_dds(NSString *output)
  */
 static NSData *
 write_dds_generic(void **levels, const size_t *sizes, const int *widths,
-    const int *heights, int nlevels, const char *name, bool srgb)
+    const int *heights, int nlevels, int faces, const char *name, bool srgb)
 {
 	uint32_t dxgi = format_dxgi_for(name, srgb);
 	char buf[64];
@@ -1132,6 +1174,9 @@ write_dds_generic(void **levels, const size_t *sizes, const int *widths,
 	size_t len;
 	NSData *out;
 
+	/* A cubemap gets no DDS at all; Apple write none and say nothing. */
+	if (faces > 1)
+		return (nil);
 	if (dxgi == 0) {
 		fprintf(stderr, "Error: Compression format %s not supported "
 		    "for DDS files\n", format_atc_for(name, srgb, buf,
@@ -1154,8 +1199,8 @@ write_dds_generic(void **levels, const size_t *sizes, const int *widths,
  */
 static NSData *
 write_header_generic(void **levels, const size_t *sizes, const int *widths,
-    const int *heights, int nlevels, const char *name, bool srgb,
-    bool normal, NSString *output,
+    const int *heights, int nlevels, int faces, const char *name,
+    bool srgb, bool normal, NSString *output,
     NSDictionary<NSString *, NSString *> *opts)
 {
 	NSString *gamut = opts[@"gamut_out"];
@@ -1175,7 +1220,7 @@ write_header_generic(void **levels, const size_t *sizes, const int *widths,
 	text = header_write(levels, sizes, widths, heights, nlevels, name,
 	    format_atc_for(name, srgb, buf, sizeof(buf)), gname,
 	    [[[output lastPathComponent] stringByDeletingPathExtension]
-	    UTF8String], srgb, normal, &len);
+	    UTF8String], srgb, normal, faces, &len);
 	if (text == NULL)
 		return (nil);
 	out = [NSData dataWithBytes:text length:len];
@@ -1189,8 +1234,8 @@ write_header_generic(void **levels, const size_t *sizes, const int *widths,
  */
 static NSData *
 write_ktx2_generic(void **levels, const size_t *sizes, const int *widths,
-    const int *heights, int nlevels, const char *name, bool premultiplied,
-    bool srgb, NSString *options, bool annotate)
+    const int *heights, int nlevels, int faces, const char *name,
+    bool premultiplied, bool srgb, NSString *options, bool annotate)
 {
 	struct format_dfd dfd;
 	uint32_t gl, base, metal, vk = 0, srgb_gl;
@@ -1214,7 +1259,7 @@ write_ktx2_generic(void **levels, const size_t *sizes, const int *widths,
 	type_size = bx == 1 ? format_channel_bits(name) / 8 : 1;
 	if (!srgb || !format_srgb_for(name, &srgb_gl, &vk))
 		vk = format_vk_for(name);
-	bytes = ktx2_write(levels, sizes, widths, heights, nlevels,
+	bytes = ktx2_write(levels, sizes, widths, heights, nlevels, faces,
 	    vk, block_bytes, bx, by, type_size, &dfd,
 	    premultiplied, srgb,
 	    annotate ? "Apple TextureConverter " TC_VERSION " / libktx v4.0" :
@@ -1360,11 +1405,15 @@ bc_format_of(NSString *name, enum tc_bc *out)
  * level to the encoder.
  */
 static int
-do_compress(NSString *path, NSDictionary<NSString *, NSString *> *opts)
+do_compress(NSArray<NSString *> *paths,
+    NSDictionary<NSString *, NSString *> *opts)
 {
+	int faces = opts[@"build_cubemap"] != nil ? (int)paths.count : 1;
+	int face;
+	bool cube = opts[@"build_cubemap"] != nil;
 	enum { MAX_LEVELS = 32 };
 	float *levels[MAX_LEVELS];
-	void *blocks[MAX_LEVELS];
+	void *blocks[MAX_LEVELS * MAX_FACES];
 	size_t sizes[MAX_LEVELS];
 	int widths[MAX_LEVELS], heights[MAX_LEVELS];
 	NSString *fmt = opts[@"compression_format"];
@@ -1507,16 +1556,23 @@ do_compress(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 
 	printf("Using Compressor: %s\n", [compressor UTF8String]);
 
+	/* Six faces exactly: Apple refuse any other count outright. */
+	if (cube && faces != MAX_FACES) {
+		printf("Error: A cubemap needs six input files!\n");
+		return (255);
+	}
+
+	for (face = 0; face < faces; face++) {
 	{
 		const char *iname;
 
-		if (load_container(path, levels, widths, heights, 1,
+		if (load_container(paths[face], levels, widths, heights, 1,
 		    &iname) == 0)
 			levels[0] = NULL;
 	}
 	if (levels[0] == NULL)
-		levels[0] = load_rgba(path, alpha_mode_of(opts), &widths[0],
-		    &heights[0]);
+		levels[0] = load_rgba(paths[face], alpha_mode_of(opts),
+		    &widths[0], &heights[0]);
 	if (levels[0] == NULL) {
 		printf("Error: Could not read input file!\n");
 		return (255);
@@ -1590,27 +1646,30 @@ do_compress(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 	}
 
 	for (i = 0; i < n; i++) {
+		void **slot = &blocks[i * faces + face];
+
 		if ([compressor isEqualToString:@"RAW"])
-			blocks[i] = pack_raw(levels[i], widths[i], heights[i],
+			*slot = pack_raw(levels[i], widths[i], heights[i],
 			    [fmt UTF8String], &sizes[i]);
 		else if ([compressor isEqualToString:@"NVTT"])
-			blocks[i] = compress_bc(levels[i], widths[i],
+			*slot = compress_bc(levels[i], widths[i],
 			    heights[i], bc, aopt.quality, &sizes[i]);
 		else if ([compressor isEqualToString:@"STB"])
-			blocks[i] = compress_bc_stb(levels[i], widths[i],
+			*slot = compress_bc_stb(levels[i], widths[i],
 			    heights[i], bc, aopt.quality, &sizes[i]);
 		else if ([compressor isEqualToString:@"ETC2COMP"])
-			blocks[i] = compress_etc(levels[i], widths[i],
+			*slot = compress_etc(levels[i], widths[i],
 			    heights[i], etc, aopt.quality, aopt.perceptual,
 			    &sizes[i]);
 		else
-			blocks[i] = compress_astc(levels[i], widths[i],
+			*slot = compress_astc(levels[i], widths[i],
 			    heights[i], &aopt, &sizes[i]);
 		free(levels[i]);
-		if (blocks[i] == NULL) {
+		if (*slot == NULL) {
 			printf("Error: Compression failed!\n");
 			return (255);
 		}
+	}
 	}
 
 	/*
@@ -1640,20 +1699,21 @@ do_compress(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 		bool annotate = opts[@"disable_annotation"] == nil;
 
 		data = wants_dds(output) ?
-		    write_dds_generic(blocks, sizes, widths, heights, n,
+		    write_dds_generic(blocks, sizes, widths, heights, n, faces,
 		        [fmt UTF8String], srgb) :
 		    wants_header(output) ?
 		    write_header_generic(blocks, sizes, widths, heights, n,
-		        [fmt UTF8String], srgb, normal, output, opts) :
+		        faces, [fmt UTF8String], srgb, normal, output,
+		        opts) :
 		    wants_ktx2(output) ?
 		    write_ktx2_generic(blocks, sizes, widths, heights, n,
-		        [fmt UTF8String],
+		        faces, [fmt UTF8String],
 		        alpha_mode_of(opts) == ALPHA_PREMULTIPLY, srgb,
 		        options, annotate) :
 		    write_ktx_generic(blocks, sizes, widths, heights, n,
-		        gl, base, type, type_size, gl_format, texel, metal,
-		        alpha_mode_of(opts) == ALPHA_PREMULTIPLY, options,
-		        annotate);
+		        faces, gl, base, type, type_size, gl_format, texel,
+		        metal, alpha_mode_of(opts) == ALPHA_PREMULTIPLY,
+		        options, annotate);
 		if (data == nil) {
 			if (wants_dds(output))
 				return (0);
@@ -1661,7 +1721,7 @@ do_compress(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 			return (255);
 		}
 	}
-	for (i = 0; i < n; i++)
+	for (i = 0; i < n * faces; i++)
 		free(blocks[i]);
 
 	if (output.length == 0) {
@@ -2033,13 +2093,13 @@ do_decompress(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 
 		if (wants_dds(out)) {
 			file = write_dds_generic(outs, sizes, widths,
-			    heights, n, oname, false);
+			    heights, n, 1, oname, false);
 		} else if (wants_header(out)) {
 			file = write_header_generic(outs, sizes, widths,
-			    heights, n, oname, false, false, out, opts);
+			    heights, n, 1, oname, false, false, out, opts);
 		} else if (wants_ktx2(out)) {
 			file = write_ktx2_generic(outs, sizes, widths,
-			    heights, n, oname, false, false, options,
+			    heights, n, 1, oname, false, false, options,
 			    annotate);
 		} else {
 			uint32_t texel = hdr ? 16 : (uint32_t)(
@@ -2047,9 +2107,9 @@ do_decompress(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 			    obase == 0x1907 ? 3 : 4);
 
 			file = write_ktx_generic(outs, sizes, widths, heights,
-			    n, ogl, obase, hdr ? GL_FLOAT : GL_UNSIGNED_BYTE,
-			    hdr ? 4 : 1, obase, texel, 0, false, options,
-			    annotate);
+			    n, 1, ogl, obase,
+			    hdr ? GL_FLOAT : GL_UNSIGNED_BYTE, hdr ? 4 : 1,
+			    obase, texel, 0, false, options, annotate);
 		}
 
 		for (i = 0; i < n; i++)
@@ -2461,9 +2521,9 @@ main(int argc, char *argv[])
 	if ([mode caseInsensitiveCompare:@"examine"] == NSOrderedSame)
 		return (do_examine(inputs[0]));
 	if ([mode caseInsensitiveCompare:@"convert"] == NSOrderedSame)
-		return (do_convert(inputs[0], opts));
+		return (do_convert(inputs, opts));
 	if ([mode caseInsensitiveCompare:@"compress"] == NSOrderedSame)
-		return (do_compress(inputs[0], opts));
+		return (do_compress(inputs, opts));
 
 	if ([mode caseInsensitiveCompare:@"decompress"] == NSOrderedSame)
 		return (do_decompress(inputs[0], opts));

@@ -20,7 +20,7 @@
  * --disable_annotation asks for.  The caller frees the result.
  */
 uint8_t	*ktx2_write(void **levels, const size_t *sizes, const int *widths,
-	    const int *heights, int nlevels, uint32_t vk_format,
+	    const int *heights, int nlevels, int faces, uint32_t vk_format,
 	    int block_bytes, int block_x, int block_y, int type_size,
 	    const struct format_dfd *, bool premultiplied, bool srgb,
 	    const char *writer, const char *options, const char *version,

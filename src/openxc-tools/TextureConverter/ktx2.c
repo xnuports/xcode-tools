@@ -96,7 +96,8 @@ put_kv(struct buf *b, const char *key, const char *value)
 
 uint8_t *
 ktx2_write(void **levels, const size_t *sizes, const int *widths,
-    const int *heights, int nlevels, uint32_t vk_format, int block_bytes,
+    const int *heights, int nlevels, int faces, uint32_t vk_format,
+    int block_bytes,
     int block_x, int block_y, int type_size, const struct format_dfd *dfd,
     bool premultiplied, bool srgb, const char *writer, const char *options,
     const char *version, size_t *out_len)
@@ -108,7 +109,7 @@ ktx2_write(void **levels, const size_t *sizes, const int *widths,
 	size_t off;
 	int i;
 
-	if (nlevels <= 0 || dfd == NULL)
+	if (nlevels <= 0 || faces < 1 || dfd == NULL)
 		return (NULL);
 
 	/* Sorted by key: KTXwriter, then TC_Options, then TC_Version. */
@@ -152,7 +153,7 @@ ktx2_write(void **levels, const size_t *sizes, const int *widths,
 	put32(&b, (uint32_t)heights[0]);
 	put32(&b, 0);				/* pixelDepth */
 	put32(&b, 0);				/* layerCount */
-	put32(&b, 1);				/* faceCount */
+	put32(&b, (uint32_t)faces);		/* faceCount */
 	put32(&b, (uint32_t)nlevels);
 	put32(&b, 0);				/* supercompressionScheme */
 	put32(&b, (uint32_t)dfd_off);
@@ -172,14 +173,16 @@ ktx2_write(void **levels, const size_t *sizes, const int *widths,
 	 * not count: byteLength stays the level's own size.
 	 */
 	for (i = 0; i < nlevels; i++) {
+		size_t whole = sizes[i] * (size_t)faces;
 		int j;
 
 		off = data_off;
 		for (j = nlevels - 1; j > i; j--)
-			off += (sizes[j] + align - 1) / align * align;
+			off += (sizes[j] * (size_t)faces + align - 1) /
+			    align * align;
 		put64(&b, off);
-		put64(&b, sizes[i]);
-		put64(&b, sizes[i]);		/* uncompressed: the same */
+		put64(&b, whole);
+		put64(&b, whole);		/* uncompressed: the same */
 	}
 
 	/* The descriptor. */
@@ -226,7 +229,10 @@ ktx2_write(void **levels, const size_t *sizes, const int *widths,
 	pad_to(&b, align);
 
 	for (i = nlevels - 1; i >= 0; i--) {
-		put(&b, levels[i], sizes[i]);
+		int j;
+
+		for (j = 0; j < faces; j++)
+			put(&b, levels[i * faces + j], sizes[i]);
 		if (i > 0)
 			pad_to(&b, align);
 	}
