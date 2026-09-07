@@ -40,6 +40,7 @@
 #include "ktx.h"
 #include "ktx2.h"
 #include "header.h"
+#include "dds.h"
 #include "mipmap.h"
 #include "usage.h"
 
@@ -58,6 +59,10 @@ static NSData *write_ktx2_generic(void **levels, const size_t *sizes,
 static void *pack_raw(const float *rgba, int w, int h, const char *name,
     size_t *out_len);
 static bool wants_header(NSString *output);
+static bool wants_dds(NSString *output);
+static NSData *write_dds_generic(void **levels, const size_t *sizes,
+    const int *widths, const int *heights, int nlevels, const char *name,
+    bool srgb);
 static NSData *write_header_generic(void **levels, const size_t *sizes,
     const int *widths, const int *heights, int nlevels, const char *name,
     bool srgb, NSString *output,
@@ -769,7 +774,10 @@ do_convert(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 		bool annotate = opts[@"disable_annotation"] == nil;
 		bool prem = alpha_mode_of(opts) == ALPHA_PREMULTIPLY;
 
-		data = wants_header(output) ?
+		data = wants_dds(output) ?
+		    write_dds_generic(ptrs, sizes, widths, heights, n,
+		        "RGBA32", false) :
+		    wants_header(output) ?
 		    write_header_generic(ptrs, sizes, widths, heights, n,
 		        "RGBA32", false, output, opts) :
 		    wants_ktx2(output) ?
@@ -782,6 +790,12 @@ do_convert(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 	for (i = 0; i < n; i++)
 		free(levels[i]);
 
+	/*
+	 * A DDS the format has no DXGI name for has already said so, on
+	 * stderr, and Apple leave it there: no file, and still a zero exit.
+	 */
+	if (data == nil)
+		return (wants_dds(output) ? 0 : 255);
 	if (output.length == 0) {
 		printf("Error: Missing output file path!\n");
 		return (255);
@@ -806,12 +820,49 @@ wants_ktx2(NSString *output)
 	    NSOrderedSame);
 }
 
-/* The .h output goes the same way: by the extension, not by a flag. */
+/* The .h and .dds outputs go the same way: by the extension, not a flag. */
 static bool
 wants_header(NSString *output)
 {
 	return ([[output pathExtension] caseInsensitiveCompare:@"h"] ==
 	    NSOrderedSame);
+}
+
+static bool
+wants_dds(NSString *output)
+{
+	return ([[output pathExtension] caseInsensitiveCompare:@"dds"] ==
+	    NSOrderedSame);
+}
+
+/*
+ * The levels as a DirectDraw surface.  A format Direct3D has no name for
+ * cannot be written -- Apple say so on stderr, having already compressed
+ * it, and leave no file behind but still exit zero.
+ */
+static NSData *
+write_dds_generic(void **levels, const size_t *sizes, const int *widths,
+    const int *heights, int nlevels, const char *name, bool srgb)
+{
+	uint32_t dxgi = format_dxgi_for(name, srgb);
+	char buf[64];
+	uint8_t *bytes;
+	size_t len;
+	NSData *out;
+
+	if (dxgi == 0) {
+		fprintf(stderr, "Error: Compression format %s not supported "
+		    "for DDS files\n", format_atc_for(name, srgb, buf,
+		    sizeof(buf)));
+		return (nil);
+	}
+	bytes = dds_write(levels, sizes, widths[0], heights[0], nlevels,
+	    dxgi, &len);
+	if (bytes == NULL)
+		return (nil);
+	out = [NSData dataWithBytes:bytes length:len];
+	free(bytes);
+	return (out);
 }
 
 /*
@@ -838,7 +889,7 @@ write_header_generic(void **levels, const size_t *sizes, const int *widths,
 	text = header_write(levels, sizes, widths, heights, nlevels, name,
 	    format_atc_for(name, srgb, buf, sizeof(buf)), gname,
 	    [[[output lastPathComponent] stringByDeletingPathExtension]
-	    UTF8String], &len);
+	    UTF8String], srgb, &len);
 	if (text == NULL)
 		return (nil);
 	out = [NSData dataWithBytes:text length:len];
@@ -1054,24 +1105,6 @@ do_compress(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 		return (255);
 	}
 	/*
-	 * --srgb_format asks for the sRGB spelling of the format, which is
-	 * a different enumerant in both containers and, for ASTC, a Metal
-	 * one eighteen below the linear one.  The formats that carry no
-	 * colour have no such spelling; Apple's tool crashes on those, and
-	 * this says so.
-	 */
-	if (srgb) {
-		uint32_t vk;
-
-		if (!format_srgb_for([fmt UTF8String], &gl, &vk)) {
-			printf("Error: Compression format \"%s\" has no "
-			    "sRGB pixel format!\n", [fmt UTF8String]);
-			return (255);
-		}
-		if (metal != 0)
-			metal -= 18;
-	}
-	/*
 	 * Which back end.  Apple's --compressor defaults to Auto, and Auto
 	 * is not a search: ASTC goes to ARM's encoder, every one of BC1
 	 * through BC7 to NVTT, and the ETC2 and EAC formats to ETC2COMP.
@@ -1234,11 +1267,36 @@ do_compress(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 		}
 	}
 
+	/*
+	 * --srgb_format asks for the sRGB spelling of the format, which is
+	 * a different enumerant in both containers and, for ASTC, a Metal
+	 * one eighteen below the linear one.  The formats that carry no
+	 * colour have no such spelling, and only the two containers have to
+	 * name one: the .h and DDS outputs write atcFormatUnknown and
+	 * refuse, which they do on their own.  Apple's tool crashes here
+	 * rather than checking, so this is an error of our own.
+	 */
+	if (srgb && (wants_ktx2(output) ||
+	    (!wants_header(output) && !wants_dds(output)))) {
+		uint32_t vk;
+
+		if (!format_srgb_for([fmt UTF8String], &gl, &vk)) {
+			printf("Error: Compression format \"%s\" has no "
+			    "sRGB pixel format!\n", [fmt UTF8String]);
+			return (255);
+		}
+		if (metal != 0)
+			metal -= 18;
+	}
+
 	{
 		NSString *options = tc_options_string(opts, compressor, fmt);
 		bool annotate = opts[@"disable_annotation"] == nil;
 
-		data = wants_header(output) ?
+		data = wants_dds(output) ?
+		    write_dds_generic(blocks, sizes, widths, heights, n,
+		        [fmt UTF8String], srgb) :
+		    wants_header(output) ?
 		    write_header_generic(blocks, sizes, widths, heights, n,
 		        [fmt UTF8String], srgb, output, opts) :
 		    wants_ktx2(output) ?
@@ -1251,6 +1309,8 @@ do_compress(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 		        alpha_mode_of(opts) == ALPHA_PREMULTIPLY, options,
 		        annotate);
 		if (data == nil) {
+			if (wants_dds(output))
+				return (0);
 			printf("Error: Could not write output file!\n");
 			return (255);
 		}
@@ -1622,7 +1682,10 @@ do_decompress(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 		bool annotate = opts[@"disable_annotation"] == nil;
 		NSData *file;
 
-		if (wants_header(out)) {
+		if (wants_dds(out)) {
+			file = write_dds_generic(outs, sizes, widths,
+			    heights, n, oname, false);
+		} else if (wants_header(out)) {
 			file = write_header_generic(outs, sizes, widths,
 			    heights, n, oname, false, out, opts);
 		} else if (wants_ktx2(out)) {
@@ -1643,6 +1706,8 @@ do_decompress(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 		for (i = 0; i < n; i++)
 			free(outs[i]);
 		if (file == nil) {
+			if (wants_dds(out))
+				return (0);
 			printf("Error: Could not write output file!\n");
 			return (255);
 		}

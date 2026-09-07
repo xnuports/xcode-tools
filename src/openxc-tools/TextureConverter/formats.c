@@ -46,7 +46,10 @@ static const struct entry table[] = {
 	{ "R8",		0x8229, 9,   GL_RED,  1, 1, 0, 0x8FBD, 15 },
 	/* Apple write GL_RGBA8 for BGRA8: version 1 has no way to say the
 	 * channels are the other way round, so it does not say it. */
-	{ "BGRA8",	0x8058, 44,  GL_RGBA, 1, 1, 0, 0, 0 },
+	/* And GL_SRGB8_ALPHA8 with --srgb_format, which is RGBA8's sRGB
+	 * spelling in both containers -- Apple describe the file as RGBA
+	 * and write BGRA bytes into it. */
+	{ "BGRA8",	0x8058, 44,  GL_RGBA, 1, 1, 0, 0x8C43, 43 },
 
 	/* ASTC, LDR. */
 	{ "ASTC4x4",	0x93B0, 157, GL_RGBA, 4, 4, 204, 0x93D0, 158 },
@@ -246,7 +249,12 @@ format_dfd_for(const char *name, _Bool srgb, struct format_dfd *out)
 	 */
 	if (format_lookup(name, &gl, &base, &bx, &by, &metal) && bx == 1) {
 		_Bool flt = format_is_float(name);
-		_Bool bgra = name[0] == 'B';
+		/*
+		 * --srgb_format takes the swizzle with it: Apple write
+		 * RGBA8's sRGB enumerant for BGRA8 and describe the samples
+		 * in RGBA order, with the bytes still BGRA.
+		 */
+		_Bool bgra = name[0] == 'B' && !srgb;
 		int channels = base == GL_RED ? 1 : base == GL_RG ? 2 :
 		    base == GL_RGB ? 3 : 4;
 		int bits = format_channel_bits(name);
@@ -377,6 +385,7 @@ static const struct { const char *name, *atc; } atc_names[] = {
 const char *
 format_atc_for(const char *name, _Bool srgb, char *buf, size_t buflen)
 {
+	uint32_t gl, vk;
 	size_t i, n;
 
 	for (i = 0; atc_names[i].name != NULL; i++) {
@@ -384,6 +393,13 @@ format_atc_for(const char *name, _Bool srgb, char *buf, size_t buflen)
 			continue;
 		if (!srgb)
 			return (atc_names[i].atc);
+		/*
+		 * A format with no sRGB enumerant has no sRGB name either,
+		 * and Apple print atcFormatUnknown for it rather than
+		 * inventing one.
+		 */
+		if (!format_srgb_for(name, &gl, &vk))
+			return ("atcFormatUnknown");
 		n = strlen(atc_names[i].atc);
 		if (n < 5 || strcmp(atc_names[i].atc + n - 5, "Unorm") != 0)
 			return ("atcFormatUnknown");
@@ -399,18 +415,79 @@ format_atc_for(const char *name, _Bool srgb, char *buf, size_t buflen)
 /*
  * How many channels the .h output says the format carries.  It follows the
  * base internal format everywhere but BC6, which Apple call four channels
- * although its descriptor is colour with no alpha.
+ * although its descriptor is colour with no alpha -- and a format with no
+ * name carries none, so --srgb_format on one that has no sRGB spelling
+ * writes atcFormatUnknown and zero channels together.
  */
 int
-format_atc_channels(const char *name)
+format_atc_channels(const char *name, _Bool srgb)
 {
 	uint32_t gl, base, metal;
+	char buf[64];
 	int bx, by;
 
+	if (strcmp(format_atc_for(name, srgb, buf, sizeof(buf)),
+	    "atcFormatUnknown") == 0)
+		return (0);
 	if (strcmp(name, "BC6U") == 0 || strcmp(name, "BC6S") == 0)
 		return (4);
 	if (!format_lookup(name, &gl, &base, &bx, &by, &metal))
 		return (4);
 	return (base == GL_RED ? 1 : base == GL_RG ? 2 :
 	    base == GL_RGB ? 3 : 4);
+}
+
+/*
+ * The DXGI enumerant a DDS file names the format with, and the one
+ * --srgb_format asks for.  Only the formats Direct3D has a name for are
+ * here, which is why the tool writes no DDS for RG8, RGB8, the sixteen and
+ * thirty-two bit formats other than the four channel ones, or any of ETC2
+ * and EAC.  R8 is the odd one: it has an OpenGL sRGB spelling but no DXGI
+ * one, so --srgb_format takes it out of the list.
+ *
+ * The ASTC values are the ones Microsoft reserved and never shipped: 134
+ * for 4x4 and four apart from there, sRGB one above each.
+ */
+static const struct { const char *name; uint32_t dxgi, srgb; } dxgis[] = {
+	{ "RGBA32",	2,   0 },
+	{ "RGBA16",	10,  0 },
+	{ "R32",	41,  0 },
+	{ "RGBA8",	28,  29 },
+	{ "BGRA8",	87,  91 },
+	{ "R8",		61,  0 },
+	{ "ASTC4x4",	134, 135 },
+	{ "ASTC5x4",	138, 139 },
+	{ "ASTC5x5",	142, 143 },
+	{ "ASTC6x5",	146, 147 },
+	{ "ASTC6x6",	150, 151 },
+	{ "ASTC8x5",	154, 155 },
+	{ "ASTC8x6",	158, 159 },
+	{ "ASTC8x8",	162, 163 },
+	{ "ASTC10x5",	166, 167 },
+	{ "ASTC10x6",	170, 171 },
+	{ "ASTC10x8",	174, 175 },
+	{ "ASTC10x10",	178, 179 },
+	{ "ASTC12x10",	182, 183 },
+	{ "ASTC12x12",	186, 187 },
+	{ "BC1",	71,  72 },
+	{ "BC2",	74,  75 },
+	{ "BC3",	77,  78 },
+	{ "BC4",	80,  0 },
+	{ "BC5",	83,  0 },
+	{ "BC6U",	95,  0 },
+	{ "BC6S",	96,  0 },
+	{ "BC7",	98,  99 },
+	{ NULL,		0,   0 }
+};
+
+uint32_t
+format_dxgi_for(const char *name, _Bool srgb)
+{
+	size_t i;
+
+	for (i = 0; dxgis[i].name != NULL; i++) {
+		if (strcmp(dxgis[i].name, name) == 0)
+			return (srgb ? dxgis[i].srgb : dxgis[i].dxgi);
+	}
+	return (0);
 }

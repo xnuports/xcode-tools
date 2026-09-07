@@ -74,7 +74,7 @@ char *
 header_write(void **levels, const size_t *sizes, const int *widths,
     const int *heights, int nlevels, const char *name,
     const char *atc_format, const char *gamut, const char *ident,
-    size_t *out_len)
+    _Bool srgb, size_t *out_len)
 {
 	struct text t = { NULL, 0, 0, 0 };
 	int i;
@@ -97,23 +97,31 @@ header_write(void **levels, const size_t *sizes, const int *widths,
 	addf(&t, "const uint32_t %s_numMipmaps = %d;\n", ident, nlevels);
 	addf(&t, "const uint32_t %s_numElements = 1;\n", ident);
 	addf(&t, "const uint32_t %s_numChannels = %d;\n\n", ident,
-	    format_atc_channels(name));
+	    format_atc_channels(name, srgb));
 
 	for (i = 0; i < nlevels; i++) {
 		const uint8_t *b = levels[i];
 		size_t j;
 
+		/*
+		 * The tab that opens a line is written whenever the count
+		 * reaches a multiple of twenty, the end of the level
+		 * included, so a level whose size is a multiple of twenty
+		 * ends with a line holding nothing but the tab.  Apple do
+		 * that and a reader would never notice, but a byte compare
+		 * does.
+		 */
 		addf(&t, "uint8_t %s_Mip%d[%zu] = { \n", ident, i, sizes[i]);
-		for (j = 0; j < sizes[i]; j++) {
-			if (j % 20 == 0)
+		for (j = 0; j <= sizes[i]; j++) {
+			if (j % 20 == 0) {
+				if (j != 0)
+					addf(&t, "\n");
 				addf(&t, "\t");
-			addf(&t, "0x%02x, ", b[j]);
-			if (j % 20 == 19)
-				addf(&t, "\n");
+			}
+			if (j < sizes[i])
+				addf(&t, "0x%02x, ", b[j]);
 		}
-		if (sizes[i] % 20 != 0)
-			addf(&t, "\n");
-		addf(&t, "};\n\n");
+		addf(&t, "\n};\n\n");
 	}
 
 	addf(&t, "static void SetSurface%s(const ATC_Texture* pTexture, "

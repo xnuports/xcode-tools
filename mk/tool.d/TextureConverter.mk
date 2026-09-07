@@ -4,7 +4,7 @@
 # what Apple's links for the same job.  The compressor libraries in
 # usr/local come from src/extras (see mk/port.d/{astcenc,stb,etc2comp,nvtt}).
 T_SRCS=		TextureConverter.m ktx.c formats.c compress.c mipmap.cpp \
-		nvtt.cpp stb.c etc2.cpp decode.cpp eac.c ktx2.c header.c
+		nvtt.cpp stb.c etc2.cpp decode.cpp eac.c ktx2.c header.c dds.c
 T_CFLAGS+=	-fobjc-arc
 T_LDADD+=	-framework Foundation
 T_LDADD+=	-framework CoreGraphics

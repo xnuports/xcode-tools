@@ -81,6 +81,13 @@ const char *format_atc_for(const char *name, _Bool srgb, char *buf,
 	    size_t buflen);
 
 /* The channel count that output records, which is BC6's only oddity. */
-int	format_atc_channels(const char *name);
+int	format_atc_channels(const char *name, _Bool srgb);
+
+/*
+ * The DXGI enumerant a DDS file names the format with; zero for a format
+ * Direct3D has no name for, which is what makes the tool refuse to write a
+ * DDS for it.
+ */
+uint32_t format_dxgi_for(const char *name, _Bool srgb);
 
 #endif /* TEXTURECONVERTER_FORMATS_H */
