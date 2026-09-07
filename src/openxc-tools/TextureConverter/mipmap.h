@@ -25,12 +25,19 @@ enum mip_filter {
 	MIP_FILTER_KAISER
 };
 
+/* --wrap_mode, which says what the filter reads past an edge. */
+enum mip_wrap {
+	MIP_WRAP_MIRROR,
+	MIP_WRAP_CLAMP,
+	MIP_WRAP_REPEAT
+};
+
 /*
  * Halve a tightly packed RGBA float image.  The caller owns the result and
  * frees it with free().  Returns NULL when the image is already 1x1.
  */
 float	*mip_downsample(const float *rgba, int w, int h, enum mip_filter,
-	    int *out_w, int *out_h);
+	    enum mip_wrap, int *out_w, int *out_h);
 
 #ifdef __cplusplus
 }

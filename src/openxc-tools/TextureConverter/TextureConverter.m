@@ -719,6 +719,7 @@ do_convert(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 	NSString *output = opts[@"output"];
 	NSString *filter = opts[@"mipmap_filter"];
 	enum mip_filter which = MIP_FILTER_KAISER;
+	enum mip_wrap wrap = MIP_WRAP_MIRROR;
 	bool normal = opts[@"normal_map"] != nil;
 	NSData *data;
 	int n = 0, i, maxlevels;
@@ -729,6 +730,12 @@ do_convert(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 		which = MIP_FILTER_BOX;
 	else if ([filter caseInsensitiveCompare:@"Triangle"] == NSOrderedSame)
 		which = MIP_FILTER_TRIANGLE;
+	if ([opts[@"wrap_mode"] caseInsensitiveCompare:@"Clamp"] ==
+	    NSOrderedSame)
+		wrap = MIP_WRAP_CLAMP;
+	else if ([opts[@"wrap_mode"] caseInsensitiveCompare:@"Repeat"] ==
+	    NSOrderedSame)
+		wrap = MIP_WRAP_REPEAT;
 
 	if ((levels[0] = load_rgba(path, alpha_mode_of(opts), &widths[0],
 	    &heights[0])) == NULL) {
@@ -744,7 +751,7 @@ do_convert(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 		maxlevels = MAX_LEVELS;
 	while (n < maxlevels && (widths[n - 1] > 1 || heights[n - 1] > 1)) {
 		levels[n] = mip_downsample(levels[n - 1], widths[n - 1],
-		    heights[n - 1], which, &widths[n], &heights[n]);
+		    heights[n - 1], which, wrap, &widths[n], &heights[n]);
 		if (levels[n] == NULL)
 			break;
 		if (normal)
@@ -1087,6 +1094,7 @@ do_compress(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 	NSString *quality = opts[@"compression_quality"];
 	struct tc_astc_options aopt;
 	enum mip_filter which = MIP_FILTER_KAISER;
+	enum mip_wrap wrap = MIP_WRAP_MIRROR;
 	bool normal = opts[@"normal_map"] != nil;
 	enum tc_bc bc = TC_BC1;
 	enum tc_etc etc = TC_ETC2_RGB8;
@@ -1210,6 +1218,12 @@ do_compress(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 		which = MIP_FILTER_BOX;
 	else if ([filter caseInsensitiveCompare:@"Triangle"] == NSOrderedSame)
 		which = MIP_FILTER_TRIANGLE;
+	if ([opts[@"wrap_mode"] caseInsensitiveCompare:@"Clamp"] ==
+	    NSOrderedSame)
+		wrap = MIP_WRAP_CLAMP;
+	else if ([opts[@"wrap_mode"] caseInsensitiveCompare:@"Repeat"] ==
+	    NSOrderedSame)
+		wrap = MIP_WRAP_REPEAT;
 
 	printf("Using Compressor: %s\n", [compressor UTF8String]);
 
@@ -1226,7 +1240,7 @@ do_compress(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 		maxlevels = MAX_LEVELS;
 	while (n < maxlevels && (widths[n - 1] > 1 || heights[n - 1] > 1)) {
 		levels[n] = mip_downsample(levels[n - 1], widths[n - 1],
-		    heights[n - 1], which, &widths[n], &heights[n]);
+		    heights[n - 1], which, wrap, &widths[n], &heights[n]);
 		if (levels[n] == NULL)
 			break;
 		if (normal)
@@ -1407,22 +1421,25 @@ pack_bytes_u8(const uint8_t *rgba, int w, int h, int channels,
 }
 
 /*
- * A sample as a byte.  The scale is 256 rather than 255 and the narrowing
- * truncates, which is only visible where the sample is not already a
- * multiple of 1/255: k/255 times 256 is k plus k/255, so it floors back to
- * k for every byte the decompress path hands over, and the mip levels the
- * compression path builds are where it shows.  Rounding by 255 instead is
- * one out on about one sample in eight of those.
+ * A sample as a byte, through sixteen bits: rounded to a sixteen bit unorm
+ * and then reduced to its top byte.  It is the same narrowing EAC uses in
+ * the other direction, and nothing in one step matches it -- rounding by
+ * 255 is out on one sample in thirty, and truncating by 256 agrees
+ * everywhere but the few where the sixteen bit rounding carries, one
+ * sample in twenty thousand.
+ *
+ * Every sample the decompress path produces is already a multiple of
+ * 1/255, and k/255 rounds to 257k here, whose top byte is k, so it is only
+ * the compression path's mip levels that can tell any of these apart.
  */
 static uint8_t
 to_byte(float v)
 {
-	int q;
-
 	if (!(v > 0.0f))
 		return (0);
-	q = (int)(v * 256.0f);
-	return (q > 255 ? 255 : (uint8_t)q);
+	if (v >= 1.0f)
+		return (255);
+	return ((uint8_t)((int)(v * 65535.0f + 0.5f) >> 8));
 }
 
 static uint8_t *

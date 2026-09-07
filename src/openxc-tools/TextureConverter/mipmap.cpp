@@ -15,8 +15,12 @@
 
 float *
 mip_downsample(const float *rgba, int w, int h, enum mip_filter which,
-    int *out_w, int *out_h)
+    enum mip_wrap wrap, int *out_w, int *out_h)
 {
+	nv::FloatImage::WrapMode mode =
+	    wrap == MIP_WRAP_CLAMP ? nv::FloatImage::WrapMode_Clamp :
+	    wrap == MIP_WRAP_REPEAT ? nv::FloatImage::WrapMode_Repeat :
+	    nv::FloatImage::WrapMode_Mirror;
 	nv::FloatImage img;
 	nv::FloatImage *half = NULL;
 	float *out;
@@ -36,8 +40,9 @@ mip_downsample(const float *rgba, int w, int h, enum mip_filter which,
 	}
 
 	/*
-	 * Mirror at the edges, which is what Apple's default wrap mode is and
-	 * what the impulse response showed their filter doing.
+	 * --wrap_mode says what the filter reads past an edge, and Mirror is
+	 * the default -- which is what the impulse response showed their
+	 * filter doing.
 	 */
 	switch (which) {
 	case MIP_FILTER_BOX:
@@ -53,13 +58,13 @@ mip_downsample(const float *rgba, int w, int h, enum mip_filter which,
 	case MIP_FILTER_TRIANGLE: {
 		nv::TriangleFilter f;
 
-		half = img.downSample(f, nv::FloatImage::WrapMode_Mirror);
+		half = img.downSample(f, mode);
 		break;
 	}
 	default: {
 		nv::KaiserFilter f(3.0f);
 
-		half = img.downSample(f, nv::FloatImage::WrapMode_Mirror);
+		half = img.downSample(f, mode);
 		break;
 	}
 	}
