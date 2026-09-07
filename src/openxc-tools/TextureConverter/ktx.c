@@ -29,6 +29,12 @@ le32(const uint8_t *p)
  * that many bytes of a NUL-terminated key followed by its value, then
  * padding to the next multiple of four.
  */
+static uint64_t
+le64(const uint8_t *p)
+{
+	return ((uint64_t)le32(p) | ((uint64_t)le32(p + 4) << 32));
+}
+
 static void
 read_kv(struct ktx *k, const uint8_t *p, size_t len)
 {
@@ -105,6 +111,41 @@ read_levels_v1(struct ktx *k, const uint8_t *p, size_t len, size_t off)
 	}
 }
 
+/*
+ * Version 2 indexes its levels instead: levelCount entries of three 64-bit
+ * words -- the offset, the stored length and the uncompressed length --
+ * starting right after the header, in level order.  The levels themselves
+ * are stored the other way round, smallest first, which is why the index
+ * is needed rather than a walk.
+ */
+static void
+read_levels_v2(struct ktx *k, const uint8_t *p, size_t len)
+{
+	uint32_t w = k->width, h = k->height;
+	uint32_t i;
+
+	if (k->levels == 0 || k->levels > 32)
+		return;
+	if (80 + (size_t)k->levels * 24 > len)
+		return;
+	if ((k->level = calloc(k->levels, sizeof(*k->level))) == NULL)
+		return;
+	for (i = 0; i < k->levels; i++) {
+		const uint8_t *e = p + 80 + (size_t)i * 24;
+		uint64_t off = le64(e), n = le64(e + 8);
+
+		if (off > len || n > len - off)
+			break;
+		k->level[i].data = p + off;
+		k->level[i].len = (size_t)n;
+		k->level[i].width = w;
+		k->level[i].height = h;
+		k->nlevel++;
+		w = w > 1 ? w / 2 : 1;
+		h = h > 1 ? h / 2 : 1;
+	}
+}
+
 bool
 ktx_parse(const void *bytes, size_t len, struct ktx *out)
 {
@@ -150,6 +191,7 @@ ktx_parse(const void *bytes, size_t len, struct ktx *out)
 		kvlen = le32(p + 60);
 		if (kvoff < len && kvlen <= len - kvoff)
 			read_kv(out, p + kvoff, (size_t)kvlen);
+		read_levels_v2(out, p, len);
 		return (true);
 	}
 	return (false);

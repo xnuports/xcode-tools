@@ -180,6 +180,8 @@ static NSData *write_ktx2_generic(void **levels, const size_t *sizes,
     bool premultiplied, bool srgb, NSString *options, bool annotate);
 static void *pack_raw(const float *rgba, int w, int h, const char *name,
     size_t *out_len);
+static float *unpack_level(const struct ktx_level *, bool bgra,
+    int channels, int bits, int version);
 static bool wants_header(NSString *output);
 static bool wants_dds(NSString *output);
 static NSData *write_dds_generic(void **levels, const size_t *sizes,
@@ -460,6 +462,70 @@ enum alpha_mode {
  * where Apple's tool writes 237, 191 and 136.  The provider hands over what
  * was decoded, which is what they read.
  */
+/*
+ * The base level of an uncompressed Khronos container, as RGBA floats.
+ *
+ * Apple read these as inputs and this tree only read what CoreGraphics
+ * decodes, which is neither all of them nor reliably any of them: the four
+ * and three channel byte formats come back, and R8, the sixteen bit
+ * formats and the float ones do not.  Everything needed to read them is
+ * already here, so it is read here.
+ *
+ * The name is handed back because --mode=convert writes it: converting a
+ * container is a format-preserving copy with the chain rebuilt, where
+ * converting an image file writes RGBA32.  A compressed container is
+ * refused, as Apple's is.
+ */
+static int
+load_container(NSString *path, float **levels, int *widths, int *heights,
+    int max, const char **namep)
+{
+	NSData *data = [NSData dataWithContentsOfFile:path];
+	struct ktx k;
+	const char *name;
+	uint32_t gl, base, metal;
+	int bx, by, channels, bits, n, i;
+
+	if (data == nil || !ktx_parse([data bytes], [data length], &k))
+		return (0);
+	name = k.version == 1 ? format_name_for_gl(k.gl_internal_format) :
+	    format_name_for_vk(k.vk_format);
+	if (name == NULL || k.nlevel == 0 ||
+	    !format_lookup(name, &gl, &base, &bx, &by, &metal) || bx != 1) {
+		ktx_free(&k);
+		return (0);
+	}
+	channels = base == 0x1903 ? 1 : base == 0x8227 ? 2 :
+	    base == 0x1907 ? 3 : 4;
+	bits = format_channel_bits(name);
+	n = (int)k.nlevel > max ? max : (int)k.nlevel;
+	for (i = 0; i < n; i++) {
+		/*
+		 * Read as version 2 does, with the rows tight, whichever
+		 * version this is.  Version 1 pads its rows to four bytes
+		 * and Apple do not put that back when they read one: an
+		 * R8 level two texels wide comes back as its first two
+		 * bytes and then the two bytes of padding after them, and
+		 * a thirteen wide one comes back sliding three bytes
+		 * further left on every row.  It is their bug, and reading
+		 * the file correctly here would put a different image
+		 * through the rest of the tool than their tool has.
+		 */
+		levels[i] = unpack_level(&k.level[i], name[0] == 'B',
+		    channels, bits, 2);
+		if (levels[i] == NULL)
+			break;
+		widths[i] = (int)k.level[i].width;
+		heights[i] = (int)k.level[i].height;
+	}
+	n = i;
+	*namep = name;
+	ktx_free(&k);
+	if (n == 0)
+		return (0);
+	return (n);
+}
+
 static float *
 load_rgba(NSString *path, enum alpha_mode amode, int *wp, int *hp)
 {
@@ -843,6 +909,7 @@ do_convert(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 	enum mip_filter which = MIP_FILTER_KAISER;
 	enum mip_wrap wrap = MIP_WRAP_MIRROR;
 	bool normal = opts[@"normal_map"] != nil;
+	const char *oname = "RGBA32";
 	NSData *data;
 	int n = 0, i, maxlevels;
 
@@ -859,11 +926,39 @@ do_convert(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 	    NSOrderedSame)
 		wrap = MIP_WRAP_REPEAT;
 
-	if ((levels[0] = load_rgba(path, alpha_mode_of(opts), &widths[0],
-	    &heights[0])) == NULL) {
+	/*
+	 * A container carries its own format, and converting one keeps it:
+	 * an RGBA8 container in comes out RGBA8, where an image file comes
+	 * out RGBA32.
+	 */
+	n = load_container(path, levels, widths, heights, MAX_LEVELS,
+	    &oname);
+	if (n == 0) {
+		oname = "RGBA32";
+		levels[0] = load_rgba(path, alpha_mode_of(opts), &widths[0],
+		    &heights[0]);
+		n = levels[0] != NULL ? 1 : 0;
+	}
+	if (n == 0) {
 		printf("Error: Could not read input file!\n");
 		return (255);
 	}
+	/*
+	 * A container's own levels are kept, and the chain is only extended
+	 * past them: converting a two level container gives a full chain
+	 * whose first two levels are the ones that came in, not two rebuilt
+	 * from the base.  Anything that changes the base's geometry or its
+	 * colour throws them away, since they would no longer belong to it.
+	 */
+	if (n > 1 && (opts[@"flip_x"] != nil || opts[@"flip_y"] != nil ||
+	    [opts[@"gamma_in"] floatValue] != 1.0f || normal ||
+	    [opts[@"max_extent"] intValue] < widths[0] ||
+	    [opts[@"max_extent"] intValue] < heights[0])) {
+		for (i = 1; i < n; i++)
+			free(levels[i]);
+		n = 1;
+	}
+
 	flip_image(levels[0], widths[0], heights[0],
 	    opts[@"flip_x"] != nil, opts[@"flip_y"] != nil);
 	/*
@@ -884,7 +979,6 @@ do_convert(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 	    [opts[@"max_extent"] intValue], which, wrap);
 	if (normal)
 		normalize_normals(levels[0], widths[0], heights[0]);
-	n = 1;
 
 	maxlevels = [opts[@"max_mipmaps"] intValue];
 	if (maxlevels <= 0 || maxlevels > MAX_LEVELS)
@@ -936,28 +1030,44 @@ do_convert(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 	{
 		void *ptrs[MAX_LEVELS];
 		size_t sizes[MAX_LEVELS];
+		uint32_t gl, base, metal, type, texel;
+		int bx, by, bits;
 
-		for (i = 0; i < n; i++) {
-			ptrs[i] = levels[i];
-			sizes[i] = (size_t)widths[i] * heights[i] * 4 *
-			    sizeof(float);
-		}
 		NSString *options = tc_options_string(opts, nil, nil);
 		bool annotate = opts[@"disable_annotation"] == nil;
 		bool prem = alpha_mode_of(opts) == ALPHA_PREMULTIPLY;
 
+		if (!format_lookup(oname, &gl, &base, &bx, &by, &metal))
+			return (255);
+		bits = format_channel_bits(oname);
+		type = bits == 8 ? GL_UNSIGNED_BYTE :
+		    bits == 16 ? GL_HALF_FLOAT : GL_FLOAT;
+		texel = (uint32_t)(bits / 8) * (uint32_t)(base == 0x1903 ?
+		    1 : base == 0x8227 ? 2 : base == 0x1907 ? 3 : 4);
+		for (i = 0; i < n; i++) {
+			ptrs[i] = pack_raw(levels[i], widths[i], heights[i],
+			    oname, &sizes[i]);
+			if (ptrs[i] == NULL) {
+				printf("Error: Could not write output "
+				    "file!\n");
+				return (255);
+			}
+		}
+
 		data = wants_dds(output) ?
 		    write_dds_generic(ptrs, sizes, widths, heights, n,
-		        "RGBA32", false) :
+		        oname, false) :
 		    wants_header(output) ?
 		    write_header_generic(ptrs, sizes, widths, heights, n,
-		        "RGBA32", false, normal, output, opts) :
+		        oname, false, normal, output, opts) :
 		    wants_ktx2(output) ?
 		    write_ktx2_generic(ptrs, sizes, widths, heights, n,
-		        "RGBA32", prem, false, options, annotate) :
+		        oname, prem, false, options, annotate) :
 		    write_ktx_generic(ptrs, sizes, widths, heights, n,
-		        0x8814, 0x1908, GL_FLOAT, 4, 0x1908, 16, 0, prem,
-		        options, annotate);
+		        gl, base, type, (uint32_t)(bits / 8), base, texel,
+		        0, prem, options, annotate);
+		for (i = 0; i < n; i++)
+			free(ptrs[i]);
 	}
 	for (i = 0; i < n; i++)
 		free(levels[i]);
@@ -1397,8 +1507,17 @@ do_compress(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 
 	printf("Using Compressor: %s\n", [compressor UTF8String]);
 
-	if ((levels[0] = load_rgba(path, alpha_mode_of(opts), &widths[0],
-	    &heights[0])) == NULL) {
+	{
+		const char *iname;
+
+		if (load_container(path, levels, widths, heights, 1,
+		    &iname) == 0)
+			levels[0] = NULL;
+	}
+	if (levels[0] == NULL)
+		levels[0] = load_rgba(path, alpha_mode_of(opts), &widths[0],
+		    &heights[0]);
+	if (levels[0] == NULL) {
 		printf("Error: Could not read input file!\n");
 		return (255);
 	}
@@ -1992,23 +2111,56 @@ bytes_to_float(uint8_t *px, size_t n)
 	return (out);
 }
 
+/* A half back to a float.  The other direction is to_half. */
+static float
+from_half(uint16_t h)
+{
+	uint32_t sign = (uint32_t)(h & 0x8000) << 16;
+	int exp = (h >> 10) & 0x1f;
+	uint32_t mant = h & 0x3ff;
+	uint32_t u;
+	float f;
+
+	if (exp == 0) {
+		if (mant == 0)
+			u = sign;
+		else {
+			/* Subnormal: renormalise into a float. */
+			exp = -1;
+			do {
+				exp++;
+				mant <<= 1;
+			} while ((mant & 0x400) == 0);
+			u = sign | ((uint32_t)(127 - 15 - exp) << 23) |
+			    ((mant & 0x3ff) << 13);
+		}
+	} else if (exp == 0x1f) {
+		u = sign | 0x7f800000 | (mant << 13);
+	} else {
+		u = sign | ((uint32_t)(exp - 15 + 127) << 23) | (mant << 13);
+	}
+	memcpy(&f, &u, sizeof(f));
+	return (f);
+}
+
 /*
- * One level of an uncompressed container, whatever it stores, as RGBA.
- * Rows are padded to four bytes on the way in and not on the way out.
+ * One level of an uncompressed container as RGBA floats.  Version 1 pads
+ * each row to four bytes and version 2 packs them tight, and BGRA8 is the
+ * one format whose channels are not in order.
  */
 static float *
-unpack_level(const struct ktx_level *lv, bool is_float, int channels)
+unpack_level(const struct ktx_level *lv, bool bgra, int channels,
+    int bits, int version)
 {
 	float *out = calloc((size_t)lv->width * lv->height * 4, sizeof(*out));
-	size_t stride;
+	size_t texel = (size_t)channels * (size_t)(bits / 8);
+	size_t row = (size_t)lv->width * texel, stride;
 	uint32_t x, y;
 	int c;
 
 	if (out == NULL)
 		return (NULL);
-	stride = is_float ?
-	    (size_t)lv->width * (size_t)channels * sizeof(float) :
-	    (((size_t)lv->width * (size_t)channels + 3) & ~(size_t)3);
+	stride = version == 1 ? ((row + 3) & ~(size_t)3) : row;
 	if (stride * lv->height > lv->len) {
 		free(out);
 		return (NULL);
@@ -2016,17 +2168,22 @@ unpack_level(const struct ktx_level *lv, bool is_float, int channels)
 	for (y = 0; y < lv->height; y++) {
 		for (x = 0; x < lv->width; x++) {
 			float *o = out + ((size_t)y * lv->width + x) * 4;
+			const uint8_t *p = lv->data + (size_t)y * stride +
+			    (size_t)x * texel;
 
 			o[3] = 1.0f;
 			for (c = 0; c < channels; c++) {
-				if (is_float)
-					memcpy(&o[c], lv->data + y * stride +
-					    ((size_t)x * channels + c) *
-					    sizeof(float), sizeof(o[c]));
-				else
-					o[c] = lv->data[y * stride +
-					    (size_t)x * channels + c] *
-					    (1.0f / 255.0f);
+				int d = bgra && c < 3 ? 2 - c : c;
+
+				if (bits == 32)
+					memcpy(&o[d], p + (size_t)c * 4, 4);
+				else if (bits == 16) {
+					uint16_t h;
+
+					memcpy(&h, p + (size_t)c * 2, 2);
+					o[d] = from_half(h);
+				} else
+					o[d] = p[c] * (1.0f / 255.0f);
 			}
 		}
 	}
@@ -2085,8 +2242,8 @@ cmp_load(NSString *path, struct cmp_image *im)
 			int channels = base == 0x1903 ? 1 :
 			    base == 0x8227 ? 2 : base == 0x1907 ? 3 : 4;
 
-			im->level[i] = unpack_level(lv, format_is_float(name),
-			    channels);
+			im->level[i] = unpack_level(lv, name[0] == 'B',
+			    channels, format_channel_bits(name), k.version);
 		} else if (strncmp(name, "ASTC", 4) == 0) {
 			/*
 			 * Through the eight bit decode, not the float one.
