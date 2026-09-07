@@ -54,6 +54,8 @@ static bool wants_ktx2(NSString *output);
 static NSData *write_ktx2_generic(void **levels, const size_t *sizes,
     const int *widths, const int *heights, int nlevels, const char *name,
     bool premultiplied, bool srgb, NSString *options, bool annotate);
+static void *pack_raw(const float *rgba, int w, int h, const char *name,
+    size_t *out_len);
 
 /*
  * Every option the tool takes, with the default the usage text advertises.
@@ -580,6 +582,7 @@ put_kv(NSMutableData *d, const char *key, const char *value)
 /* The two OpenGL types this tool ever writes. */
 #define	GL_UNSIGNED_BYTE	0x1401
 #define	GL_FLOAT		0x1406
+#define	GL_HALF_FLOAT		0x140B
 
 static const uint8_t ktx1_id[12] = {
 	0xAB, 0x4B, 0x54, 0x58, 0x20, 0x31, 0x31, 0xBB, 0x0D, 0x0A, 0x1A, 0x0A
@@ -594,7 +597,8 @@ static NSData *
 write_ktx_generic(void **levels, const size_t *sizes, const int *widths,
     const int *heights, int nlevels, uint32_t gl_internal, uint32_t gl_base,
     uint32_t gl_type, uint32_t gl_type_size, uint32_t gl_format,
-    uint32_t metal, bool premultiplied, NSString *options, bool annotate)
+    uint32_t texel_bytes, uint32_t metal, bool premultiplied,
+    NSString *options, bool annotate)
 {
 	NSMutableData *out = [NSMutableData data];
 	NSMutableData *kvd = [NSMutableData data];
@@ -663,16 +667,35 @@ write_ktx_generic(void **levels, const size_t *sizes, const int *widths,
 	put32(out, (uint32_t)[kvd length]);
 	[out appendData:kvd];
 
+	/*
+	 * Version 1 pads each row of an uncompressed level to four bytes and
+	 * counts the padding in imageSize; version 2 packs the rows tight,
+	 * so the packers hand over tight rows and the padding is put in
+	 * here.  A block format has no rows to pad -- texel_bytes is zero
+	 * for it -- and only its level is rounded up.
+	 */
 	for (i = 0; i < nlevels; i++) {
 		static const uint8_t pad[4] = { 0, 0, 0, 0 };
+		size_t row = texel_bytes == 0 ? sizes[i] :
+		    (size_t)widths[i] * texel_bytes;
+		size_t stride = (row + 3) & ~(size_t)3;
+		size_t total = texel_bytes == 0 ? sizes[i] :
+		    stride * (size_t)heights[i];
+		size_t y;
 
-		put32(out, (uint32_t)sizes[i]);
-		[out appendBytes:levels[i] length:sizes[i]];
+		put32(out, (uint32_t)total);
+		if (row == stride) {
+			[out appendBytes:levels[i] length:sizes[i]];
+		} else {
+			for (y = 0; y < (size_t)heights[i]; y++) {
+				[out appendBytes:(const uint8_t *)levels[i] +
+				    y * row length:row];
+				[out appendBytes:pad length:stride - row];
+			}
+		}
 		/* Each level is padded to a four byte boundary. */
-		[out appendBytes:pad length:(4 - sizes[i] % 4) % 4];
+		[out appendBytes:pad length:(4 - total % 4) % 4];
 	}
-	(void)widths;
-	(void)heights;
 	return (out);
 }
 
@@ -744,7 +767,7 @@ do_convert(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 		    write_ktx2_generic(ptrs, sizes, widths, heights, n,
 		        "RGBA32", prem, false, options, annotate) :
 		    write_ktx_generic(ptrs, sizes, widths, heights, n,
-		        0x8814, 0x1908, GL_FLOAT, 4, 0x1908, 0, prem,
+		        0x8814, 0x1908, GL_FLOAT, 4, 0x1908, 16, 0, prem,
 		        options, annotate);
 	}
 	for (i = 0; i < n; i++)
@@ -802,7 +825,7 @@ write_ktx2_generic(void **levels, const size_t *sizes, const int *widths,
 	block_bytes = (int)(sizes[0] /
 	    ((size_t)((widths[0] + bx - 1) / bx) *
 	     (size_t)((heights[0] + by - 1) / by)));
-	type_size = format_is_float(name) ? 4 : 1;
+	type_size = bx == 1 ? format_channel_bits(name) / 8 : 1;
 	if (!srgb || !format_srgb_for(name, &srgb_gl, &vk))
 		vk = format_vk_for(name);
 	bytes = ktx2_write(levels, sizes, widths, heights, nlevels,
@@ -968,13 +991,14 @@ do_compress(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 	enum tc_bc bc = TC_BC1;
 	enum tc_etc etc = TC_ETC2_RGB8;
 	bool srgb = opts[@"srgb_format"] != nil;
+	uint32_t type = 0, type_size = 1, gl_format = 0, texel = 0;
 	NSString *compressor;
 	uint32_t gl, base, metal;
 	NSData *data;
 	int n = 0, i, maxlevels;
 
 	if (!format_lookup([fmt UTF8String], &gl, &base, &aopt.block_x,
-	    &aopt.block_y, &metal) || aopt.block_x == 1) {
+	    &aopt.block_y, &metal)) {
 		printf("Error: Unsupported compression format \"%s\"!\n",
 		    [fmt UTF8String]);
 		short_usage();
@@ -1012,7 +1036,23 @@ do_compress(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 	else if ([quality caseInsensitiveCompare:@"Highest"] == NSOrderedSame)
 		aopt.quality = TC_QUALITY_HIGHEST;
 
-	if ([fmt hasPrefix:@"ASTC"]) {
+	if (aopt.block_x == 1) {
+		/*
+		 * An uncompressed format runs no encoder.  Apple still name
+		 * one, and the name they name is RAW.  Version 1 spells the
+		 * samples out rather than calling them a block: the type,
+		 * its size, and the channel order.
+		 */
+		int bits = format_channel_bits([fmt UTF8String]);
+
+		compressor = @"RAW";
+		type = bits == 8 ? GL_UNSIGNED_BYTE :
+		    bits == 16 ? GL_HALF_FLOAT : GL_FLOAT;
+		type_size = (uint32_t)(bits / 8);
+		gl_format = base;
+		texel = type_size * (uint32_t)(base == 0x1903 ? 1 :
+		    base == 0x8227 ? 2 : base == 0x1907 ? 3 : 4);
+	} else if ([fmt hasPrefix:@"ASTC"]) {
 		compressor = @"ARM";
 	} else if (etc_format_of(fmt, &etc)) {
 		compressor = @"ETC2COMP";
@@ -1122,7 +1162,10 @@ do_compress(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 		premultiply_base(levels[0], widths[0], heights[0]);
 
 	for (i = 0; i < n; i++) {
-		if ([compressor isEqualToString:@"NVTT"])
+		if ([compressor isEqualToString:@"RAW"])
+			blocks[i] = pack_raw(levels[i], widths[i], heights[i],
+			    [fmt UTF8String], &sizes[i]);
+		else if ([compressor isEqualToString:@"NVTT"])
 			blocks[i] = compress_bc(levels[i], widths[i],
 			    heights[i], bc, aopt.quality, &sizes[i]);
 		else if ([compressor isEqualToString:@"STB"])
@@ -1152,7 +1195,7 @@ do_compress(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 		        alpha_mode_of(opts) == ALPHA_PREMULTIPLY, srgb,
 		        options, annotate) :
 		    write_ktx_generic(blocks, sizes, widths, heights, n,
-		        gl, base, 0, 1, 0, metal,
+		        gl, base, type, type_size, gl_format, texel, metal,
 		        alpha_mode_of(opts) == ALPHA_PREMULTIPLY, options,
 		        annotate);
 		if (data == nil) {
@@ -1224,20 +1267,16 @@ decode_format_of(const char *name, enum tc_decode *out)
  * Pack a decoded RGBA float image down to the channels the output format
  * carries.
  *
- * Rounding, not the truncation the compression path uses.  It only shows on
- * ASTC, whose decoder does not land on exact multiples of 1/255: every one
- * of five hundred differing bytes was low by one until this rounded.
- *
- * Rows are padded to a multiple of four bytes.  That is KTX's rule, not a
- * choice -- a level is stored as if read with an UNPACK_ALIGNMENT of 4 --
- * and it only shows up on the narrow formats: a 2x2 level of R8 is eight
- * bytes, not four, and a 1x1 level is four, not one.
+ * The rows come out tight.  Version 1 pads them to four bytes -- a level is
+ * stored as if read with an UNPACK_ALIGNMENT of 4, so a 2x2 level of R8 is
+ * eight bytes and a 1x1 level four -- and version 2 does not, so the writer
+ * that wants the padding puts it in.
  */
 static uint8_t *
 pack_bytes_u8(const uint8_t *rgba, int w, int h, int channels,
     size_t *out_len)
 {
-	size_t stride = ((size_t)w * (size_t)channels + 3) & ~(size_t)3;
+	size_t stride = (size_t)w * (size_t)channels;
 	uint8_t *out = calloc((size_t)h, stride);
 	int x, y, c;
 
@@ -1255,10 +1294,29 @@ pack_bytes_u8(const uint8_t *rgba, int w, int h, int channels,
 	return (out);
 }
 
+/*
+ * A sample as a byte.  The scale is 256 rather than 255 and the narrowing
+ * truncates, which is only visible where the sample is not already a
+ * multiple of 1/255: k/255 times 256 is k plus k/255, so it floors back to
+ * k for every byte the decompress path hands over, and the mip levels the
+ * compression path builds are where it shows.  Rounding by 255 instead is
+ * one out on about one sample in eight of those.
+ */
+static uint8_t
+to_byte(float v)
+{
+	int q;
+
+	if (!(v > 0.0f))
+		return (0);
+	q = (int)(v * 256.0f);
+	return (q > 255 ? 255 : (uint8_t)q);
+}
+
 static uint8_t *
 pack_bytes(const float *rgba, int w, int h, int channels, size_t *out_len)
 {
-	size_t stride = ((size_t)w * (size_t)channels + 3) & ~(size_t)3;
+	size_t stride = (size_t)w * (size_t)channels;
 	uint8_t *out = calloc((size_t)h, stride);
 	int x, y, c;
 
@@ -1266,17 +1324,115 @@ pack_bytes(const float *rgba, int w, int h, int channels, size_t *out_len)
 		return (NULL);
 	for (y = 0; y < h; y++) {
 		for (x = 0; x < w; x++) {
-			for (c = 0; c < channels; c++) {
-				float v = rgba[((size_t)y * w + x) * 4 +
-				    (size_t)c];
-
-				if (v < 0.0f)
-					v = 0.0f;
-				if (v > 1.0f)
-					v = 1.0f;
+			for (c = 0; c < channels; c++)
 				out[(size_t)y * stride +
 				    (size_t)x * (size_t)channels + (size_t)c] =
-				    (uint8_t)lrintf(255.0f * v);
+				    to_byte(rgba[((size_t)y * w + x) * 4 +
+				    (size_t)c]);
+		}
+	}
+	*out_len = (size_t)h * stride;
+	return (out);
+}
+
+/* BGRA8: the same bytes as RGBA8 with red and blue exchanged. */
+static uint8_t *
+pack_bytes_bgra(const float *rgba, int w, int h, size_t *out_len)
+{
+	uint8_t *out = pack_bytes(rgba, w, h, 4, out_len);
+	size_t i;
+
+	if (out == NULL)
+		return (NULL);
+	for (i = 0; i + 3 < *out_len; i += 4) {
+		uint8_t t = out[i];
+
+		out[i] = out[i + 2];
+		out[i + 2] = t;
+	}
+	return (out);
+}
+
+/*
+ * The uncompressed formats, as --compression_format asks for them: the
+ * levels the mip chain produced, packed to the named channel count and
+ * width.  Apple call this compressor RAW, and it is one -- there is no
+ * encoder behind it.
+ *
+ * Eight bit channels quantise; sixteen and thirty-two bit ones are floats
+ * and keep what they were given, so an HDR source is not clipped.  BGRA8 is
+ * RGBA8 with the colour channels reversed, which is the only format here
+ * whose channels are not in order.  Rows are padded to four bytes as
+ * version 1 wants, which is what pack_bytes does for the byte formats.
+ */
+/*
+ * A sample as a half.  Not __fp16, which rounds a tie to even: Apple round
+ * a tie up, so 0.4659423828125 -- exactly between two halves -- comes out
+ * 0x3775 where the hardware conversion gives 0x3774.  Adding half of the
+ * low bit kept before the shift is what does it.
+ */
+static uint16_t
+to_half(float f)
+{
+	uint32_t u, sign;
+	int exp, shift;
+
+	memcpy(&u, &f, sizeof(u));
+	sign = (u >> 16) & 0x8000;
+	u &= 0x7fffffff;
+
+	if (u >= 0x7f800000)		/* infinity, or not a number */
+		return ((uint16_t)(sign | 0x7c00 |
+		    ((u & 0x007fffff) ? 0x0200 : 0)));
+	if (u >= 0x477ff000)		/* rounds past the largest half */
+		return ((uint16_t)(sign | 0x7c00));
+	if (u >= 0x38800000)		/* a normal half */
+		return ((uint16_t)(sign |
+		    (((u + 0x00001000) - 0x38000000) >> 13)));
+	if (u < 0x33000000)		/* rounds to zero */
+		return ((uint16_t)sign);
+	/* Subnormal: put the hidden bit back and round at the same place. */
+	exp = (int)(u >> 23);
+	shift = 126 - exp;
+	u = (u & 0x007fffff) | 0x00800000;
+	return ((uint16_t)(sign | ((u + (1u << (shift - 1))) >> shift)));
+}
+
+static void *
+pack_raw(const float *rgba, int w, int h, const char *name, size_t *out_len)
+{
+	uint32_t gl, base, metal;
+	int bx, by, channels, bits, x, y, c;
+	uint8_t *out;
+	size_t stride;
+
+	if (!format_lookup(name, &gl, &base, &bx, &by, &metal) || bx != 1)
+		return (NULL);
+	channels = base == 0x1903 ? 1 : base == 0x8227 ? 2 :
+	    base == 0x1907 ? 3 : 4;
+	bits = format_channel_bits(name);
+	if (bits == 8)
+		return (name[0] == 'B' ?
+		    pack_bytes_bgra(rgba, w, h, out_len) :
+		    pack_bytes(rgba, w, h, channels, out_len));
+
+	stride = (size_t)w * (size_t)channels * (size_t)(bits / 8);
+	if ((out = calloc((size_t)h, stride)) == NULL)
+		return (NULL);
+	for (y = 0; y < h; y++) {
+		for (x = 0; x < w; x++) {
+			const float *px = rgba + ((size_t)y * w + x) * 4;
+			uint8_t *o = out + (size_t)y * stride +
+			    (size_t)x * channels * (bits / 8);
+
+			for (c = 0; c < channels; c++) {
+				if (bits == 32) {
+					memcpy(o + c * 4, &px[c], 4);
+				} else {
+					uint16_t h16 = to_half(px[c]);
+
+					memcpy(o + c * 2, &h16, 2);
+				}
 			}
 		}
 	}
@@ -1415,38 +1571,18 @@ do_decompress(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 		NSData *file;
 
 		if (wants_ktx2(out)) {
-			/*
-			 * Version 2 packs its levels tight, where version 1
-			 * pads every row to four bytes.  The padding is put
-			 * in by pack_bytes, so it is taken back out here
-			 * rather than the packer being taught two layouts.
-			 */
-			int channels = strcmp(oname, "R8") == 0 ? 1 :
-			    strcmp(oname, "RG8") == 0 ? 2 :
-			    strcmp(oname, "RGB8") == 0 ? 3 : 4;
-
-			if (!hdr) {
-				for (i = 0; i < n; i++) {
-					size_t row = (size_t)widths[i] *
-					    (size_t)channels;
-					size_t stride = (row + 3) & ~(size_t)3;
-					uint8_t *p = outs[i];
-					int y;
-
-					for (y = 1; y < heights[i]; y++)
-						memmove(p + (size_t)y * row,
-						    p + (size_t)y * stride,
-						    row);
-					sizes[i] = row * (size_t)heights[i];
-				}
-			}
 			file = write_ktx2_generic(outs, sizes, widths,
 			    heights, n, oname, false, false, options,
 			    annotate);
 		} else {
+			uint32_t texel = hdr ? 16 : (uint32_t)(
+			    obase == 0x1903 ? 1 : obase == 0x8227 ? 2 :
+			    obase == 0x1907 ? 3 : 4);
+
 			file = write_ktx_generic(outs, sizes, widths, heights,
 			    n, ogl, obase, hdr ? GL_FLOAT : GL_UNSIGNED_BYTE,
-			    hdr ? 4 : 1, obase, 0, false, options, annotate);
+			    hdr ? 4 : 1, obase, texel, 0, false, options,
+			    annotate);
 		}
 
 		for (i = 0; i < n; i++)

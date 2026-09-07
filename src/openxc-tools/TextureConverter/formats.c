@@ -44,7 +44,9 @@ static const struct entry table[] = {
 	{ "RGB8",	0x8051, 23,  GL_RGB,  1, 1, 0, 0x8C41, 29 },
 	{ "RG8",	0x822B, 16,  GL_RG,   1, 1, 0, 0x8FBE, 22 },
 	{ "R8",		0x8229, 9,   GL_RED,  1, 1, 0, 0x8FBD, 15 },
-	{ "BGRA8",	0x93A1, 44,  GL_RGBA, 1, 1, 0, 0, 0 },
+	/* Apple write GL_RGBA8 for BGRA8: version 1 has no way to say the
+	 * channels are the other way round, so it does not say it. */
+	{ "BGRA8",	0x8058, 44,  GL_RGBA, 1, 1, 0, 0, 0 },
 
 	/* ASTC, LDR. */
 	{ "ASTC4x4",	0x93B0, 157, GL_RGBA, 4, 4, 204, 0x93D0, 158 },
@@ -244,17 +246,20 @@ format_dfd_for(const char *name, _Bool srgb, struct format_dfd *out)
 	 */
 	if (format_lookup(name, &gl, &base, &bx, &by, &metal) && bx == 1) {
 		_Bool flt = format_is_float(name);
+		_Bool bgra = name[0] == 'B';
 		int channels = base == GL_RED ? 1 : base == GL_RG ? 2 :
 		    base == GL_RGB ? 3 : 4;
-		int bits = flt ? 32 : 8;
+		int bits = format_channel_bits(name);
 
 		out->color_model = 1;		/* KHR_DF_MODEL_RGBSDA */
 		out->nsamples = channels;
 		for (i = 0; i < channels; i++) {
+			int ch = bgra && i < 3 ? 2 - i : i;
+
 			out->sample[i].bit_offset = (uint16_t)(bits * i);
 			out->sample[i].bit_length = (uint8_t)(bits - 1);
 			out->sample[i].channel_type =
-			    (uint8_t)((i == 3 ? 15 : i) | (flt ? 0xc0 : 0));
+			    (uint8_t)((i == 3 ? 15 : ch) | (flt ? 0xc0 : 0));
 			out->sample[i].lower = flt ? 0xbf800000 : 0x00000000;
 			out->sample[i].upper = flt ? 0x3f800000 : 0x000000ff;
 		}
@@ -282,6 +287,23 @@ format_dfd_for(const char *name, _Bool srgb, struct format_dfd *out)
 			return (1);
 		}
 	}
+	return (0);
+}
+
+int
+format_channel_bits(const char *name)
+{
+	size_t n;
+
+	if (name == NULL)
+		return (0);
+	n = strlen(name);
+	if (n >= 2 && strcmp(name + n - 2, "32") == 0)
+		return (32);
+	if (n >= 2 && strcmp(name + n - 2, "16") == 0)
+		return (16);
+	if (n >= 1 && name[n - 1] == '8')
+		return (8);
 	return (0);
 }
 

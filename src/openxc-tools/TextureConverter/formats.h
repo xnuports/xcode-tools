@@ -19,8 +19,12 @@ const char *format_name_for_gl(uint32_t gl_internal_format);
 const char *format_name_for_vk(uint32_t vk_format);
 
 /* True for a format whose samples are floating point, which is what makes
- * the colour space extended-range linear rather than plain sRGB. */
+ * the colour space extended-range linear rather than plain sRGB.  The
+ * sixteen bit formats are half floats rather than unorms, so they count. */
 _Bool	format_is_float(const char *name);
+
+/* 8, 16 or 32 for an uncompressed format; 0 for anything else. */
+int	format_channel_bits(const char *name);
 
 /*
  * The OpenGL internal format a name compresses to, the base internal format
