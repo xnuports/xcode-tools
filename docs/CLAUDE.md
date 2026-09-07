@@ -973,10 +973,27 @@ not the fraction of texels above a threshold.
 output on any image tried, including one with a uniform black border and
 one with a full alpha ramp, so what they are for is still to be found.
 
-Still to write: those three, `--gamut_in`/`--gamut_out` beyond the `.h`
-output, `--build_cubemap`, `--build_volume`, and reading the input formats
-ImageIO does not -- Apple's usage lists DDS, EXR, HDR, KTX and KTX2, and
-this tree reads only what CoreGraphics decodes.
+KTX and KTX2 are read as inputs.  `ktx_parse` had never read version 2's
+level index, so every version 2 container looked empty; it does now, and
+the unpacker learnt halves, floats, version 2's tight rows and BGRA8's
+reversed channels.  Converting a container keeps its format -- an RGBA8
+container converts to RGBA8, only an image file converts to RGBA32 -- and
+keeps its levels, building only the rest of the chain; a flip, a gamma, a
+`--max_extent` that bites or `--normal_map` throws them away first.
+
+Version 1's padded rows are read as if they were tight, which is Apple's
+bug and is reproduced deliberately: an R8 level two texels wide comes back
+as its two bytes and then the two bytes of padding behind them.  Reading
+the file correctly would put a different image through the rest of the
+tool than their tool has.  696 of 720 across thirteen formats, two input
+containers, four output formats and eight images; the 24 are RGBA32 on the
+three images whose chain does not halve exactly, where Apple rebuild part
+of the tail on a rule that does not fall out of the level sizes.
+
+Still to write: `--crop_uniform_content`, `--scale_range`,
+`--alpha_to_coverage`, `--gamut_in`/`--gamut_out` beyond the `.h` output,
+`--build_cubemap`, `--build_volume`, and the DDS, EXR and HDR inputs
+Apple's usage also lists.
 
 Five measurements settled the pixel path, and none was guessable:
 
