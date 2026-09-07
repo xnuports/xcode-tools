@@ -338,3 +338,6 @@
 [submodule "python-fissix"]
 	path = src/python/fissix
 	url = https://github.com/amyreese/fissix.git
+[submodule "python-platformdirs"]
+	path = src/python/platformdirs
+	url = https://github.com/tox-dev/platformdirs.git
