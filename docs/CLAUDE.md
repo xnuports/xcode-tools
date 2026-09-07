@@ -843,8 +843,7 @@ Two back ends are not ported:
 
 The tool itself is in `src/openxc-tools/TextureConverter`, and all five
 modes are written: `examine`, `convert`, `compress`, `decompress` and
-`compare`, and four of the five output formats: KTX, KTX2 and `.h`, with
-DDS still to write.  It is gated on `MK_PORTS`, since it links the encoders it
+`compare`, and all four output formats: KTX, KTX2, `.h` and DDS.  It is gated on `MK_PORTS`, since it links the encoders it
 drives.
 
 Compression is byte-identical to Apple's across all twenty-seven formats --
@@ -887,19 +886,32 @@ surfaces as `PSNR:1.79...e308` from an unguarded divide by zero.  Ours reads
 every container through the decoders the rest of the tool uses, so its
 compare and its decompress agree with each other.
 
-KTX2 and the `.h` output are both written wherever the output path ends in
-`.ktx2` or `.h`, which is the only thing that selects either -- neither
-`--file_format=KTX2` nor `--file_format=H` reaches them in Apple's tool
-either.  Both are byte-identical across `convert`, `compress` and
-`decompress`.
+All four output formats are selected by the output path's extension and by
+nothing else -- `--file_format` reaches none of them in Apple's tool
+either -- and all four are byte-identical across `convert`, `compress` and
+`decompress`: 1788 of 1812 over four containers, forty formats, seven
+images and both sRGB settings, excluding the 204 combinations where their
+own tool crashes.
 
-The `.h` output is the one place `--gamut_out` leaves a mark: neither
-container records it.  It is also the only place a format is named rather
-than enumerated, and the names are not derivable from Apple's own -- BC6U
-is `atcFormatBc6Uf16` -- so they are tabulated in `formats.c`.
+The `.h` output is the one place `--gamut_out` leaves a mark: no container
+records it.  It is also the only place a format is named rather than
+enumerated, and the names are not derivable from Apple's own -- BC6U is
+`atcFormatBc6Uf16` -- so they are tabulated in `formats.c`.
 
-Still to write: DDS output, resizing (`--max_extent`, `--resize_filter`,
-`--resize_round_mode`), and the gamma options.
+DDS is NVTT's, down to the "NVTT" signature and version 2.1.2 in the
+reserved words, and always names its format through the DX10 header.  A
+format Direct3D has no DXGI enumerant for gets no DDS: their tool
+compresses it, says so on stderr, writes nothing and exits zero.
+
+The 24 that are not identical are three ASTC block sizes on the two images
+whose mip levels are not a multiple of the block.  Level 0 is identical
+every time and one block of one mip level is not, and feeding that mip's
+exact floats back through their tool on its own reproduces their blocks --
+so it is astcenc's partial-block handling, most likely a version
+difference, rather than anything in the pixel path.
+
+Still to write: resizing (`--max_extent`, `--resize_filter`,
+`--resize_round_mode`) and the gamma options.
 
 Five measurements settled the pixel path, and none was guessable:
 
