@@ -854,15 +854,12 @@ format goes to is a table rather than a search: ASTC to ARM's, every BC
 format to NVTT except BC1 at Highest which goes to STB, and every ETC2 and
 EAC format to ETC2COMP.
 
-`decompress` is byte-identical for 46 of 53 cases.  Four formats are refused
-because NVTT cannot read them -- BC7, whose decoder is the old avpcl
-prototype and fails an assertion on a conforming block, and ETC2_RGB8A1,
-EAC_R11 and EAC_RG11, whose call sites in `nvtt/Surface.cpp` are commented
-out and marked "@@ Not implemented".  The two EAC formats are decoded in
-`eac.c` instead, to within one decoded level in 2048: Apple narrow the
-eleven bit value 1172 to 146 where truncation gives 145, but narrow 1180 to
-146 as well, so their function is neither truncation nor rounding nor a
-shift, and the specification's arithmetic stays.
+`decompress` is byte-identical for all 53 cases, in both containers.  Two
+formats are refused because NVTT cannot read them -- BC7, whose decoder is
+the old avpcl prototype and fails an assertion on a conforming block, and
+ETC2_RGB8A1, whose call site in `nvtt/Surface.cpp` is commented out and
+marked "@@ Not implemented".  EAC_R11 and EAC_RG11 are commented out there
+too and are decoded in `eac.c` instead.
 
 `compare` matches wherever Apple's own compare is self-consistent, which is
 not everywhere.  Their compare does not read a compressed container through
@@ -873,10 +870,15 @@ surfaces as `PSNR:1.79...e308` from an unguarded divide by zero.  Ours reads
 every container through the decoders the rest of the tool uses, so its
 compare and its decompress agree with each other.
 
-Still to write: KTX2 and DDS output, resizing (`--max_extent`,
+KTX2 is written wherever the output path ends in `.ktx2`, which is the only
+thing that selects it -- `--file_format=KTX2` is ignored by Apple's tool as
+well.  All twenty-seven block formats and the five uncompressed ones are
+byte-identical, across `convert`, `compress` and `decompress`.
+
+Still to write: DDS and `.h` output, resizing (`--max_extent`,
 `--resize_filter`, `--resize_round_mode`), and the gamma and gamut options.
 
-Four measurements settled the pixel path, and none was guessable:
+Five measurements settled the pixel path, and none was guessable:
 
   - **The mip chains are NVTT's.**  An impulse through Apple's Kaiser
     gives weights of 0.006729, 0.013252, -0.033884, -0.054839, 0.139929
@@ -893,6 +895,12 @@ Four measurements settled the pixel path, and none was guessable:
   - **`--alpha_mode=Premultiply` folds alpha into the base level only.**
     The mip chain is built from the straight colour: Apple's Premultiply
     and Preserve write byte-for-byte the same second level.
+  - **An EAC sample is narrowed to eight bits through sixteen.**  The
+    eleven bits are replicated up into a sixteen bit channel, which maps
+    2047 onto 65535 rather than onto 65504, and that is divided by 257.
+    Nothing in one step matches: over the 256 distinct values the four EAC
+    files decode to, truncation is one too low for 1172 and rounding is
+    wrong for 108 of them.
 
 The four compression qualities are astcenc's own presets, measured by
 compressing the same image both ways: Fastest is FASTEST, Normal FAST,
