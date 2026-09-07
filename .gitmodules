@@ -335,3 +335,6 @@
 [submodule "src/extras/machsec"]
 	path = src/extras/machsec
 	url = https://github.com/gracecondition/machsec.git
+[submodule "python-fissix"]
+	path = src/python/fissix
+	url = https://github.com/amyreese/fissix.git
