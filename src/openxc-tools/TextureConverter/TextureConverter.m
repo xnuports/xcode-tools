@@ -38,6 +38,7 @@
 #include "compress.h"
 #include "decode.h"
 #include "ktx.h"
+#include "ktx2.h"
 #include "mipmap.h"
 #include "usage.h"
 
@@ -751,6 +752,60 @@ do_convert(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 	return (0);
 }
 
+/*
+ * Which container to write.  Apple decide it from the output file's
+ * extension and nothing else: --file_format names KTX2 among its choices
+ * and does not select it, so a path ending in anything but .ktx2 gets
+ * version 1 however the flag is set.
+ */
+static bool
+wants_ktx2(NSString *output)
+{
+	return ([[output pathExtension] caseInsensitiveCompare:@"ktx2"] ==
+	    NSOrderedSame);
+}
+
+/*
+ * The compressed levels as a version 2 container.  nil when the format has
+ * no data format descriptor here, which is every uncompressed one.
+ */
+static NSData *
+write_ktx2_generic(void **levels, const size_t *sizes, const int *widths,
+    const int *heights, int nlevels, const char *name, bool premultiplied,
+    NSString *options, bool annotate)
+{
+	struct format_dfd dfd;
+	uint32_t gl, base, metal;
+	int bx, by, block_bytes;
+	uint8_t *bytes;
+	size_t len;
+	NSData *out;
+
+	if (!format_dfd_for(name, &dfd) ||
+	    !format_lookup(name, &gl, &base, &bx, &by, &metal))
+		return (nil);
+	/*
+	 * How big one block is, which sets the alignment the levels are
+	 * padded to.  Counted from the base level rather than taken from the
+	 * smallest, which is only one block when the chain runs all the way
+	 * down: --max_mipmaps=2 stops it at four.
+	 */
+	block_bytes = (int)(sizes[0] /
+	    ((size_t)((widths[0] + bx - 1) / bx) *
+	     (size_t)((heights[0] + by - 1) / by)));
+	bytes = ktx2_write(levels, sizes, widths, heights, nlevels,
+	    format_vk_for(name), block_bytes, bx, by, &dfd, premultiplied,
+	    annotate ? "Apple TextureConverter " TC_VERSION " / libktx v4.0" :
+	    "Unidentified app / libktx v4.0",
+	    annotate ? [options UTF8String] : NULL,
+	    annotate ? TC_VERSION : NULL, &len);
+	if (bytes == NULL)
+		return (nil);
+	out = [NSData dataWithBytes:bytes length:len];
+	free(bytes);
+	return (out);
+}
+
 /* ------------------------------------------------------------------ */
 /* Compress.                                                           */
 /* ------------------------------------------------------------------ */
@@ -1051,11 +1106,21 @@ do_compress(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 
 	{
 		NSString *options = tc_options_string(opts, compressor, fmt);
+		bool annotate = opts[@"disable_annotation"] == nil;
 
-		data = write_ktx_generic(blocks, sizes, widths, heights, n,
-		    gl, base, 0, 1, 0, metal,
-		    alpha_mode_of(opts) == ALPHA_PREMULTIPLY, options,
-		    opts[@"disable_annotation"] == nil);
+		data = wants_ktx2(output) ?
+		    write_ktx2_generic(blocks, sizes, widths, heights, n,
+		        [fmt UTF8String],
+		        alpha_mode_of(opts) == ALPHA_PREMULTIPLY, options,
+		        annotate) :
+		    write_ktx_generic(blocks, sizes, widths, heights, n,
+		        gl, base, 0, 1, 0, metal,
+		        alpha_mode_of(opts) == ALPHA_PREMULTIPLY, options,
+		        annotate);
+		if (data == nil) {
+			printf("Error: Could not write output file!\n");
+			return (255);
+		}
 	}
 	for (i = 0; i < n; i++)
 		free(blocks[i]);

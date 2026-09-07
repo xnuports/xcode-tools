@@ -75,8 +75,8 @@ static const struct entry table[] = {
 	/* ETC2 and EAC, the same way: R11 is one channel, RG11 two, and
 	 * ETC2_RGB8 has no alpha. */
 	{ "ETC2_RGB8",	0x9274, 147, GL_RGB,  4, 4, 0 },
-	{ "ETC2_RGB8A1", 0x9276, 151, GL_RGBA, 4, 4, 0 },
-	{ "EAC_RGBA8",	0x9278, 149, GL_RGBA, 4, 4, 0 },
+	{ "ETC2_RGB8A1", 0x9276, 149, GL_RGBA, 4, 4, 0 },
+	{ "EAC_RGBA8",	0x9278, 151, GL_RGBA, 4, 4, 0 },
 	{ "EAC_R11",	0x9270, 153, GL_RED,  4, 4, 0 },
 	{ "EAC_RG11",	0x9272, 155, GL_RG,   4, 4, 0 },
 
@@ -122,6 +122,83 @@ format_lookup(const char *name, uint32_t *gl, uint32_t *base, int *block_x,
 		*block_y = e->block_y;
 		*metal = e->metal;
 		return (1);
+	}
+	return (0);
+}
+
+/*
+ * The KTX2 descriptors, measured from Apple's .ktx2 output one format at a
+ * time.  The models are the Khronos data format ones -- 128 through 134 for
+ * the BC family, 161 for ETC2 and EAC, 162 for ASTC -- and the samples say
+ * where each part of a block lives.
+ *
+ * Two things are not guessable from the format alone.  ETC2_RGB8A1 puts
+ * both of its samples at bit offset zero rather than side by side, because
+ * its alpha is a bit stolen from the colour block rather than a block of
+ * its own.  And BC6, being floating point, bounds its sample with the bit
+ * patterns of 1.0f and -1.0f instead of the integer range everything else
+ * uses.
+ */
+#define	FULL	0x00000000, 0xffffffff
+
+static const struct { const char *name; struct format_dfd dfd; } dfds[] = {
+	{ "BC1",	{ 128, 1, { { 0, 63, 0x01, FULL } } } },
+	{ "BC2",	{ 129, 2, { { 0, 63, 0x0f, FULL },
+				    { 64, 63, 0x00, FULL } } } },
+	{ "BC3",	{ 130, 2, { { 0, 63, 0x0f, FULL },
+				    { 64, 63, 0x00, FULL } } } },
+	{ "BC4",	{ 131, 1, { { 0, 63, 0x00, FULL } } } },
+	{ "BC5",	{ 132, 2, { { 0, 63, 0x00, FULL },
+				    { 64, 63, 0x01, FULL } } } },
+	{ "BC6U",	{ 133, 1, { { 0, 127, 0x80, 0x00000000,
+				      0x3f800000 } } } },
+	{ "BC6S",	{ 133, 1, { { 0, 127, 0xc0, 0xbf800000,
+				      0x3f800000 } } } },
+	{ "BC7",	{ 134, 1, { { 0, 127, 0x00, FULL } } } },
+	{ "ETC2_RGB8",	{ 161, 1, { { 0, 63, 0x02, FULL } } } },
+	{ "ETC2_RGB8A1", { 161, 2, { { 0, 63, 0x02, FULL },
+				     { 0, 63, 0x0f, FULL } } } },
+	{ "EAC_RGBA8",	{ 161, 2, { { 0, 63, 0x0f, FULL },
+				    { 64, 63, 0x02, FULL } } } },
+	{ "EAC_R11",	{ 161, 1, { { 0, 63, 0x00, FULL } } } },
+	{ "EAC_RG11",	{ 161, 2, { { 0, 63, 0x00, FULL },
+				    { 64, 63, 0x01, FULL } } } },
+	{ NULL,		{ 0, 0, { { 0, 0, 0, 0, 0 } } } }
+};
+
+uint32_t
+format_vk_for(const char *name)
+{
+	const struct entry *e;
+
+	for (e = table; e->name != NULL; e++) {
+		if (strcmp(e->name, name) == 0)
+			return (e->vk);
+	}
+	return (0);
+}
+
+_Bool
+format_dfd_for(const char *name, struct format_dfd *out)
+{
+	size_t i;
+
+	/* Every ASTC block size shares one descriptor. */
+	if (strncmp(name, "ASTC", 4) == 0) {
+		out->color_model = 162;
+		out->nsamples = 1;
+		out->sample[0].bit_offset = 0;
+		out->sample[0].bit_length = 127;
+		out->sample[0].channel_type = 0x00;
+		out->sample[0].lower = 0x00000000;
+		out->sample[0].upper = 0xffffffff;
+		return (1);
+	}
+	for (i = 0; dfds[i].name != NULL; i++) {
+		if (strcmp(dfds[i].name, name) == 0) {
+			*out = dfds[i].dfd;
+			return (1);
+		}
 	}
 	return (0);
 }

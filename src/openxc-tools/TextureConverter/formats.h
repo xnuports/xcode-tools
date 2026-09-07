@@ -35,4 +35,30 @@ _Bool	format_is_float(const char *name);
 _Bool	format_lookup(const char *name, uint32_t *gl, uint32_t *base,
 	    int *block_x, int *block_y, uint32_t *metal);
 
+/*
+ * What a KTX2 data format descriptor has to say about a format: which
+ * colour model the blocks belong to, and one or two samples describing the
+ * bits.  Everything else in the descriptor is either constant or derivable
+ * from the block size, so only this is tabulated.
+ */
+struct format_sample {
+	uint16_t	bit_offset;
+	uint8_t		bit_length;	/* one less than the count, as KTX2 */
+	uint8_t		channel_type;
+	uint32_t	lower, upper;
+};
+
+struct format_dfd {
+	uint8_t			color_model;
+	int			nsamples;
+	struct format_sample	sample[2];
+};
+
+/* The Vulkan enumerant a name is written as, or zero. */
+uint32_t format_vk_for(const char *name);
+
+/* False for a name with no descriptor here, which is every uncompressed
+ * one: KTX2 output is only written for the block formats. */
+_Bool	format_dfd_for(const char *name, struct format_dfd *);
+
 #endif /* TEXTURECONVERTER_FORMATS_H */
