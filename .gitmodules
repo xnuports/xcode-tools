@@ -341,3 +341,7 @@
 [submodule "python-platformdirs"]
 	path = src/python/platformdirs
 	url = https://github.com/tox-dev/platformdirs.git
+[submodule "extras-capstone"]
+	path = src/extras/capstone
+	url = https://github.com/capstone-engine/capstone.git
+	branch = v5
