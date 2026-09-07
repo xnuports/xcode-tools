@@ -50,6 +50,77 @@
 static const char *progpath;
 
 /* Defined below, beside the compression path they mostly describe. */
+/*
+ * --flip_x and --flip_y, in place.  --flip_z is accepted and does nothing:
+ * there is no third axis in a two dimensional image, and Apple's tool
+ * writes the same texels with it as without.
+ */
+static void
+flip_image(float *rgba, int w, int h, bool flip_x, bool flip_y)
+{
+	int x, y, c;
+
+	if (flip_x) {
+		for (y = 0; y < h; y++) {
+			for (x = 0; x < w / 2; x++) {
+				float *a = rgba + ((size_t)y * w + x) * 4;
+				float *b = rgba +
+				    ((size_t)y * w + (w - 1 - x)) * 4;
+
+				for (c = 0; c < 4; c++) {
+					float t = a[c];
+
+					a[c] = b[c];
+					b[c] = t;
+				}
+			}
+		}
+	}
+	if (flip_y) {
+		for (y = 0; y < h / 2; y++) {
+			for (x = 0; x < w; x++) {
+				float *a = rgba + ((size_t)y * w + x) * 4;
+				float *b = rgba +
+				    ((size_t)(h - 1 - y) * w + x) * 4;
+
+				for (c = 0; c < 4; c++) {
+					float t = a[c];
+
+					a[c] = b[c];
+					b[c] = t;
+				}
+			}
+		}
+	}
+}
+
+/*
+ * --max_extent, which is not a resize: Apple halve the image with the
+ * mipmap filter, over and over, until neither side is longer than the
+ * extent.  The result is bit for bit the level of the mip chain that
+ * halving that many times would have reached, and --resize_filter does not
+ * touch it -- that option and --resize_round_mode are recorded in
+ * TC_Options and change nothing else, in their tool as in this one.
+ */
+static float *
+fit_extent(float *rgba, int *w, int *h, int extent, enum mip_filter which,
+    enum mip_wrap wrap)
+{
+	while (extent > 0 && (*w > extent || *h > extent)) {
+		int nw, nh;
+		float *half = mip_downsample(rgba, *w, *h, which, wrap,
+		    &nw, &nh);
+
+		if (half == NULL)
+			break;
+		free(rgba);
+		rgba = half;
+		*w = nw;
+		*h = nh;
+	}
+	return (rgba);
+}
+
 static NSString *tc_options_string(NSDictionary<NSString *, NSString *> *,
     NSString *compressor, NSString *fmt);
 static bool wants_ktx2(NSString *output);
@@ -742,6 +813,10 @@ do_convert(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 		printf("Error: Could not read input file!\n");
 		return (255);
 	}
+	flip_image(levels[0], widths[0], heights[0],
+	    opts[@"flip_x"] != nil, opts[@"flip_y"] != nil);
+	levels[0] = fit_extent(levels[0], &widths[0], &heights[0],
+	    [opts[@"max_extent"] intValue], which, wrap);
 	if (normal)
 		normalize_normals(levels[0], widths[0], heights[0]);
 	n = 1;
@@ -982,9 +1057,9 @@ tc_options_string(NSDictionary<NSString *, NSString *> *opts,
 		"compression_quality", "gamma_in", "gamma_out", "srgb_format",
 		"max_mipmaps", "mipmap_filter", "alpha_mode",
 		"alpha_to_coverage", "alpha_weight", "flip_x", "flip_y",
-		"max_extent", "resize_filter", "crop_uniform_content",
-		"wrap_mode", "normal_map", "rgbm_encoding", "scale_range",
-		"channel_weighting"
+		"flip_z", "max_extent", "resize_filter", "resize_round_mode",
+		"crop_uniform_content", "wrap_mode", "normal_map",
+		"rgbm_encoding", "scale_range", "channel_weighting"
 	};
 	NSMutableString *out = [NSMutableString string];
 	size_t i;
@@ -1232,6 +1307,10 @@ do_compress(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 		printf("Error: Could not read input file!\n");
 		return (255);
 	}
+	flip_image(levels[0], widths[0], heights[0],
+	    opts[@"flip_x"] != nil, opts[@"flip_y"] != nil);
+	levels[0] = fit_extent(levels[0], &widths[0], &heights[0],
+	    [opts[@"max_extent"] intValue], which, wrap);
 	if (normal)
 		normalize_normals(levels[0], widths[0], heights[0]);
 	n = 1;
