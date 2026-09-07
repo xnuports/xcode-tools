@@ -39,6 +39,7 @@
 #include "decode.h"
 #include "ktx.h"
 #include "ktx2.h"
+#include "header.h"
 #include "mipmap.h"
 #include "usage.h"
 
@@ -56,6 +57,11 @@ static NSData *write_ktx2_generic(void **levels, const size_t *sizes,
     bool premultiplied, bool srgb, NSString *options, bool annotate);
 static void *pack_raw(const float *rgba, int w, int h, const char *name,
     size_t *out_len);
+static bool wants_header(NSString *output);
+static NSData *write_header_generic(void **levels, const size_t *sizes,
+    const int *widths, const int *heights, int nlevels, const char *name,
+    bool srgb, NSString *output,
+    NSDictionary<NSString *, NSString *> *opts);
 
 /*
  * Every option the tool takes, with the default the usage text advertises.
@@ -763,7 +769,10 @@ do_convert(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 		bool annotate = opts[@"disable_annotation"] == nil;
 		bool prem = alpha_mode_of(opts) == ALPHA_PREMULTIPLY;
 
-		data = wants_ktx2(output) ?
+		data = wants_header(output) ?
+		    write_header_generic(ptrs, sizes, widths, heights, n,
+		        "RGBA32", false, output, opts) :
+		    wants_ktx2(output) ?
 		    write_ktx2_generic(ptrs, sizes, widths, heights, n,
 		        "RGBA32", prem, false, options, annotate) :
 		    write_ktx_generic(ptrs, sizes, widths, heights, n,
@@ -795,6 +804,46 @@ wants_ktx2(NSString *output)
 {
 	return ([[output pathExtension] caseInsensitiveCompare:@"ktx2"] ==
 	    NSOrderedSame);
+}
+
+/* The .h output goes the same way: by the extension, not by a flag. */
+static bool
+wants_header(NSString *output)
+{
+	return ([[output pathExtension] caseInsensitiveCompare:@"h"] ==
+	    NSOrderedSame);
+}
+
+/*
+ * The levels as a C header.  The identifier everything is named after is
+ * the output file's stem, and the gamut is whatever --gamut_out asked for
+ * -- the one place either of the gamut options leaves a mark.
+ */
+static NSData *
+write_header_generic(void **levels, const size_t *sizes, const int *widths,
+    const int *heights, int nlevels, const char *name, bool srgb,
+    NSString *output, NSDictionary<NSString *, NSString *> *opts)
+{
+	NSString *gamut = opts[@"gamut_out"];
+	const char *gname = "atcColorGamutUnknown";
+	char buf[64];
+	char *text;
+	size_t len;
+	NSData *out;
+
+	if ([gamut caseInsensitiveCompare:@"sRGB"] == NSOrderedSame)
+		gname = "atcColorGamutSRGB";
+	else if ([gamut caseInsensitiveCompare:@"DisplayP3"] == NSOrderedSame)
+		gname = "atcColorGamutDisplayP3";
+	text = header_write(levels, sizes, widths, heights, nlevels, name,
+	    format_atc_for(name, srgb, buf, sizeof(buf)), gname,
+	    [[[output lastPathComponent] stringByDeletingPathExtension]
+	    UTF8String], &len);
+	if (text == NULL)
+		return (nil);
+	out = [NSData dataWithBytes:text length:len];
+	free(text);
+	return (out);
 }
 
 /*
@@ -1189,7 +1238,10 @@ do_compress(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 		NSString *options = tc_options_string(opts, compressor, fmt);
 		bool annotate = opts[@"disable_annotation"] == nil;
 
-		data = wants_ktx2(output) ?
+		data = wants_header(output) ?
+		    write_header_generic(blocks, sizes, widths, heights, n,
+		        [fmt UTF8String], srgb, output, opts) :
+		    wants_ktx2(output) ?
 		    write_ktx2_generic(blocks, sizes, widths, heights, n,
 		        [fmt UTF8String],
 		        alpha_mode_of(opts) == ALPHA_PREMULTIPLY, srgb,
@@ -1570,7 +1622,10 @@ do_decompress(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 		bool annotate = opts[@"disable_annotation"] == nil;
 		NSData *file;
 
-		if (wants_ktx2(out)) {
+		if (wants_header(out)) {
+			file = write_header_generic(outs, sizes, widths,
+			    heights, n, oname, false, out, opts);
+		} else if (wants_ktx2(out)) {
 			file = write_ktx2_generic(outs, sizes, widths,
 			    heights, n, oname, false, false, options,
 			    annotate);

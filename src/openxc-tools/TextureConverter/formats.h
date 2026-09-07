@@ -12,6 +12,7 @@
 #ifndef TEXTURECONVERTER_FORMATS_H
 #define TEXTURECONVERTER_FORMATS_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 /* NULL when the enumerant is one this tool has no name for. */
@@ -70,5 +71,16 @@ _Bool	format_srgb_for(const char *name, uint32_t *gl, uint32_t *vk);
 
 /* False only for a name this tool does not know at all. */
 _Bool	format_dfd_for(const char *name, _Bool srgb, struct format_dfd *);
+
+/*
+ * The name AppleTextureConverter.h gives a format, which the .h output
+ * writes.  The sRGB spelling is built in buf, so pass one big enough for
+ * the longest name; the linear spellings are returned as they stand.
+ */
+const char *format_atc_for(const char *name, _Bool srgb, char *buf,
+	    size_t buflen);
+
+/* The channel count that output records, which is BC6's only oddity. */
+int	format_atc_channels(const char *name);
 
 #endif /* TEXTURECONVERTER_FORMATS_H */

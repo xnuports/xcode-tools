@@ -317,3 +317,100 @@ format_is_float(const char *name)
 	    strcmp(name, "RGBA16") == 0 || strcmp(name, "RGB16") == 0 ||
 	    strcmp(name, "RG16") == 0 || strcmp(name, "R16") == 0);
 }
+
+/*
+ * The names AppleTextureConverter.h gives these formats, which is what the
+ * .h output writes rather than an enumerant.  They are not derivable from
+ * ours: the suffix follows the samples -- Unorm for bytes, F16 for halves,
+ * F32 for floats -- but BC6 folds its signedness into the word, so BC6U is
+ * Bc6Uf16 and not Bc6UF16, and ETC2_RGB8A1 keeps its A capital where every
+ * other letter after the first is lowered.
+ *
+ * --srgb_format swaps the Unorm ending for Srgb, which is why the formats
+ * that have no sRGB spelling are exactly the ones not ending in Unorm plus
+ * BC4, BC5, EAC_R11 and EAC_RG11.
+ */
+static const struct { const char *name, *atc; } atc_names[] = {
+	{ "R8",		"atcFormatR8Unorm" },
+	{ "RG8",	"atcFormatRg8Unorm" },
+	{ "RGB8",	"atcFormatRgb8Unorm" },
+	{ "RGBA8",	"atcFormatRgba8Unorm" },
+	{ "BGRA8",	"atcFormatBgra8Unorm" },
+	{ "R16",	"atcFormatR16F16" },
+	{ "RG16",	"atcFormatRg16F16" },
+	{ "RGB16",	"atcFormatRgb16F16" },
+	{ "RGBA16",	"atcFormatRgba16F16" },
+	{ "R32",	"atcFormatR32F32" },
+	{ "RG32",	"atcFormatRg32F32" },
+	{ "RGB32",	"atcFormatRgb32F32" },
+	{ "RGBA32",	"atcFormatRgba32F32" },
+	{ "ASTC4x4",	"atcFormatAstc4x4Unorm" },
+	{ "ASTC5x4",	"atcFormatAstc5x4Unorm" },
+	{ "ASTC5x5",	"atcFormatAstc5x5Unorm" },
+	{ "ASTC6x5",	"atcFormatAstc6x5Unorm" },
+	{ "ASTC6x6",	"atcFormatAstc6x6Unorm" },
+	{ "ASTC8x5",	"atcFormatAstc8x5Unorm" },
+	{ "ASTC8x6",	"atcFormatAstc8x6Unorm" },
+	{ "ASTC8x8",	"atcFormatAstc8x8Unorm" },
+	{ "ASTC10x5",	"atcFormatAstc10x5Unorm" },
+	{ "ASTC10x6",	"atcFormatAstc10x6Unorm" },
+	{ "ASTC10x8",	"atcFormatAstc10x8Unorm" },
+	{ "ASTC10x10",	"atcFormatAstc10x10Unorm" },
+	{ "ASTC12x10",	"atcFormatAstc12x10Unorm" },
+	{ "ASTC12x12",	"atcFormatAstc12x12Unorm" },
+	{ "BC1",	"atcFormatBc1Unorm" },
+	{ "BC2",	"atcFormatBc2Unorm" },
+	{ "BC3",	"atcFormatBc3Unorm" },
+	{ "BC4",	"atcFormatBc4Unorm" },
+	{ "BC5",	"atcFormatBc5Unorm" },
+	{ "BC6U",	"atcFormatBc6Uf16" },
+	{ "BC6S",	"atcFormatBc6Sf16" },
+	{ "BC7",	"atcFormatBc7Unorm" },
+	{ "ETC2_RGB8",	"atcFormatEtc2Rgb8Unorm" },
+	{ "ETC2_RGB8A1", "atcFormatEtc2Rgb8A1Unorm" },
+	{ "EAC_RGBA8",	"atcFormatEacRgba8Unorm" },
+	{ "EAC_R11",	"atcFormatEacR11Unorm" },
+	{ "EAC_RG11",	"atcFormatEacRg11Unorm" },
+	{ NULL,		NULL }
+};
+
+const char *
+format_atc_for(const char *name, _Bool srgb, char *buf, size_t buflen)
+{
+	size_t i, n;
+
+	for (i = 0; atc_names[i].name != NULL; i++) {
+		if (strcmp(atc_names[i].name, name) != 0)
+			continue;
+		if (!srgb)
+			return (atc_names[i].atc);
+		n = strlen(atc_names[i].atc);
+		if (n < 5 || strcmp(atc_names[i].atc + n - 5, "Unorm") != 0)
+			return ("atcFormatUnknown");
+		if (buflen < n + 1)
+			return ("atcFormatUnknown");
+		memcpy(buf, atc_names[i].atc, n - 5);
+		memcpy(buf + n - 5, "Srgb", 5);
+		return (buf);
+	}
+	return ("atcFormatUnknown");
+}
+
+/*
+ * How many channels the .h output says the format carries.  It follows the
+ * base internal format everywhere but BC6, which Apple call four channels
+ * although its descriptor is colour with no alpha.
+ */
+int
+format_atc_channels(const char *name)
+{
+	uint32_t gl, base, metal;
+	int bx, by;
+
+	if (strcmp(name, "BC6U") == 0 || strcmp(name, "BC6S") == 0)
+		return (4);
+	if (!format_lookup(name, &gl, &base, &bx, &by, &metal))
+		return (4);
+	return (base == GL_RED ? 1 : base == GL_RG ? 2 :
+	    base == GL_RGB ? 3 : 4);
+}
