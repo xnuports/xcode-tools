@@ -85,6 +85,7 @@ compress_bc_stb(const float *rgba, int w, int h, enum tc_bc fmt,
 	case TC_BC1A:
 	case TC_BC4:	bs = 8; break;
 	case TC_BC3:
+	case TC_BC3N:
 	case TC_BC5:	bs = 16; break;
 	default:	return (NULL);	/* stb writes no other format */
 	}
@@ -121,6 +122,7 @@ compress_bc_stb(const float *rgba, int w, int h, enum tc_bc fmt,
 				stb_compress_bc5_block(p, two);
 				break;
 			case TC_BC3:
+			case TC_BC3N:
 				stb_compress_dxt_block(p, block, 1, mode);
 				break;
 			default:

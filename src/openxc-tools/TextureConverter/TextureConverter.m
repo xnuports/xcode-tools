@@ -28,6 +28,7 @@
 #include <CoreGraphics/CoreGraphics.h>
 #include <ImageIO/ImageIO.h>
 
+#include <math.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -474,6 +475,46 @@ premultiply_base(float *rgba, int w, int h)
 	}
 }
 
+/*
+ * A normal map's colour is a direction, not a colour, and filtering it does
+ * not keep it one: averaging two unit vectors gives a shorter one.  So the
+ * texels are expanded out of [0,1] into [-1,1], normalised, and packed back,
+ * and that happens to the base level and again after every downsample --
+ * Apple's chain has unit length at every level, which a single pass at the
+ * top would not give.
+ */
+static void
+normalize_normals(float *rgba, int w, int h)
+{
+	size_t i, n = (size_t)w * h * 4;
+
+	/*
+	 * The three steps are NVTT's, in NVTT's order, because the answer
+	 * has to agree to the last bit: FloatImage::expandNormals is
+	 * scaleBias(2, -1), normalize scales by the reciprocal of the
+	 * length rather than dividing, and packNormals is scaleBias(0.5,
+	 * 0.5).  Dividing instead of multiplying by the reciprocal moves a
+	 * few hundred samples per level by one unit in the last place.
+	 */
+	for (i = 0; i < n; i += 4) {
+		float x = rgba[i + 0] * 2.0f + -1.0f;
+		float y = rgba[i + 1] * 2.0f + -1.0f;
+		float z = rgba[i + 2] * 2.0f + -1.0f;
+		float len = sqrtf(x * x + y * y + z * z);
+
+		if (len != 0.0f) {
+			float rcp = 1.0f / len;
+
+			x *= rcp;
+			y *= rcp;
+			z *= rcp;
+		}
+		rgba[i + 0] = x * 0.5f + 0.5f;
+		rgba[i + 1] = y * 0.5f + 0.5f;
+		rgba[i + 2] = z * 0.5f + 0.5f;
+	}
+}
+
 static enum alpha_mode
 alpha_mode_of(NSDictionary<NSString *, NSString *> *opts)
 {
@@ -483,6 +524,14 @@ alpha_mode_of(NSDictionary<NSString *, NSString *> *opts)
 		return (ALPHA_PRESERVE);
 	if ([m caseInsensitiveCompare:@"Premultiply"] == NSOrderedSame)
 		return (ALPHA_PREMULTIPLY);
+	/*
+	 * --normal_map keeps the alpha channel whatever --alpha_mode says,
+	 * which is visible in Apple's output: with it, the alpha of a
+	 * converted image is the source's rather than the solid 1.0 that
+	 * Ignore writes.
+	 */
+	if (opts[@"normal_map"] != nil)
+		return (ALPHA_PRESERVE);
 	return (ALPHA_IGNORE);
 }
 
@@ -625,6 +674,7 @@ do_convert(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 	NSString *output = opts[@"output"];
 	NSString *filter = opts[@"mipmap_filter"];
 	enum mip_filter which = MIP_FILTER_KAISER;
+	bool normal = opts[@"normal_map"] != nil;
 	NSData *data;
 	int n = 0, i, maxlevels;
 
@@ -640,6 +690,8 @@ do_convert(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 		printf("Error: Could not read input file!\n");
 		return (255);
 	}
+	if (normal)
+		normalize_normals(levels[0], widths[0], heights[0]);
 	n = 1;
 
 	maxlevels = [opts[@"max_mipmaps"] intValue];
@@ -650,10 +702,18 @@ do_convert(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 		    heights[n - 1], which, &widths[n], &heights[n]);
 		if (levels[n] == NULL)
 			break;
+		if (normal)
+			normalize_normals(levels[n], widths[n], heights[n]);
 		n++;
 	}
 
-	if (alpha_mode_of(opts) == ALPHA_PREMULTIPLY)
+	/*
+	 * Not for a normal map: its colour is a direction and folding alpha
+	 * into it would mean nothing.  Apple's --normal_map
+	 * --alpha_mode=Premultiply writes the same texels as --normal_map
+	 * alone, so the premultiply is simply not done.
+	 */
+	if (!normal && alpha_mode_of(opts) == ALPHA_PREMULTIPLY)
 		premultiply_base(levels[0], widths[0], heights[0]);
 
 	{
@@ -824,6 +884,7 @@ do_compress(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 	NSString *quality = opts[@"compression_quality"];
 	struct tc_astc_options aopt;
 	enum mip_filter which = MIP_FILTER_KAISER;
+	bool normal = opts[@"normal_map"] != nil;
 	enum tc_bc bc = TC_BC1;
 	enum tc_etc etc = TC_ETC2_RGB8;
 	NSString *compressor;
@@ -885,8 +946,23 @@ do_compress(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 		 * whenever the alpha channel is not being ignored, which is
 		 * what --alpha_mode says.
 		 */
-		if (bc == TC_BC1 && alpha_mode_of(opts) != ALPHA_IGNORE)
+		/*
+		 * The alpha mode the caller named, not the one in force:
+		 * --normal_map preserves alpha for its own reasons (see
+		 * alpha_mode_of) and that must not turn BC1 into the
+		 * punch-through variant, which is a different block layout.
+		 */
+		if (bc == TC_BC1 && opts[@"alpha_mode"] != nil &&
+		    [opts[@"alpha_mode"] caseInsensitiveCompare:@"Ignore"] !=
+		    NSOrderedSame)
 			bc = TC_BC1A;
+		/*
+		 * NVTT has a normal-map variant of BC3 -- the x and y of the
+		 * normal in the two channels a DXT5 stores best -- and
+		 * --normal_map is what selects it.
+		 */
+		if (bc == TC_BC3 && normal)
+			bc = TC_BC3N;
 		/*
 		 * ISPC is the one back end this tree has no port for.  Say
 		 * so rather than quietly encoding with a different one: the
@@ -907,6 +983,7 @@ do_compress(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 	aopt.perceptual = [opts[@"channel_weighting"]
 	    caseInsensitiveCompare:@"Linear"] != NSOrderedSame;
 	aopt.alpha_weight = opts[@"alpha_weight"] != nil;
+	aopt.normal = normal;
 
 	if ([filter caseInsensitiveCompare:@"Box"] == NSOrderedSame)
 		which = MIP_FILTER_BOX;
@@ -920,6 +997,8 @@ do_compress(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 		printf("Error: Could not read input file!\n");
 		return (255);
 	}
+	if (normal)
+		normalize_normals(levels[0], widths[0], heights[0]);
 	n = 1;
 	maxlevels = [opts[@"max_mipmaps"] intValue];
 	if (maxlevels <= 0 || maxlevels > MAX_LEVELS)
@@ -929,10 +1008,18 @@ do_compress(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 		    heights[n - 1], which, &widths[n], &heights[n]);
 		if (levels[n] == NULL)
 			break;
+		if (normal)
+			normalize_normals(levels[n], widths[n], heights[n]);
 		n++;
 	}
 
-	if (alpha_mode_of(opts) == ALPHA_PREMULTIPLY)
+	/*
+	 * Not for a normal map: its colour is a direction and folding alpha
+	 * into it would mean nothing.  Apple's --normal_map
+	 * --alpha_mode=Premultiply writes the same texels as --normal_map
+	 * alone, so the premultiply is simply not done.
+	 */
+	if (!normal && alpha_mode_of(opts) == ALPHA_PREMULTIPLY)
 		premultiply_base(levels[0], widths[0], heights[0]);
 
 	for (i = 0; i < n; i++) {

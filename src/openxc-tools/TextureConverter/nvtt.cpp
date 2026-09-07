@@ -69,6 +69,7 @@ nvtt_format(enum tc_bc f)
 	case TC_BC1A:	return (nvtt::Format_BC1a);
 	case TC_BC2:	return (nvtt::Format_BC2);
 	case TC_BC3:	return (nvtt::Format_BC3);
+	case TC_BC3N:	return (nvtt::Format_BC3n);
 	case TC_BC4:	return (nvtt::Format_BC4);
 	case TC_BC5:	return (nvtt::Format_BC5);
 	case TC_BC6U:

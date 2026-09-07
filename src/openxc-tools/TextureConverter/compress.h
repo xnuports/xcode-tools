@@ -30,6 +30,7 @@ struct tc_astc_options {
 	enum tc_quality	quality;
 	bool		perceptual;	/* --channel_weighting=Perceptual */
 	bool		alpha_weight;	/* --alpha_weight */
+	bool		normal;		/* --normal_map */
 };
 
 /*
@@ -38,8 +39,8 @@ struct tc_astc_options {
  * how Apple's tool names them.
  */
 enum tc_bc {
-	TC_BC1, TC_BC1A, TC_BC2, TC_BC3, TC_BC4, TC_BC5, TC_BC6U, TC_BC6S,
-	TC_BC7
+	TC_BC1, TC_BC1A, TC_BC2, TC_BC3, TC_BC3N, TC_BC4, TC_BC5, TC_BC6U,
+	TC_BC6S, TC_BC7
 };
 
 #ifdef __cplusplus

@@ -33,9 +33,22 @@ uint8_t *
 compress_astc(const float *rgba, int w, int h,
     const struct tc_astc_options *opt, size_t *out_len)
 {
-	static const struct astcenc_swizzle swizzle = {
+	/*
+	 * A normal map is not stored as a colour.  astcenc's normal mode
+	 * keeps two channels and reconstructs the third, and it wants them
+	 * where an ASTC block holds two channels best: x replicated across
+	 * the colour and y in alpha, which is the "rrrg" swizzle its own
+	 * tool uses for -normal.  Anything else -- including the identity
+	 * swizzle with the same flag -- gives different blocks.
+	 */
+	static const struct astcenc_swizzle sw_rgba = {
 		ASTCENC_SWZ_R, ASTCENC_SWZ_G, ASTCENC_SWZ_B, ASTCENC_SWZ_A
 	};
+	static const struct astcenc_swizzle sw_rrrg = {
+		ASTCENC_SWZ_R, ASTCENC_SWZ_R, ASTCENC_SWZ_R, ASTCENC_SWZ_G
+	};
+	const struct astcenc_swizzle *swizzle = opt->normal ? &sw_rrrg :
+	    &sw_rgba;
 	struct astcenc_config config;
 	struct astcenc_context *ctx = NULL;
 	struct astcenc_image image;
@@ -50,7 +63,14 @@ compress_astc(const float *rgba, int w, int h,
 	 */
 	if (opt->perceptual)
 		flags |= ASTCENC_FLG_USE_PERCEPTUAL;
-	if (opt->alpha_weight)
+	/*
+	 * Normal mode and alpha weighting do not go together: alpha is
+	 * carrying a coordinate there, not coverage, and asking astcenc to
+	 * weigh by it moves sixteen bytes of every block.  Apple do not.
+	 */
+	if (opt->normal)
+		flags |= ASTCENC_FLG_MAP_NORMAL;
+	else if (opt->alpha_weight)
 		flags |= ASTCENC_FLG_USE_ALPHA_WEIGHT;
 
 	if (astcenc_config_init(ASTCENC_PRF_LDR, (unsigned)opt->block_x,
@@ -74,7 +94,7 @@ compress_astc(const float *rgba, int w, int h,
 		astcenc_context_free(ctx);
 		return (NULL);
 	}
-	if (astcenc_compress_image(ctx, &image, &swizzle, out, len, 0) !=
+	if (astcenc_compress_image(ctx, &image, swizzle, out, len, 0) !=
 	    ASTCENC_SUCCESS) {
 		free(out);
 		astcenc_context_free(ctx);
