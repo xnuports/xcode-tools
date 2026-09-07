@@ -855,11 +855,12 @@ format to NVTT except BC1 at Highest which goes to STB, and every ETC2 and
 EAC format to ETC2COMP.
 
 The thirteen uncompressed formats go to no encoder at all -- Apple call
-that compressor RAW -- and are byte-identical too, 156 of 156 over both
-containers and six images.  Two measurements settled the packing: a byte
-is the sample times 256 truncated, not times 255 rounded, which only the
-mip levels can tell apart since every sample the decompress path produces
-is already a multiple of 1/255; and a half rounds a tie up rather than to
+that compressor RAW -- and are byte-identical too, 546 of 546 over both
+containers, seven images and all three wrap modes.  Two measurements
+settled the packing: a byte is the sample rounded to a sixteen bit unorm
+and reduced to its top byte, which only the mip levels can tell from
+either one-step rule since every sample the decompress path produces is
+already a multiple of 1/255; and a half rounds a tie up rather than to
 even, so 0.4659423828125 comes out one step above what the hardware
 conversion gives.
 
@@ -903,15 +904,25 @@ reserved words, and always names its format through the DX10 header.  A
 format Direct3D has no DXGI enumerant for gets no DDS: their tool
 compresses it, says so on stderr, writes nothing and exits zero.
 
-The 24 that are not identical are three ASTC block sizes on the two images
-whose mip levels are not a multiple of the block.  Level 0 is identical
-every time and one block of one mip level is not, and feeding that mip's
-exact floats back through their tool on its own reproduces their blocks --
-so it is astcenc's partial-block handling, most likely a version
-difference, rather than anything in the pixel path.
+What is left over are encoder tie-breaks on images whose mip levels are
+not a multiple of the block: a handful of ASTC blocks and, in one case,
+two bytes of a BC5 file.  Level 0 is identical every time; the float chain
+feeding the level that differs is identical; and feeding that level's
+exact floats back through Apple's tool on its own reproduces their blocks.
+It is not the astcenc version -- 5.4.0, 5.6.0 and 5.7.0 all differ in the
+same places -- nor the instruction set, since a scalar build differs
+identically.  Which candidate an equal-error search settles on is not
+something the calling code decides.
+
+`--wrap_mode` says what the mip filter reads past an edge and is NVTT's
+wrap mode passed straight through.  Mirror is the default, which is why
+nothing noticed it was missing for so long: the chain was already
+Mirror's.
 
 Still to write: resizing (`--max_extent`, `--resize_filter`,
-`--resize_round_mode`) and the gamma options.
+`--resize_round_mode`), the gamma options, and reading the input formats
+ImageIO does not -- Apple's usage lists DDS, EXR, HDR, KTX and KTX2, and
+this tree reads only what CoreGraphics decodes.
 
 Five measurements settled the pixel path, and none was guessable:
 
