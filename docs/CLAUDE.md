@@ -955,13 +955,28 @@ undershoots there, so running it would lift every negative sample the
 chain produced -- which is what the default gamma of 1.000000 does if the
 option is read as present rather than as a value.
 
-Still to write: `--crop_uniform_content`, `--scale_range`,
-`--alpha_to_coverage`, `--gamut_in`/`--gamut_out` beyond the `.h` output,
-`--build_cubemap`, `--build_volume`, and reading the input formats ImageIO
-does not -- Apple's usage lists DDS, EXR, HDR, KTX and KTX2, and this tree
-reads only what CoreGraphics decodes.  The first three change nothing in
-Apple's own output on any image tried so far, so what they are for is
-still to be found.
+`--alpha_to_coverage` is measured but not solved, and is left inert rather
+than guessed at.  What is known: it does nothing when alpha is being
+ignored, which is the default; under Preserve or Premultiply it scales the
+alpha of the smaller levels and leaves level zero alone; and the scales it
+picks are dyadic from a start of one over a range of four -- 1.005859 is
+one plus 3/512, 1.398437 one plus 204/512 -- which is exactly the ten-step
+binary search in nvimage's `scaleAlphaToCoverage`.  So the search is
+NVTT's.  The coverage measure is not: neither nvimage's subsampled
+`alphaTestCoverage` nor a plain count above the reference reproduces
+Apple's scales at any reference tried (0.5, 0.25, 0.75, 0.9, 0.95, 1/256,
+0.125), and on one image Apple scale four levels where both measures say
+the coverage is already one at every level.  Whatever they measure, it is
+not the fraction of texels above a threshold.
+
+`--crop_uniform_content` and `--scale_range` change nothing in Apple's own
+output on any image tried, including one with a uniform black border and
+one with a full alpha ramp, so what they are for is still to be found.
+
+Still to write: those three, `--gamut_in`/`--gamut_out` beyond the `.h`
+output, `--build_cubemap`, `--build_volume`, and reading the input formats
+ImageIO does not -- Apple's usage lists DDS, EXR, HDR, KTX and KTX2, and
+this tree reads only what CoreGraphics decodes.
 
 Five measurements settled the pixel path, and none was guessable:
 
