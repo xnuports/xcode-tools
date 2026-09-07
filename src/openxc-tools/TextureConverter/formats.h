@@ -22,4 +22,13 @@ const char *format_name_for_vk(uint32_t vk_format);
  * the colour space extended-range linear rather than plain sRGB. */
 _Bool	format_is_float(const char *name);
 
+/*
+ * The OpenGL internal format a name compresses to, the block it packs
+ * pixels into, and the MTLPixelFormat a Khronos container records beside
+ * it (zero for a format Apple record none for).  Returns false for a name
+ * this tool does not write.
+ */
+_Bool	format_lookup(const char *name, uint32_t *gl, int *block_x,
+	    int *block_y, uint32_t *metal);
+
 #endif /* TEXTURECONVERTER_FORMATS_H */

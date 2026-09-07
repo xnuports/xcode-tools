@@ -4,7 +4,7 @@
 # what Apple's links for the same job.  The compressor libraries in
 # usr/local come from src/extras (see mk/port.d/{astcenc,stb,etc2comp,nvtt});
 # nothing links them yet, because the modes that would are still to write.
-T_SRCS=		TextureConverter.m ktx.c formats.c mipmap.cpp
+T_SRCS=		TextureConverter.m ktx.c formats.c compress.c mipmap.cpp
 T_CFLAGS+=	-fobjc-arc
 T_LDADD+=	-framework Foundation
 T_LDADD+=	-framework CoreGraphics
@@ -15,3 +15,6 @@ T_LDADD+=	-framework ImageIO
 T_CFLAGS+=	-I${TOP}/build/release/usr/local/include
 T_CXXFLAGS+=	-std=c++11 -DNV_CPU_AARCH64=1 -DNV_CPU_ARM=1
 T_LDADD+=	${TOP}/build/release/usr/local/lib/libnvtt-bc.a
+
+# ARM's astc-encoder, which is what Apple's ASTC back end is.
+T_LDADD+=	${TOP}/build/release/usr/local/lib/libastcenc.a

@@ -34,6 +34,7 @@
 #include <string.h>
 
 #include "formats.h"
+#include "compress.h"
 #include "ktx.h"
 #include "mipmap.h"
 #include "usage.h"
@@ -293,21 +294,38 @@ do_examine(NSString *path)
 /* Convert.                                                            */
 /* ------------------------------------------------------------------ */
 
+/* --alpha_mode. */
+enum alpha_mode {
+	ALPHA_IGNORE,		/* the default: the image is treated as opaque */
+	ALPHA_PRESERVE,
+	ALPHA_PREMULTIPLY
+};
+
 /*
  * Read an image into tightly packed RGBA floats, top row first.  The values
- * are the stored bytes over 255 with no gamma applied, which is what Apple's
- * writes: a level of theirs holds 0.501961 where the source byte was 128.
+ * are the stored samples over 255 with no gamma applied, which is what
+ * Apple's writes: a level of theirs holds 0.501961 where the source byte
+ * was 128.
+ *
+ * The samples are taken from the image's own data provider rather than by
+ * drawing it into a bitmap context.  A context can only be asked for
+ * premultiplied alpha, and dividing that back out does not give the
+ * original: a pixel stored (237, 191, 136, 70) comes back (236, 189, 134),
+ * where Apple's tool writes 237, 191 and 136.  The provider hands over what
+ * was decoded, which is what they read.
  */
 static float *
-load_rgba(NSString *path, int *wp, int *hp)
+load_rgba(NSString *path, enum alpha_mode amode, int *wp, int *hp)
 {
+	const float inv255 = 1.0f / 255.0f;
 	CGImageSourceRef src;
 	CGImageRef img;
-	CGColorSpaceRef cs;
-	CGContextRef ctx;
-	uint8_t *bytes;
+	CFDataRef pixels;
+	const uint8_t *bytes;
 	float *out;
-	size_t w, h, i, n;
+	size_t w, h, bpc, bpp, stride, x, y;
+	CGImageAlphaInfo alpha;
+	bool has_alpha, alpha_first, premultiplied;
 
 	src = CGImageSourceCreateWithURL((__bridge CFURLRef)
 	    [NSURL fileURLWithPath:path], NULL);
@@ -320,62 +338,148 @@ load_rgba(NSString *path, int *wp, int *hp)
 
 	w = CGImageGetWidth(img);
 	h = CGImageGetHeight(img);
-	if (w == 0 || h == 0) {
-		CGImageRelease(img);
-		return (NULL);
-	}
-	if ((bytes = calloc(1, w * h * 4)) == NULL) {
-		CGImageRelease(img);
-		return (NULL);
-	}
-	cs = CGColorSpaceCreateDeviceRGB();
-	ctx = CGBitmapContextCreate(bytes, w, h, 8, w * 4, cs,
-	    kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
-	CGColorSpaceRelease(cs);
-	if (ctx == NULL) {
-		free(bytes);
-		CGImageRelease(img);
-		return (NULL);
-	}
-	CGContextDrawImage(ctx, CGRectMake(0, 0, w, h), img);
-	CGContextRelease(ctx);
-	CGImageRelease(img);
+	bpc = CGImageGetBitsPerComponent(img);
+	bpp = CGImageGetBitsPerPixel(img);
+	stride = CGImageGetBytesPerRow(img);
+	alpha = CGImageGetAlphaInfo(img);
 
-	n = w * h * 4;
-	if ((out = malloc(n * sizeof(*out))) == NULL) {
-		free(bytes);
-		return (NULL);
-	}
 	/*
-	 * Multiplied by the reciprocal rather than divided by 255, because
-	 * that is what Apple's does and the two disagree.  1/255 is not
-	 * exact in binary, so the multiply carries its rounding into the
-	 * result: 96 comes out 0x3ec0c0c2 that way and 0x3ec0c0c1 by
-	 * division -- one unit in the last place, in every file.
+	 * Only the eight bit layouts are read directly; anything else --
+	 * sixteen bit, floating point, indexed, CMYK -- would need the
+	 * conversion a bitmap context does, and is not handled yet.
 	 */
-	{
-		const float inv255 = 1.0f / 255.0f;
+	if (w == 0 || h == 0 || bpc != 8 || (bpp != 24 && bpp != 32) ||
+	    (CGImageGetBitmapInfo(img) & kCGBitmapByteOrderMask) ==
+	    kCGBitmapByteOrder32Little) {
+		CGImageRelease(img);
+		return (NULL);
+	}
+	switch (alpha) {
+	case kCGImageAlphaNone:
+	case kCGImageAlphaNoneSkipLast:
+		has_alpha = false;
+		alpha_first = false;
+		premultiplied = false;
+		break;
+	case kCGImageAlphaNoneSkipFirst:
+		has_alpha = false;
+		alpha_first = true;
+		premultiplied = false;
+		break;
+	case kCGImageAlphaLast:
+		has_alpha = true;
+		alpha_first = false;
+		premultiplied = false;
+		break;
+	case kCGImageAlphaFirst:
+		has_alpha = true;
+		alpha_first = true;
+		premultiplied = false;
+		break;
+	case kCGImageAlphaPremultipliedLast:
+		has_alpha = true;
+		alpha_first = false;
+		premultiplied = true;
+		break;
+	case kCGImageAlphaPremultipliedFirst:
+		has_alpha = true;
+		alpha_first = true;
+		premultiplied = true;
+		break;
+	default:
+		CGImageRelease(img);
+		return (NULL);
+	}
 
-		for (i = 0; i < n; i += 4) {
-			unsigned a = bytes[i + 3];
+	pixels = CGDataProviderCopyData(CGImageGetDataProvider(img));
+	CGImageRelease(img);
+	if (pixels == NULL)
+		return (NULL);
+	bytes = CFDataGetBytePtr(pixels);
+	if ((size_t)CFDataGetLength(pixels) < stride * h) {
+		CFRelease(pixels);
+		return (NULL);
+	}
 
-			/* CoreGraphics hands back premultiplied colour. */
-			if (a != 0 && a != 255) {
-				out[i + 0] = (bytes[i + 0] * 255u / a) * inv255;
-				out[i + 1] = (bytes[i + 1] * 255u / a) * inv255;
-				out[i + 2] = (bytes[i + 2] * 255u / a) * inv255;
+	if ((out = malloc(w * h * 4 * sizeof(*out))) == NULL) {
+		CFRelease(pixels);
+		return (NULL);
+	}
+	for (y = 0; y < h; y++) {
+		const uint8_t *row = bytes + y * stride;
+
+		for (x = 0; x < w; x++) {
+			const uint8_t *p = row + x * (bpp / 8);
+			float *o = out + (y * w + x) * 4;
+			unsigned r, g, b, a;
+
+			if (alpha_first) {
+				a = p[0];
+				r = p[1];
+				g = p[2];
+				b = p[3];
 			} else {
-				out[i + 0] = bytes[i + 0] * inv255;
-				out[i + 1] = bytes[i + 1] * inv255;
-				out[i + 2] = bytes[i + 2] * inv255;
+				r = p[0];
+				g = p[1];
+				b = p[2];
+				a = bpp == 32 ? p[3] : 255;
 			}
-			out[i + 3] = a * inv255;
+			if (!has_alpha)
+				a = 255;
+			if (premultiplied && a != 0 && a != 255) {
+				r = r * 255u / a;
+				g = g * 255u / a;
+				b = b * 255u / a;
+			}
+
+			/*
+			 * Ignore, the default, treats the image as opaque
+			 * rather than dropping the colour behind it; the
+			 * other two keep the alpha, one of them folding it
+			 * into the colour first.
+			 */
+			if (amode == ALPHA_IGNORE)
+				a = 255;
+			o[0] = r * inv255;
+			o[1] = g * inv255;
+			o[2] = b * inv255;
+			o[3] = a * inv255;
 		}
 	}
-	free(bytes);
+	CFRelease(pixels);
 	*wp = (int)w;
 	*hp = (int)h;
 	return (out);
+}
+
+/*
+ * Fold alpha into colour.  Only the base level: the mip chain is built from
+ * the straight colour and left alone, which is what Apple's does -- their
+ * --alpha_mode=Premultiply and --alpha_mode=Preserve write byte for byte the
+ * same second level, and only the first differs.
+ */
+static void
+premultiply_base(float *rgba, int w, int h)
+{
+	size_t i, n = (size_t)w * h * 4;
+
+	for (i = 0; i < n; i += 4) {
+		rgba[i + 0] *= rgba[i + 3];
+		rgba[i + 1] *= rgba[i + 3];
+		rgba[i + 2] *= rgba[i + 3];
+	}
+}
+
+static enum alpha_mode
+alpha_mode_of(NSDictionary<NSString *, NSString *> *opts)
+{
+	NSString *m = opts[@"alpha_mode"];
+
+	if ([m caseInsensitiveCompare:@"Preserve"] == NSOrderedSame)
+		return (ALPHA_PRESERVE);
+	if ([m caseInsensitiveCompare:@"Premultiply"] == NSOrderedSame)
+		return (ALPHA_PREMULTIPLY);
+	return (ALPHA_IGNORE);
 }
 
 static void
@@ -389,11 +493,17 @@ put32(NSMutableData *d, uint32_t v)
 	[d appendBytes:b length:sizeof(b)];
 }
 
-/* One key/value pair, NUL terminated and padded to a four byte boundary. */
+/*
+ * One key/value pair: a length, the NUL terminated key, the value, then
+ * padding to a four byte boundary.  The padding is not counted in the
+ * length but is counted in the header's bytesOfKeyValueData, which is the
+ * kind of asymmetry that costs an afternoon if the two are written
+ * separately -- so everything goes through here.
+ */
 static void
-put_kv(NSMutableData *d, const char *key, const char *value)
+put_kv_bytes(NSMutableData *d, const char *key, const void *value, size_t vlen)
 {
-	size_t klen = strlen(key) + 1, vlen = strlen(value) + 1;
+	size_t klen = strlen(key) + 1;
 	static const uint8_t pad[4] = { 0, 0, 0, 0 };
 
 	put32(d, (uint32_t)(klen + vlen));
@@ -402,17 +512,25 @@ put_kv(NSMutableData *d, const char *key, const char *value)
 	[d appendBytes:pad length:(4 - (klen + vlen) % 4) % 4];
 }
 
+static void
+put_kv(NSMutableData *d, const char *key, const char *value)
+{
+	put_kv_bytes(d, key, value, strlen(value) + 1);
+}
+
 static const uint8_t ktx1_id[12] = {
 	0xAB, 0x4B, 0x54, 0x58, 0x20, 0x31, 0x31, 0xBB, 0x0D, 0x0A, 0x1A, 0x0A
 };
 
 /*
- * KTX version 1 holding RGBA32F, which is what the conversion path writes
- * whatever --format asks for: Apple's does the same.
+ * KTX version 1.  The conversion path writes RGBA32F whatever --format asks
+ * for, which is what Apple's does; the compression path writes whichever
+ * block format was asked for, and then the samples are the encoder's.
  */
 static NSData *
-write_ktx(float **levels, const int *widths, const int *heights, int nlevels,
-    bool annotate)
+write_ktx_generic(void **levels, const size_t *sizes, const int *widths,
+    const int *heights, int nlevels, uint32_t gl_internal, bool compressed,
+    uint32_t metal, bool premultiplied, NSString *options, bool annotate)
 {
 	NSMutableData *out = [NSMutableData data];
 	NSMutableData *kvd = [NSMutableData data];
@@ -421,15 +539,43 @@ write_ktx(float **levels, const int *widths, const int *heights, int nlevels,
 	if (annotate) {
 		put_kv(kvd, "TC_Version", TC_VERSION);
 		put_kv(kvd, "KTXwriter", "TextureConverter " TC_VERSION);
-		put_kv(kvd, "TC_Options", "");
+		put_kv(kvd, "TC_Options", [options UTF8String]);
+	}
+	/*
+	 * A reader has to be told the colour has alpha folded into it, so
+	 * this is part of describing the file rather than an annotation and
+	 * --disable_annotation leaves it alone.  Written only when the
+	 * colour actually was premultiplied.
+	 */
+	if (premultiplied) {
+		static const uint8_t one[4] = { 1, 0, 0, 0 };
+
+		put_kv_bytes(kvd, "com.apple.image.premultipliedAlpha", one,
+		    sizeof(one));
+	}
+	/*
+	 * The Metal format is not an annotation either.  Only the ASTC
+	 * formats carry one; Apple record none for the BC or ETC families.
+	 */
+	if (metal != 0) {
+		uint8_t v[4] = {
+			(uint8_t)metal, (uint8_t)(metal >> 8),
+			(uint8_t)(metal >> 16), (uint8_t)(metal >> 24)
+		};
+
+		put_kv_bytes(kvd, "KTXmetalPixelFormat", v, sizeof(v));
 	}
 
 	[out appendBytes:ktx1_id length:sizeof(ktx1_id)];
 	put32(out, 0x04030201);		/* endianness */
-	put32(out, 0x1406);		/* glType: GL_FLOAT */
-	put32(out, 4);			/* glTypeSize */
-	put32(out, 0x1908);		/* glFormat: GL_RGBA */
-	put32(out, 0x8814);		/* glInternalFormat: GL_RGBA32F */
+	/*
+	 * A compressed format names no type and no size: the block layout is
+	 * the internal format's business.
+	 */
+	put32(out, compressed ? 0 : 0x1406);		/* glType: GL_FLOAT */
+	put32(out, compressed ? 1 : 4);			/* glTypeSize */
+	put32(out, compressed ? 0 : 0x1908);		/* glFormat: GL_RGBA */
+	put32(out, gl_internal);
 	put32(out, 0x1908);		/* glBaseInternalFormat: GL_RGBA */
 	put32(out, (uint32_t)widths[0]);
 	put32(out, (uint32_t)heights[0]);
@@ -441,13 +587,15 @@ write_ktx(float **levels, const int *widths, const int *heights, int nlevels,
 	[out appendData:kvd];
 
 	for (i = 0; i < nlevels; i++) {
-		uint32_t n = (uint32_t)((size_t)widths[i] * heights[i] * 4 *
-		    sizeof(float));
+		static const uint8_t pad[4] = { 0, 0, 0, 0 };
 
-		put32(out, n);
-		[out appendBytes:levels[i] length:n];
-		/* Levels are padded to four bytes; a float image never is. */
+		put32(out, (uint32_t)sizes[i]);
+		[out appendBytes:levels[i] length:sizes[i]];
+		/* Each level is padded to a four byte boundary. */
+		[out appendBytes:pad length:(4 - sizes[i] % 4) % 4];
 	}
+	(void)widths;
+	(void)heights;
 	return (out);
 }
 
@@ -470,7 +618,8 @@ do_convert(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 	else if ([filter caseInsensitiveCompare:@"Triangle"] == NSOrderedSame)
 		which = MIP_FILTER_TRIANGLE;
 
-	if ((levels[0] = load_rgba(path, &widths[0], &heights[0])) == NULL) {
+	if ((levels[0] = load_rgba(path, alpha_mode_of(opts), &widths[0],
+	    &heights[0])) == NULL) {
 		printf("Error: Could not read input file!\n");
 		return (255);
 	}
@@ -487,10 +636,139 @@ do_convert(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 		n++;
 	}
 
-	data = write_ktx(levels, widths, heights, n,
-	    opts[@"disable_annotation"] == nil);
+	if (alpha_mode_of(opts) == ALPHA_PREMULTIPLY)
+		premultiply_base(levels[0], widths[0], heights[0]);
+
+	{
+		void *ptrs[MAX_LEVELS];
+		size_t sizes[MAX_LEVELS];
+
+		for (i = 0; i < n; i++) {
+			ptrs[i] = levels[i];
+			sizes[i] = (size_t)widths[i] * heights[i] * 4 *
+			    sizeof(float);
+		}
+		data = write_ktx_generic(ptrs, sizes, widths, heights, n,
+		    0x8814, false, 0,
+		    alpha_mode_of(opts) == ALPHA_PREMULTIPLY, @"",
+		    opts[@"disable_annotation"] == nil);
+	}
 	for (i = 0; i < n; i++)
 		free(levels[i]);
+
+	if (output.length == 0) {
+		printf("Error: Missing output file path!\n");
+		return (255);
+	}
+	if (![data writeToFile:output atomically:NO]) {
+		printf("Error: Could not write output file!\n");
+		return (255);
+	}
+	return (0);
+}
+
+/* ------------------------------------------------------------------ */
+/* Compress.                                                           */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Build the mip chain the same way the conversion path does, then hand each
+ * level to the encoder.
+ */
+static int
+do_compress(NSString *path, NSDictionary<NSString *, NSString *> *opts)
+{
+	enum { MAX_LEVELS = 32 };
+	float *levels[MAX_LEVELS];
+	void *blocks[MAX_LEVELS];
+	size_t sizes[MAX_LEVELS];
+	int widths[MAX_LEVELS], heights[MAX_LEVELS];
+	NSString *fmt = opts[@"compression_format"];
+	NSString *output = opts[@"output"];
+	NSString *filter = opts[@"mipmap_filter"];
+	NSString *quality = opts[@"compression_quality"];
+	struct tc_astc_options aopt;
+	enum mip_filter which = MIP_FILTER_KAISER;
+	uint32_t gl, metal;
+	NSData *data;
+	int n = 0, i, maxlevels;
+
+	if (!format_lookup([fmt UTF8String], &gl, &aopt.block_x,
+	    &aopt.block_y, &metal) || aopt.block_x == 1) {
+		printf("Error: Unsupported compression format \"%s\"!\n",
+		    [fmt UTF8String]);
+		short_usage();
+		return (255);
+	}
+	/*
+	 * ASTC is the one family wired up so far.  The other encoders are
+	 * ports in this tree already; what is missing is this, not them.
+	 */
+	if (![fmt hasPrefix:@"ASTC"]) {
+		printf("Error: Compression format \"%s\" is not implemented "
+		    "in this build!\n", [fmt UTF8String]);
+		return (255);
+	}
+
+	aopt.quality = TC_QUALITY_PRODUCTION;
+	if ([quality caseInsensitiveCompare:@"Fastest"] == NSOrderedSame)
+		aopt.quality = TC_QUALITY_FASTEST;
+	else if ([quality caseInsensitiveCompare:@"Normal"] == NSOrderedSame)
+		aopt.quality = TC_QUALITY_NORMAL;
+	else if ([quality caseInsensitiveCompare:@"Highest"] == NSOrderedSame)
+		aopt.quality = TC_QUALITY_HIGHEST;
+	aopt.perceptual = [opts[@"channel_weighting"]
+	    caseInsensitiveCompare:@"Linear"] != NSOrderedSame;
+	aopt.alpha_weight = opts[@"alpha_weight"] != nil;
+
+	if ([filter caseInsensitiveCompare:@"Box"] == NSOrderedSame)
+		which = MIP_FILTER_BOX;
+	else if ([filter caseInsensitiveCompare:@"Triangle"] == NSOrderedSame)
+		which = MIP_FILTER_TRIANGLE;
+
+	printf("Using Compressor: ARM\n");
+
+	if ((levels[0] = load_rgba(path, alpha_mode_of(opts), &widths[0],
+	    &heights[0])) == NULL) {
+		printf("Error: Could not read input file!\n");
+		return (255);
+	}
+	n = 1;
+	maxlevels = [opts[@"max_mipmaps"] intValue];
+	if (maxlevels <= 0 || maxlevels > MAX_LEVELS)
+		maxlevels = MAX_LEVELS;
+	while (n < maxlevels && (widths[n - 1] > 1 || heights[n - 1] > 1)) {
+		levels[n] = mip_downsample(levels[n - 1], widths[n - 1],
+		    heights[n - 1], which, &widths[n], &heights[n]);
+		if (levels[n] == NULL)
+			break;
+		n++;
+	}
+
+	if (alpha_mode_of(opts) == ALPHA_PREMULTIPLY)
+		premultiply_base(levels[0], widths[0], heights[0]);
+
+	for (i = 0; i < n; i++) {
+		blocks[i] = compress_astc(levels[i], widths[i], heights[i],
+		    &aopt, &sizes[i]);
+		free(levels[i]);
+		if (blocks[i] == NULL) {
+			printf("Error: Compression failed!\n");
+			return (255);
+		}
+	}
+
+	{
+		NSString *options = [NSString stringWithFormat:
+		    @"compressor=ARM compression_format=%@", fmt];
+
+		data = write_ktx_generic(blocks, sizes, widths, heights, n,
+		    gl, true, metal,
+		    alpha_mode_of(opts) == ALPHA_PREMULTIPLY, options,
+		    opts[@"disable_annotation"] == nil);
+	}
+	for (i = 0; i < n; i++)
+		free(blocks[i]);
 
 	if (output.length == 0) {
 		printf("Error: Missing output file path!\n");
@@ -560,10 +838,12 @@ main(int argc, char *argv[])
 		return (do_examine(inputs[0]));
 	if ([mode caseInsensitiveCompare:@"convert"] == NSOrderedSame)
 		return (do_convert(inputs[0], opts));
+	if ([mode caseInsensitiveCompare:@"compress"] == NSOrderedSame)
+		return (do_compress(inputs[0], opts));
 
 	/*
-	 * The remaining modes -- Compress, Decompress, Compare -- are not
-	 * written yet.  Saying so beats pretending: the compressors
+	 * The remaining modes -- Decompress and Compare -- are not written
+	 * yet.  Saying so beats pretending: the compressors
 	 * they would drive are ports in this tree already (ASTC, BC, ETC2,
 	 * BC6H/BC7), but the containers and the pixel pipeline around them
 	 * are still to come.

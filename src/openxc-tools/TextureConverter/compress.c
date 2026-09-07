@@ -1,0 +1,86 @@
+/*
+ * compress.c -- block compression, through the encoders Apple's tool names.
+ *
+ * Copyright (c) 2026 Sunneva N. Mariu <sunnevanattsol@gmail.com>
+ * SPDX-License-Identifier: BSD-3-Clause
+ */
+
+#include <astcenc.h>
+
+#include <stdlib.h>
+#include <string.h>
+
+#include "compress.h"
+
+/*
+ * astcenc takes quality as a number, with named presets at particular
+ * values.  Apple's four names land on four of them; Highest is the
+ * exhaustive search at 100 rather than the very-thorough one at 99, which
+ * only shows up on an image hard enough to separate them.
+ */
+static float
+astc_quality(enum tc_quality q)
+{
+	switch (q) {
+	case TC_QUALITY_FASTEST:	return (ASTCENC_PRE_FASTEST);
+	case TC_QUALITY_NORMAL:		return (ASTCENC_PRE_FAST);
+	case TC_QUALITY_HIGHEST:	return (ASTCENC_PRE_EXHAUSTIVE);
+	default:			return (ASTCENC_PRE_MEDIUM);
+	}
+}
+
+uint8_t *
+compress_astc(const float *rgba, int w, int h,
+    const struct tc_astc_options *opt, size_t *out_len)
+{
+	static const struct astcenc_swizzle swizzle = {
+		ASTCENC_SWZ_R, ASTCENC_SWZ_G, ASTCENC_SWZ_B, ASTCENC_SWZ_A
+	};
+	struct astcenc_config config;
+	struct astcenc_context *ctx = NULL;
+	struct astcenc_image image;
+	void *slice = (void *)(uintptr_t)rgba;
+	unsigned flags = 0;
+	uint8_t *out;
+	size_t blocks, len;
+
+	/*
+	 * Perceptual weighting is on unless asked otherwise, because
+	 * --channel_weighting defaults to Perceptual.
+	 */
+	if (opt->perceptual)
+		flags |= ASTCENC_FLG_USE_PERCEPTUAL;
+	if (opt->alpha_weight)
+		flags |= ASTCENC_FLG_USE_ALPHA_WEIGHT;
+
+	if (astcenc_config_init(ASTCENC_PRF_LDR, (unsigned)opt->block_x,
+	    (unsigned)opt->block_y, 1, astc_quality(opt->quality), flags,
+	    &config) != ASTCENC_SUCCESS)
+		return (NULL);
+	if (astcenc_context_alloc(&config, 1, &ctx, NULL) != ASTCENC_SUCCESS)
+		return (NULL);
+
+	memset(&image, 0, sizeof(image));
+	image.dim_x = (unsigned)w;
+	image.dim_y = (unsigned)h;
+	image.dim_z = 1;
+	image.data_type = ASTCENC_TYPE_F32;
+	image.data = &slice;
+
+	blocks = (size_t)((w + opt->block_x - 1) / opt->block_x) *
+	    (size_t)((h + opt->block_y - 1) / opt->block_y);
+	len = blocks * 16;
+	if ((out = malloc(len)) == NULL) {
+		astcenc_context_free(ctx);
+		return (NULL);
+	}
+	if (astcenc_compress_image(ctx, &image, &swizzle, out, len, 0) !=
+	    ASTCENC_SUCCESS) {
+		free(out);
+		astcenc_context_free(ctx);
+		return (NULL);
+	}
+	astcenc_context_free(ctx);
+	*out_len = len;
+	return (out);
+}

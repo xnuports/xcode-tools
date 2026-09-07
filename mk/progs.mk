@@ -40,9 +40,6 @@ PROGS+=	openxc-tools/Rez DeRez usr/bin
 PROGS+=	openxc-tools/Rez ResMerger usr/bin
 PROGS+=	openxc-tools/Rez Rez usr/bin
 
-# TextureConverter, the tool around the compressor ports in src/extras.
-PROGS+=	openxc-tools/TextureConverter TextureConverter usr/bin
-
 # TextureAtlas, the SpriteKit atlas compiler.
 PROGS+=	openxc-tools/TextureAtlas TextureAtlas usr/bin
 
@@ -63,7 +60,12 @@ PROGS+=	openxc-tools/xcdebug xcdebug usr/bin
 # bundle stores its objects compressed and nothing on the system provides
 # the library.  Gated for the same reason libtapi's consumer is: without
 # the port there is nothing to link against.
+# TextureConverter links the encoders it drives -- ARM's astc-encoder for
+# ASTC and NVTT for the filters Apple's mip chains are built with -- so it
+# is gated on the ports for the same reason xcresulttool is: without them
+# there is nothing to link against.
 .if ${MK_PORTS:tl} == "yes"
+PROGS+=	openxc-tools/TextureConverter TextureConverter usr/bin
 PROGS+=	openxc-tools/xcresulttool xcresulttool usr/bin
 PROGS+=	openxc-tools/xccov xccov usr/bin
 .endif

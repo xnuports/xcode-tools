@@ -112,7 +112,11 @@ as valid and as satisfying its designated requirement), `xcrun`,
 tools, each checked case by case against Apple's own binaries; Rez and
 ResMerger produce byte-identical resource forks, and Rez compiles the `data`
 and `read` statements — `type`/`resource` declarations are still to come),
-`genstrings` (and
+`TextureConverter` (the tool
+around four vendored encoders: `--mode=examine`, `--mode=convert` and ASTC
+compression produce byte-identical files, having established that Apple's
+mip chains are NVTT's polyphase Kaiser and that their samples are read
+straight rather than premultiplied), `genstrings` (and
 `extractLocStrings`, which is the same program under Apple's second name for
 it: the localization macros scanned out of C, Objective-C and Swift into
 byte-identical `.strings` files), `agvtool` (Apple-generic

@@ -487,7 +487,7 @@ We currently have **10 open-source reimaginations** of Apple's command-line tool
 | copypng | Asset | PNG optimization/copy for iOS resources |
 | pngcrush | Asset | PNG optimization | ✅ Source available (`src/other/pngcrush/`) |
 | TextureAtlas | Asset | SpriteKit texture atlas compiler | ✅ OURS (`src/openxc-tools/TextureAtlas/`) |
-| TextureConverter | Asset | Texture format conversion | ⚪ In progress: four compressor ports in, tool not written; see docs/CLAUDE.md |
+| TextureConverter | Asset | Texture format conversion | ⚪ OURS, in progress: examine, convert and ASTC compression match Apple; see docs/CLAUDE.md |
 | altool | App Store | App Store Transport / upload validation |
 | iTMSTransporter | App Store | App Store delivery tool |
 | bitcode-build-tool | Build | Bitcode linking tool |
@@ -965,7 +965,7 @@ We currently have **10 open-source reimaginations** of Apple's command-line tool
 1. **Rez/DeRez/SetFile/GetFileInfo** — Resource fork tools (available in `Tools/`)
 2. **copypng** — PNG optimization for iOS resources
 3. **sdef/sdp** — Scripting definition tools
-4. **TextureConverter** — compressor ports done (ASTC, BC, ETC2, BC6H/BC7); tool still to write
+4. **TextureConverter** — examine/convert/ASTC done; BC, ETC2 and BC6H/BC7 wiring, decompress and compare still to write
 
 ## 9. License Compliance
 

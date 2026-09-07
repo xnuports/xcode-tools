@@ -842,34 +842,55 @@ Two back ends are not ported:
 
 The tool itself is under way in `src/openxc-tools/TextureConverter`.  In:
 the option table, both usage banners, the Khronos container reader,
-`--mode=examine` and `--mode=convert`.  The converted files are byte for
-byte Apple's.
+`--mode=examine`, `--mode=convert` and `--mode=compress` for ASTC.  It is
+gated on `MK_PORTS`, since it links the encoders it drives.
 
-Two measurements settled that, and neither was guessable:
+Four measurements settled the pixel path, and none was guessable:
 
   - **The mip chains are NVTT's.**  An impulse through Apple's Kaiser
     gives weights of 0.006729, 0.013252, -0.033884, -0.054839, 0.139929
     and 0.428814, and NVTT's PolyphaseKernel over a KaiserFilter of width
     3 and alpha 4, box-sampled 32 times per tap, gives exactly those.
-    nvimage is built for that reason and every level of every chain tried
-    comes out identical.
   - **Eight-bit samples are multiplied by 1/255, not divided by 255.**
     The reciprocal is inexact in binary and carries its rounding through:
-    96 comes out 0x3ec0c0c2 that way and 0x3ec0c0c1 by division.  One unit
-    in the last place, in every file.
+    96 comes out 0x3ec0c0c2 that way and 0x3ec0c0c1 by division.
+  - **Samples are read straight, not premultiplied.**  A bitmap context
+    can only be asked for premultiplied alpha and dividing it back out
+    does not recover the original -- a pixel stored (237, 191, 136, 70)
+    returns (236, 189, 134) where Apple write 237, 191, 136.  The image's
+    own data provider hands over what was decoded.
+  - **`--alpha_mode=Premultiply` folds alpha into the base level only.**
+    The mip chain is built from the straight colour: Apple's Premultiply
+    and Preserve write byte-for-byte the same second level.
 
-One difference is inherent.  TC_Version is what a reader checks --
-`--check_details` compares it -- so it stays Apple's, being the version of
-the format and the options rather than of the binary; KTXwriter names who
-actually wrote the file, and that is us.  So an annotated file is a dozen
-bytes longer than Apple's; `--disable_annotation` turns the block off and
-then they match exactly.
+The four compression qualities are astcenc's own presets, measured by
+compressing the same image both ways: Fastest is FASTEST, Normal FAST,
+Production MEDIUM, and Highest the EXHAUSTIVE search rather than the
+very-thorough one below it.  `--channel_weighting` decides
+`ASTCENC_FLG_USE_PERCEPTUAL` and is Perceptual by default; `--alpha_weight`
+adds `ASTCENC_FLG_USE_ALPHA_WEIGHT`.
 
-Still to write: `--mode=compress` (which is what the four encoder ports are
-for), decompress and compare, the KTX2 and DDS writers, resizing, and the
-gamma and gamut handling.  One residual: the Box filter's final 1x1 level
-differs by a unit in the last place, a summation-order difference in a
-non-default filter.
+Two keys are format description rather than annotation, so
+`--disable_annotation` leaves them: `KTXmetalPixelFormat`, which only the
+ASTC formats carry and whose Metal enumerants are not contiguous (209 is
+unused, so the column is measured rather than counted), and
+`com.apple.image.premultipliedAlpha`, written only when the colour actually
+was premultiplied.
+
+**Residual.**  Roughly one partial edge block in a hundred differs.  It is
+not a settings difference -- quality was swept 0 to 100 across both
+profiles and every flag combination, and 14 of 15 blocks is the ceiling --
+and not a version difference: astcenc 4.8.0 and 5.7.0 agree with each other
+and differ from Apple in exactly the same blocks.  Padding the image to the
+block grid by clamp, zero or mirror does not reproduce it either.  Whole
+blocks and every level of a power-of-two image match; only blocks the image
+does not fill are affected.
+
+Still to write: the other three encoder families behind `--mode=compress`
+(the ports are in; the wiring is not), decompress and compare, the KTX2 and
+DDS writers, resizing, and the gamma and gamut handling.  One more
+residual: the Box mipmap filter's final 1x1 level differs by a unit in the
+last place, a summation-order difference in a non-default filter.
 
 #### Why xcsigningtool is not reimplemented
 
