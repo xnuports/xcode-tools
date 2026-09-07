@@ -1064,6 +1064,65 @@ Landing llvm/swift is what lets `xcodebuild` stop delegating and actually
 compile, and what fills `${XCTOOLCHAIN}/usr/bin`.
 
 
+### Carried but not built, and why
+
+Three submodules under `src/extras` are in the tree and deliberately not
+wired. Each was tried; these are the blockers, so nobody has to find them
+twice.
+
+- **elfsec** — the ELF counterpart to `machsec`, by the same author. It
+  includes `<libelf.h>`, `<gelf.h>` and `<elf.h>`, none of which macOS has.
+  The candidates each fail for their own reason: elfutils' libelf is
+  LGPL/GPL, Michael Riepe's is LGPL, and this tree is BSD-3-Clause;
+  elftoolchain's is BSD, but its `elf.h` is FreeBSD's and elfsec is written
+  against Linux's constants. That is a port of libelf, not a wiring job, and
+  it buys one ELF tool on a macOS-only tree — `patchelf` is already here and
+  parses ELF itself. Capstone, the other half of what it needs, *is* now a
+  port, so if libelf ever lands this is a small entry away.
+
+- **MTool** — a Mach-O and dyld-shared-cache analyser, an Xcode project.
+  Two things stop it. Its `mtool` target includes `<mach-o/dyld_cache_format.h>`
+  and `<mach-o/dyld_process_info.h>`, which come from Apple's *internal* SDK;
+  our own `src/apple/dyld/include` has both, but they use
+  `__API_UNAVAILABLE(bridgeos)`, and `bridgeos` is not a platform the public
+  `Availability.h` knows, so the header will not even parse. Beyond that its
+  documented first step is `sh ref/clone.sh`, which clones six Apple projects
+  and llvm-project *into the submodule* and then runs an
+  `extract_external_headers` target that writes into `apple_headers/`. Nothing
+  here writes to a submodule. Wiring it means building against the internal
+  SDK this tree reconstructs (`mk/sdk-headers.mk`), and pointing
+  `HEADER_SEARCH_PATHS` there rather than at `ref/`.
+
+- **mootool** — a Ruby tool for Mach-O, IPAs and Apple data formats. Its
+  gemspec depends on `activemodel`, `apple-data`, `CFPropertyList`, `ecies`,
+  `gtk3`, `lzfse`, `lzss` and a dozen more. Every one would have to become a
+  vendored gem, one of them binds GTK3, and a build that fetches from
+  rubygems.org is not a build that runs twice and gets the same answer. This
+  needs a Ruby story for the whole tree before it needs a port fragment.
+
+Two outside projects were looked at and are not being taken up:
+
+- **gollvm** (`go.googlesource.com/gollvm`) — an LLVM-based Go compiler, and
+  we ship both Go and LLVM, so it looks like a fit. Its own README says
+  "currently supported only for x86_64 and aarch64 Linux". There is no Darwin
+  support to enable: it would need a Mach-O TLS story in the driver and a
+  darwin syscall layer in libgo. It also wants gofrontend, libffi and
+  libbacktrace checked out inside `llvm-project/llvm/tools`, which is not how
+  submodules are laid out here, and gofrontend is GPL-3 — the same objection
+  that ruled out libdwarf for `atos`, only stronger.
+
+- **macos-minimal-sdk** (`tinygo-org/macos-minimal-sdk`) — read against
+  `mk/sdk-headers.mk`; there is nothing to take. It exists to cross-compile
+  to macOS *from Linux*, which is out of scope for a macOS-only tree. Its
+  headers are macOS 11.5 and C/POSIX only, with no frameworks, where ours are
+  macOS 26.5 and include CoreFoundation, Security, IOKit, WebKit, Foundation
+  and Kernel. Its link stubs are a `libSystem.s` of symbol names harvested by
+  parsing headers with clang; ours are real `.tbd` files generated from the
+  host's own dylibs (`mk/scripts/make-tbd.sh`), which is both more faithful
+  and something only a macOS host can do — exactly the assumption this tree
+  is allowed to make and that one is not.
+
+
 ## 10. Development Workflow
 
 ### Building
