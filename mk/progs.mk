@@ -60,6 +60,10 @@ PROGS+=	openxc-tools/xcdebug xcdebug usr/bin
 # bundle stores its objects compressed and nothing on the system provides
 # the library.  Gated for the same reason libtapi's consumer is: without
 # the port there is nothing to link against.
+# atos links LLVM's symbolizer, which the llvm port builds, so it is gated
+# on the ports for the same reason the others here are.
+PROGS+=	openxc-tools/atos atos usr/bin
+
 # TextureConverter links the encoders it drives -- ARM's astc-encoder for
 # ASTC and NVTT for the filters Apple's mip chains are built with -- so it
 # is gated on the ports for the same reason xcresulttool is: without them
