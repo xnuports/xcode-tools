@@ -133,6 +133,7 @@ PORTS+=	extras/arm64th forth usr/local/bin
 PORTS+=	extras/zsign zsign usr/local/bin
 PORTS+=	extras/bsdiff bsdiff usr/local/bin
 PORTS+=	extras/patchelf patchelf usr/local/bin
+PORTS+=	extras/unxip unxip usr/local/bin
 
 # Compatibility libraries and libplist.  These are not tools; they are
 # carried so that source written for Linux or BSD, and code that speaks
