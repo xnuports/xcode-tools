@@ -74,7 +74,8 @@ char *
 header_write(void **levels, const size_t *sizes, const int *widths,
     const int *heights, int nlevels, const char *name,
     const char *atc_format, const char *gamut, const char *ident,
-    _Bool srgb, _Bool normal, int faces, size_t *out_len)
+    _Bool srgb, _Bool normal, int faces, const int *depths,
+    size_t *out_len)
 {
 	struct text t = { NULL, 0, 0, 0 };
 	int i;
@@ -89,20 +90,40 @@ header_write(void **levels, const size_t *sizes, const int *widths,
 	addf(&t, "#include <stdint.h>\n");
 	addf(&t, "#include \"AppleTextureConverter.h\"\n\n");
 	addf(&t, "const uint32_t %s_type = atcTextureType%s;\n", ident,
-	    faces > 1 ? "Cube" : "2D");
+	    faces > 1 ? "Cube" : (depths != NULL && depths[0] > 1) ? "3D" :
+	    "2D");
 	addf(&t, "const uint32_t %s_format = %s;\n", ident, atc_format);
 	addf(&t, "const uint32_t %s_colorGamut = %s;\n", ident, gamut);
 	addf(&t, "const uint32_t %s_width = %d;\n", ident, widths[0]);
 	addf(&t, "const uint32_t %s_height = %d;\n", ident, heights[0]);
-	addf(&t, "const uint32_t %s_depth = 1;\n", ident);
+	addf(&t, "const uint32_t %s_depth = %d;\n", ident,
+	    depths != NULL && depths[0] > 1 ? depths[0] : 1);
 	addf(&t, "const uint32_t %s_numMipmaps = %d;\n", ident, nlevels);
 	addf(&t, "const uint32_t %s_numElements = 1;\n", ident);
 	addf(&t, "const uint32_t %s_numChannels = %d;\n\n", ident,
 	    format_atc_channels(name, srgb));
 
+	/*
+	 * A volume stays a volume all the way down: once its levels are a
+	 * single slice deep they are still named Slice0, because the name
+	 * follows the texture and not the level.
+	 */
 	for (i = 0; i < nlevels * faces; i++) {
+		int lv = i / faces;
+		int slices = depths != NULL && depths[lv] > 1 ? depths[lv] : 1;
+		_Bool vol = depths != NULL && depths[0] > 1;
+		size_t each = sizes[lv] / (size_t)slices;
 		const uint8_t *b = levels[i];
 		size_t j;
+		int sl;
+
+		/*
+		 * A volume's level is one slab, and the header wants it a
+		 * slice at a time: Mip<n>Slice<n>, the way a cubemap wants
+		 * Mip<n>Face<n>.
+		 */
+		for (sl = 0; sl < slices; sl++) {
+		b = (const uint8_t *)levels[i] + (size_t)sl * each;
 
 		/*
 		 * The tab that opens a line is written whenever the count
@@ -114,20 +135,24 @@ header_write(void **levels, const size_t *sizes, const int *widths,
 		 */
 		if (faces > 1)
 			addf(&t, "uint8_t %s_Mip%dFace%d[%zu] = { \n", ident,
-			    i / faces, i % faces, sizes[i / faces]);
+			    lv, i % faces, each);
+		else if (vol)
+			addf(&t, "uint8_t %s_Mip%dSlice%d[%zu] = { \n",
+			    ident, lv, sl, each);
 		else
-			addf(&t, "uint8_t %s_Mip%d[%zu] = { \n", ident, i,
-			    sizes[i]);
-		for (j = 0; j <= sizes[i / faces]; j++) {
+			addf(&t, "uint8_t %s_Mip%d[%zu] = { \n", ident, lv,
+			    each);
+		for (j = 0; j <= each; j++) {
 			if (j % 20 == 0) {
 				if (j != 0)
 					addf(&t, "\n");
 				addf(&t, "\t");
 			}
-			if (j < sizes[i / faces])
+			if (j < each)
 				addf(&t, "0x%02x, ", b[j]);
 		}
 		addf(&t, "\n};\n\n");
+		}
 	}
 
 	addf(&t, "static void SetSurface%s(const ATC_Texture* pTexture, "
@@ -156,6 +181,11 @@ header_write(void **levels, const size_t *sizes, const int *widths,
 		addf(&t, "\tATC_CreateTextureCube( NULL, %d, %d, %s, %s, "
 		    "%s, &pTexture );\n", widths[0], nlevels, atc_format,
 		    gamut, normal ? "true" : "false");
+	else if (depths != NULL && depths[0] > 1)
+		addf(&t, "\tATC_CreateTexture3D( NULL, %d, %d, %d, %d, %s, "
+		    "%s, %s, &pTexture );\n", widths[0], heights[0],
+		    depths[0], nlevels, atc_format, gamut,
+		    normal ? "true" : "false");
 	else
 		addf(&t, "\tATC_CreateTexture2D( NULL, %d, %d, %d, %s, %s, "
 		    "%s, &pTexture );\n", widths[0], heights[0], nlevels,
@@ -169,7 +199,18 @@ header_write(void **levels, const size_t *sizes, const int *widths,
 			    i % faces == 0 ? "\n" : "", ident, i % faces,
 			    lvl, widths[lvl], heights[lvl], sizes[lvl],
 			    ident, lvl, i % faces);
-		else
+		else if (depths != NULL && depths[0] > 1) {
+			int slices = depths[lvl] > 1 ? depths[lvl] : 1;
+			size_t each = sizes[lvl] / (size_t)slices;
+			int sl;
+
+			for (sl = 0; sl < slices; sl++)
+				addf(&t, "%s\tSetSurface%s(pTexture, %d, %d, "
+				    "%d, %d, %zu, %s_Mip%dSlice%d);\n",
+				    sl == 0 ? "\n" : "", ident, sl, lvl,
+				    widths[lvl], heights[lvl], each, ident,
+				    lvl, sl);
+		} else
 			addf(&t, "\n\tSetSurface%s(pTexture, 0, %d, %d, "
 			    "%d, %zu, %s_Mip%d);\n", ident, lvl, widths[lvl],
 			    heights[lvl], sizes[lvl], ident, lvl);

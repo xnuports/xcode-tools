@@ -96,8 +96,8 @@ put_kv(struct buf *b, const char *key, const char *value)
 
 uint8_t *
 ktx2_write(void **levels, const size_t *sizes, const int *widths,
-    const int *heights, int nlevels, int faces, uint32_t vk_format,
-    int block_bytes,
+    const int *heights, const int *depths, int nlevels, int faces,
+    uint32_t vk_format, int block_bytes,
     int block_x, int block_y, int type_size, const struct format_dfd *dfd,
     bool premultiplied, bool srgb, const char *writer, const char *options,
     const char *version, size_t *out_len)
@@ -151,7 +151,9 @@ ktx2_write(void **levels, const size_t *sizes, const int *widths,
 	put32(&b, (uint32_t)type_size);
 	put32(&b, (uint32_t)widths[0]);
 	put32(&b, (uint32_t)heights[0]);
-	put32(&b, 0);				/* pixelDepth */
+	/* A volume says how deep it is; everything else says nothing. */
+	put32(&b, depths != NULL && depths[0] > 1 ?
+	    (uint32_t)depths[0] : 0);
 	put32(&b, 0);				/* layerCount */
 	put32(&b, (uint32_t)faces);		/* faceCount */
 	put32(&b, (uint32_t)nlevels);

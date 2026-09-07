@@ -14,8 +14,8 @@
 #include "mipmap.h"
 
 float *
-mip_downsample(const float *rgba, int w, int h, enum mip_filter which,
-    enum mip_wrap wrap, int *out_w, int *out_h)
+mip_downsample(const float *rgba, int w, int h, int d, enum mip_filter which,
+    enum mip_wrap wrap, int *out_w, int *out_h, int *out_d)
 {
 	nv::FloatImage::WrapMode mode =
 	    wrap == MIP_WRAP_CLAMP ? nv::FloatImage::WrapMode_Clamp :
@@ -23,11 +23,24 @@ mip_downsample(const float *rgba, int w, int h, enum mip_filter which,
 	    nv::FloatImage::WrapMode_Mirror;
 	nv::FloatImage img;
 	nv::FloatImage *half = NULL;
-	float *out;
-	int nw, nh, x, y, c;
+	float *out = NULL;
+	int nw = 0, nh = 0, nd, x, y, z, c;
 
 	if (w <= 1 && h <= 1)
 		return (NULL);
+	if (d < 1)
+		d = 1;
+	nd = d > 1 ? d / 2 : 1;
+
+	/*
+	 * A volume is halved a slice at a time and then the slices are
+	 * paired off, which is not what a three dimensional kernel would
+	 * do: Apple's level is the plain average of two slices that have
+	 * each been through the two dimensional filter, and an odd slice
+	 * at the end is dropped rather than carried.
+	 */
+	for (z = 0; z < (d > 1 ? nd * 2 : 1); z++) {
+	const float *slice = rgba + (size_t)z * w * h * 4;
 
 	img.allocate(4, (unsigned)w, (unsigned)h);
 	for (y = 0; y < h; y++) {
@@ -35,7 +48,7 @@ mip_downsample(const float *rgba, int w, int h, enum mip_filter which,
 			for (c = 0; c < 4; c++)
 				img.pixel((unsigned)c, (unsigned)x,
 				    (unsigned)y, 0) =
-				    rgba[((size_t)y * w + x) * 4 + c];
+				    slice[((size_t)y * w + x) * 4 + c];
 		}
 	}
 
@@ -52,6 +65,7 @@ mip_downsample(const float *rgba, int w, int h, enum mip_filter which,
 		 * this one: their Box chain matches it exactly, where the
 		 * polyphase path is off by one ULP in a few dozen samples.
 		 * It is the same average, summed in a different order.
+		 *
 		 */
 		half = img.fastDownSample();
 		break;
@@ -73,21 +87,35 @@ mip_downsample(const float *rgba, int w, int h, enum mip_filter which,
 
 	nw = (int)half->width();
 	nh = (int)half->height();
-	out = (float *)malloc((size_t)nw * nh * 4 * sizeof(*out));
 	if (out == NULL) {
-		delete half;
-		return (NULL);
+		out = (float *)calloc((size_t)nw * nh * nd * 4,
+		    sizeof(*out));
+		if (out == NULL) {
+			delete half;
+			return (NULL);
+		}
 	}
-	for (y = 0; y < nh; y++) {
-		for (x = 0; x < nw; x++) {
-			for (c = 0; c < 4; c++)
-				out[((size_t)y * nw + x) * 4 + c] =
-				    half->pixel((unsigned)c, (unsigned)x,
-				    (unsigned)y, 0);
+	{
+		float *dst = out + (size_t)(z / 2) * nw * nh * 4;
+
+		for (y = 0; y < nh; y++) {
+			for (x = 0; x < nw; x++) {
+				for (c = 0; c < 4; c++) {
+					float v = half->pixel((unsigned)c,
+					    (unsigned)x, (unsigned)y, 0);
+					float *o = &dst[((size_t)y * nw + x) *
+					    4 + c];
+
+					*o = (z & 1) ? (*o + v) * 0.5f : v;
+				}
+			}
 		}
 	}
 	delete half;
+	}
 	*out_w = nw;
 	*out_h = nh;
+	if (out_d != NULL)
+		*out_d = nd;
 	return (out);
 }

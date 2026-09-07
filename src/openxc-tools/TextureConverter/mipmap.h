@@ -33,11 +33,14 @@ enum mip_wrap {
 };
 
 /*
- * Halve a tightly packed RGBA float image.  The caller owns the result and
- * frees it with free().  Returns NULL when the image is already 1x1.
+ * Halve a tightly packed RGBA float image, slice by slice in z as well:
+ * --build_volume hands this a depth and the chain halves that too, so a
+ * 8x8x4 volume gives 4x4x2 and then 2x2x1.  The caller owns the result and
+ * frees it with free().  Returns NULL when there is nothing left to halve.
  */
-float	*mip_downsample(const float *rgba, int w, int h, enum mip_filter,
-	    enum mip_wrap, int *out_w, int *out_h);
+float	*mip_downsample(const float *rgba, int w, int h, int d,
+	    enum mip_filter, enum mip_wrap, int *out_w, int *out_h,
+	    int *out_d);
 
 #ifdef __cplusplus
 }
