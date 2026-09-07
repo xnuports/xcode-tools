@@ -345,3 +345,7 @@
 	path = src/extras/capstone
 	url = https://github.com/capstone-engine/capstone.git
 	branch = v5
+[submodule "extras-pygments"]
+	path = src/extras/pygments
+	url = https://github.com/pygments/pygments.git
+	branch = master
