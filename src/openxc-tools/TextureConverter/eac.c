@@ -47,15 +47,21 @@ static const int modifiers[16][8] = {
  * Eleven bits down to eight, and back out as the float that names that byte
  * exactly.
  *
- * The narrowing truncates.  It has to happen here rather than in the caller
- * because the caller rounds -- which is right for ASTC, whose decoder does
- * not land on multiples of 1/255 -- and rounding an EAC sample is one too
- * high wherever the fraction reaches a half, which is a third of them.
+ * It goes through sixteen: the eleven bits are replicated up to a sixteen
+ * bit channel, which is what maps 2047 onto 65535 rather than onto 65504,
+ * and only then narrowed to eight -- truncating, since sixteen bit unorm
+ * divided by 257 is the byte.  Going straight from eleven to eight is one
+ * too low for a sample here and there, 1172 being the first.
+ *
+ * The narrowing belongs here rather than in the caller, which rounds: a
+ * sample is already a multiple of 1/255 by the time it leaves.
  */
 static float
 to_unorm8(int v)
 {
-	return ((float)(v * 255 / 2047) * (1.0f / 255.0f));
+	int v16 = (v << 5) | (v >> 6);
+
+	return ((float)(v16 / 257) * (1.0f / 255.0f));
 }
 
 /*
