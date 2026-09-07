@@ -24,6 +24,18 @@ struct ktx_kv {
 	size_t	 value_len;
 };
 
+/*
+ * One mip level's payload, borrowed from the bytes handed to ktx_parse.
+ * Version 1 stores the levels largest first, each behind its own length;
+ * version 2 stores them smallest first behind an index, and they are
+ * reordered here so that level 0 is the largest either way.
+ */
+struct ktx_level {
+	const uint8_t	*data;
+	size_t		 len;
+	uint32_t	 width, height;
+};
+
 struct ktx {
 	int		 version;	/* 1 or 2 */
 	uint32_t	 width, height, depth;
@@ -32,6 +44,8 @@ struct ktx {
 	uint32_t	 vk_format;		/* version 2 */
 	struct ktx_kv	*kv;
 	size_t		 nkv;
+	struct ktx_level *level;
+	size_t		 nlevel;
 };
 
 /* Returns false when the bytes are not a Khronos container at all. */

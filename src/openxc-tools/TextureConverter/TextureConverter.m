@@ -36,6 +36,7 @@
 
 #include "formats.h"
 #include "compress.h"
+#include "decode.h"
 #include "ktx.h"
 #include "mipmap.h"
 #include "usage.h"
@@ -571,6 +572,10 @@ put_kv(NSMutableData *d, const char *key, const char *value)
 	put_kv_bytes(d, key, value, strlen(value) + 1);
 }
 
+/* The two OpenGL types this tool ever writes. */
+#define	GL_UNSIGNED_BYTE	0x1401
+#define	GL_FLOAT		0x1406
+
 static const uint8_t ktx1_id[12] = {
 	0xAB, 0x4B, 0x54, 0x58, 0x20, 0x31, 0x31, 0xBB, 0x0D, 0x0A, 0x1A, 0x0A
 };
@@ -583,8 +588,8 @@ static const uint8_t ktx1_id[12] = {
 static NSData *
 write_ktx_generic(void **levels, const size_t *sizes, const int *widths,
     const int *heights, int nlevels, uint32_t gl_internal, uint32_t gl_base,
-    bool compressed, uint32_t metal, bool premultiplied, NSString *options,
-    bool annotate)
+    uint32_t gl_type, uint32_t gl_type_size, uint32_t gl_format,
+    uint32_t metal, bool premultiplied, NSString *options, bool annotate)
 {
 	NSMutableData *out = [NSMutableData data];
 	NSMutableData *kvd = [NSMutableData data];
@@ -629,12 +634,13 @@ write_ktx_generic(void **levels, const size_t *sizes, const int *widths,
 	[out appendBytes:ktx1_id length:sizeof(ktx1_id)];
 	put32(out, 0x04030201);		/* endianness */
 	/*
-	 * A compressed format names no type and no size: the block layout is
-	 * the internal format's business.
+	 * A compressed format names no type and no size -- the block layout
+	 * is the internal format's business -- so those three come in as
+	 * zero, one and zero for it.  An uncompressed one names all three.
 	 */
-	put32(out, compressed ? 0 : 0x1406);		/* glType: GL_FLOAT */
-	put32(out, compressed ? 1 : 4);			/* glTypeSize */
-	put32(out, compressed ? 0 : 0x1908);		/* glFormat: GL_RGBA */
+	put32(out, gl_type);
+	put32(out, gl_type_size);
+	put32(out, gl_format);
 	put32(out, gl_internal);
 	/*
 	 * The base format says how many channels the internal one carries,
@@ -726,7 +732,7 @@ do_convert(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 			    sizeof(float);
 		}
 		data = write_ktx_generic(ptrs, sizes, widths, heights, n,
-		    0x8814, 0x1908, false, 0,
+		    0x8814, 0x1908, GL_FLOAT, 4, 0x1908, 0,
 		    alpha_mode_of(opts) == ALPHA_PREMULTIPLY,
 		    tc_options_string(opts, nil, nil),
 		    opts[@"disable_annotation"] == nil);
@@ -1047,7 +1053,7 @@ do_compress(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 		NSString *options = tc_options_string(opts, compressor, fmt);
 
 		data = write_ktx_generic(blocks, sizes, widths, heights, n,
-		    gl, base, true, metal,
+		    gl, base, 0, 1, 0, metal,
 		    alpha_mode_of(opts) == ALPHA_PREMULTIPLY, options,
 		    opts[@"disable_annotation"] == nil);
 	}
@@ -1061,6 +1067,253 @@ do_compress(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 	if (![data writeToFile:output atomically:NO]) {
 		printf("Error: Could not write output file!\n");
 		return (255);
+	}
+	return (0);
+}
+
+/* ------------------------------------------------------------------ */
+/* Decompress.                                                         */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Which decoder reads a format, by the name this tool prints for it.  ASTC
+ * goes to astcenc and everything else to NVTT.  etc2comp has no decoder at
+ * all, which is why Apple's --decompressor list names it nowhere.
+ *
+ * Four formats are missing from this table on purpose, because NVTT cannot
+ * read them:
+ *
+ *	BC7		its decoder is the old avpcl prototype, whose
+ *			mode 0 header layout is not the one the format
+ *			was standardised with.  Handed a conforming
+ *			block -- including one its own encoder just
+ *			wrote -- it fails an assertion and calls exit.
+ *	EAC_R11		nvtt/Surface.cpp has the call sites for these
+ *	EAC_RG11	three commented out and marked "@@ Not
+ *	ETC2_RGB8A1	implemented".
+ *
+ * Leaving them out is what stops the assertion from taking the process
+ * down with no message at all.
+ */
+static bool
+decode_format_of(const char *name, enum tc_decode *out)
+{
+	static const struct { const char *name; enum tc_decode dec; } decs[] = {
+		{ "BC1", TC_DEC_BC1 }, { "BC2", TC_DEC_BC2 },
+		{ "BC3", TC_DEC_BC3 }, { "BC4", TC_DEC_BC4 },
+		{ "BC5", TC_DEC_BC5 }, { "BC6U", TC_DEC_BC6 },
+		{ "BC6S", TC_DEC_BC6S },
+		{ "ETC2_RGB8", TC_DEC_ETC2_RGB },
+		{ "EAC_RGBA8", TC_DEC_ETC2_RGBA }
+	};
+	size_t i;
+
+	for (i = 0; i < sizeof(decs) / sizeof(decs[0]); i++) {
+		if (strcmp(decs[i].name, name) == 0) {
+			*out = decs[i].dec;
+			return (true);
+		}
+	}
+	return (false);
+}
+
+/*
+ * Pack a decoded RGBA float image down to the channels the output format
+ * carries.
+ *
+ * Rounding, not the truncation the compression path uses.  It only shows on
+ * ASTC, whose decoder does not land on exact multiples of 1/255: every one
+ * of five hundred differing bytes was low by one until this rounded.
+ *
+ * Rows are padded to a multiple of four bytes.  That is KTX's rule, not a
+ * choice -- a level is stored as if read with an UNPACK_ALIGNMENT of 4 --
+ * and it only shows up on the narrow formats: a 2x2 level of R8 is eight
+ * bytes, not four, and a 1x1 level is four, not one.
+ */
+static uint8_t *
+pack_bytes_u8(const uint8_t *rgba, int w, int h, int channels,
+    size_t *out_len)
+{
+	size_t stride = ((size_t)w * (size_t)channels + 3) & ~(size_t)3;
+	uint8_t *out = calloc((size_t)h, stride);
+	int x, y, c;
+
+	if (out == NULL)
+		return (NULL);
+	for (y = 0; y < h; y++) {
+		for (x = 0; x < w; x++) {
+			for (c = 0; c < channels; c++)
+				out[(size_t)y * stride +
+				    (size_t)x * (size_t)channels + (size_t)c] =
+				    rgba[((size_t)y * w + x) * 4 + (size_t)c];
+		}
+	}
+	*out_len = (size_t)h * stride;
+	return (out);
+}
+
+static uint8_t *
+pack_bytes(const float *rgba, int w, int h, int channels, size_t *out_len)
+{
+	size_t stride = ((size_t)w * (size_t)channels + 3) & ~(size_t)3;
+	uint8_t *out = calloc((size_t)h, stride);
+	int x, y, c;
+
+	if (out == NULL)
+		return (NULL);
+	for (y = 0; y < h; y++) {
+		for (x = 0; x < w; x++) {
+			for (c = 0; c < channels; c++) {
+				float v = rgba[((size_t)y * w + x) * 4 +
+				    (size_t)c];
+
+				if (v < 0.0f)
+					v = 0.0f;
+				if (v > 1.0f)
+					v = 1.0f;
+				out[(size_t)y * stride +
+				    (size_t)x * (size_t)channels + (size_t)c] =
+				    (uint8_t)lrintf(255.0f * v);
+			}
+		}
+	}
+	*out_len = (size_t)h * stride;
+	return (out);
+}
+
+/*
+ * Read a compressed container and write an uncompressed one beside it.  The
+ * output format is not a choice: it follows the channels the source format
+ * carries, which is what its base internal format records -- one channel
+ * becomes R8, two RG8, three RGB8 and four RGBA8.  BC6 is the exception, an
+ * HDR format whose samples do not fit in a byte, and Apple write RGBA32 for
+ * it.
+ */
+static int
+do_decompress(NSString *path, NSDictionary<NSString *, NSString *> *opts)
+{
+	enum { MAX_LEVELS = 32 };
+	void *outs[MAX_LEVELS];
+	size_t sizes[MAX_LEVELS];
+	int widths[MAX_LEVELS], heights[MAX_LEVELS];
+	NSString *out = opts[@"decompressed"];
+	NSData *data = [NSData dataWithContentsOfFile:path];
+	struct ktx k;
+	const char *name;
+	enum tc_decode dec = TC_DEC_BC1;
+	uint32_t gl, base, metal, ogl, obase, ometal;
+	int bx, by, obx, oby, i, n;
+	bool astc, hdr;
+	const char *oname;
+
+	if (out.length == 0) {
+		printf("Error: No decompressed output path specified!\n");
+		short_usage();
+		return (255);
+	}
+	if (data == nil || !ktx_parse([data bytes], [data length], &k)) {
+		printf("Error: Could not read input file!\n");
+		return (255);
+	}
+	name = k.version == 1 ? format_name_for_gl(k.gl_internal_format) :
+	    format_name_for_vk(k.vk_format);
+	if (name == NULL || !format_lookup(name, &gl, &base, &bx, &by,
+	    &metal) || bx == 1) {
+		printf("Error: Unsupported compression format!\n");
+		ktx_free(&k);
+		return (255);
+	}
+	astc = strncmp(name, "ASTC", 4) == 0;
+	hdr = strcmp(name, "BC6U") == 0 || strcmp(name, "BC6S") == 0;
+	if (!astc && !decode_format_of(name, &dec)) {
+		printf("Error: Decompressing \"%s\" is not implemented in "
+		    "this build!\n", name);
+		ktx_free(&k);
+		return (255);
+	}
+
+	if (hdr)
+		oname = "RGBA32";
+	else if (base == 0x1903)
+		oname = "R8";
+	else if (base == 0x8227)
+		oname = "RG8";
+	else if (base == 0x1907)
+		oname = "RGB8";
+	else
+		oname = "RGBA8";
+	if (!format_lookup(oname, &ogl, &obase, &obx, &oby, &ometal)) {
+		ktx_free(&k);
+		return (255);
+	}
+
+	n = (int)k.nlevel;
+	if (n > MAX_LEVELS)
+		n = MAX_LEVELS;
+	for (i = 0; i < n; i++) {
+		int channels = strcmp(oname, "R8") == 0 ? 1 :
+		    strcmp(oname, "RG8") == 0 ? 2 :
+		    strcmp(oname, "RGB8") == 0 ? 3 : 4;
+
+		widths[i] = (int)k.level[i].width;
+		heights[i] = (int)k.level[i].height;
+		/*
+		 * ASTC goes straight to eight bits.  Decoding to float and
+		 * rounding after is not the same answer -- it is off by one
+		 * either way in a few dozen samples per level -- and Apple's
+		 * is astcenc's own quantisation.
+		 */
+		if (astc) {
+			uint8_t *px = decode_astc_u8(k.level[i].data,
+			    k.level[i].len, widths[i], heights[i], bx, by);
+
+			if (px == NULL) {
+				printf("Error: Decompression failed!\n");
+				ktx_free(&k);
+				return (255);
+			}
+			outs[i] = pack_bytes_u8(px, widths[i], heights[i],
+			    channels, &sizes[i]);
+			free(px);
+		} else {
+			float *pixels = decode_blocks(k.level[i].data,
+			    k.level[i].len, widths[i], heights[i], dec);
+
+			if (pixels == NULL) {
+				printf("Error: Decompression failed!\n");
+				ktx_free(&k);
+				return (255);
+			}
+			if (hdr) {
+				outs[i] = pixels;
+				sizes[i] = (size_t)widths[i] * heights[i] *
+				    4 * sizeof(float);
+				continue;
+			}
+			outs[i] = pack_bytes(pixels, widths[i], heights[i],
+			    channels, &sizes[i]);
+			free(pixels);
+		}
+		if (outs[i] == NULL) {
+			ktx_free(&k);
+			return (255);
+		}
+	}
+	ktx_free(&k);
+
+	{
+		NSData *file = write_ktx_generic(outs, sizes, widths, heights,
+		    n, ogl, obase, hdr ? GL_FLOAT : GL_UNSIGNED_BYTE,
+		    hdr ? 4 : 1, obase, 0, false,
+		    tc_options_string(opts, nil, nil),
+		    opts[@"disable_annotation"] == nil);
+
+		for (i = 0; i < n; i++)
+			free(outs[i]);
+		if (![file writeToFile:out atomically:NO]) {
+			printf("Error: Could not write output file!\n");
+			return (255);
+		}
 	}
 	return (0);
 }
@@ -1125,12 +1378,12 @@ main(int argc, char *argv[])
 	if ([mode caseInsensitiveCompare:@"compress"] == NSOrderedSame)
 		return (do_compress(inputs[0], opts));
 
+	if ([mode caseInsensitiveCompare:@"decompress"] == NSOrderedSame)
+		return (do_decompress(inputs[0], opts));
+
 	/*
-	 * The remaining modes -- Decompress and Compare -- are not written
-	 * yet.  Saying so beats pretending: the compressors
-	 * they would drive are ports in this tree already (ASTC, BC, ETC2,
-	 * BC6H/BC7), but the containers and the pixel pipeline around them
-	 * are still to come.
+	 * Compare is the one mode still to write.  Saying so beats
+	 * pretending.
 	 */
 	printf("Error: Mode \"%s\" is not implemented in this build!\n",
 	    [mode UTF8String]);

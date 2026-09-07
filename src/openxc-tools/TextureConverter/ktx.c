@@ -69,6 +69,42 @@ read_kv(struct ktx *k, const uint8_t *p, size_t len)
 	}
 }
 
+/*
+ * The mip levels.  Version 1 writes them in order, each behind a 32-bit
+ * length and padded to four bytes; nothing outside the header says where
+ * they start, so they are walked rather than indexed.
+ */
+static void
+read_levels_v1(struct ktx *k, const uint8_t *p, size_t len, size_t off)
+{
+	uint32_t w = k->width, h = k->height;
+	uint32_t i;
+
+	if (k->levels == 0 || k->levels > 32)
+		return;
+	if ((k->level = calloc(k->levels, sizeof(*k->level))) == NULL)
+		return;
+	for (i = 0; i < k->levels; i++) {
+		uint32_t n;
+
+		if (off + 4 > len)
+			break;
+		n = le32(p + off);
+		off += 4;
+		if (n > len - off)
+			break;
+		k->level[i].data = p + off;
+		k->level[i].len = n;
+		k->level[i].width = w;
+		k->level[i].height = h;
+		k->nlevel++;
+		off += n;
+		off = (off + 3) & ~(size_t)3;
+		w = w > 1 ? w / 2 : 1;
+		h = h > 1 ? h / 2 : 1;
+	}
+}
+
 bool
 ktx_parse(const void *bytes, size_t len, struct ktx *out)
 {
@@ -88,8 +124,10 @@ ktx_parse(const void *bytes, size_t len, struct ktx *out)
 		out->faces = le32(p + 52);
 		out->levels = le32(p + 56);
 		kvlen = le32(p + 60);
-		if (kvlen <= len - 64)
+		if (kvlen <= len - 64) {
 			read_kv(out, p + 64, kvlen);
+			read_levels_v1(out, p, len, 64 + (size_t)kvlen);
+		}
 		return (true);
 	}
 	if (len >= 80 && memcmp(p, ktx2_id, sizeof(ktx2_id)) == 0) {
@@ -127,6 +165,7 @@ ktx_free(struct ktx *k)
 		free(k->kv[i].value);
 	}
 	free(k->kv);
+	free(k->level);
 	memset(k, 0, sizeof(*k));
 }
 

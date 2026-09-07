@@ -5,7 +5,7 @@
 # usr/local come from src/extras (see mk/port.d/{astcenc,stb,etc2comp,nvtt});
 # nothing links them yet, because the modes that would are still to write.
 T_SRCS=		TextureConverter.m ktx.c formats.c compress.c mipmap.cpp \
-		nvtt.cpp stb.c etc2.cpp
+		nvtt.cpp stb.c etc2.cpp decode.cpp
 T_CFLAGS+=	-fobjc-arc
 T_LDADD+=	-framework Foundation
 T_LDADD+=	-framework CoreGraphics
