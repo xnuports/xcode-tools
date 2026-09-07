@@ -107,7 +107,7 @@ xcode-tools/
 │   │   ├── genstrings/             # OURS: .strings extraction (1 file)
 │   │   ├── TextureAtlas/           # OURS: SpriteKit atlas compiler (4 files)
 │   │   ├── xarsigner/              # OURS: detached xar signing (1 file)
-│   │   ├── TextureConverter/       # OURS: examine, convert, ASTC compress
+│   │   ├── TextureConverter/       # OURS: all five modes, 27 formats
 │   │   └── vmmap/                  # Submodule: third-party vmmap implementation
 │   ├── python/                     # Python runtime sources
 │   │   ├── cpython/                # Submodule: CPython v3.14.6 (upstream)
@@ -841,10 +841,40 @@ Two back ends are not ported:
     licence this tree can carry.  Apple's own help says PVRTC in Metal is
     deprecated and recommends ASTC, ETC2 or BC instead.
 
-The tool itself is under way in `src/openxc-tools/TextureConverter`.  In:
-the option table, both usage banners, the Khronos container reader,
-`--mode=examine`, `--mode=convert` and `--mode=compress` for ASTC.  It is
-gated on `MK_PORTS`, since it links the encoders it drives.
+The tool itself is in `src/openxc-tools/TextureConverter`, and all five
+modes are written: `examine`, `convert`, `compress`, `decompress` and
+`compare`.  It is gated on `MK_PORTS`, since it links the encoders it
+drives.
+
+Compression is byte-identical to Apple's across all twenty-seven formats --
+853 of 855 combinations of two images and sixteen option sets.  The two are
+BC7 at Fastest, which Apple send to ISPC; there is no ISPC port here and the
+tool says so rather than encoding with something else.  Which encoder each
+format goes to is a table rather than a search: ASTC to ARM's, every BC
+format to NVTT except BC1 at Highest which goes to STB, and every ETC2 and
+EAC format to ETC2COMP.
+
+`decompress` is byte-identical for 46 of 53 cases.  Four formats are refused
+because NVTT cannot read them -- BC7, whose decoder is the old avpcl
+prototype and fails an assertion on a conforming block, and ETC2_RGB8A1,
+EAC_R11 and EAC_RG11, whose call sites in `nvtt/Surface.cpp` are commented
+out and marked "@@ Not implemented".  The two EAC formats are decoded in
+`eac.c` instead, to within one decoded level in 2048: Apple narrow the
+eleven bit value 1172 to 146 where truncation gives 145, but narrow 1180 to
+146 as well, so their function is neither truncation nor rounding nor a
+shift, and the specification's arithmetic stays.
+
+`compare` matches wherever Apple's own compare is self-consistent, which is
+not everywhere.  Their compare does not read a compressed container through
+their own decompressor: a 64x64 BC1 file measured against an ASTC file
+answers 603.47 when the BC1 is decompressed first and 639.19 when it is not.
+The same split shows on BC4, ETC2_RGB8 and the EAC formats, and on BC5 it
+surfaces as `PSNR:1.79...e308` from an unguarded divide by zero.  Ours reads
+every container through the decoders the rest of the tool uses, so its
+compare and its decompress agree with each other.
+
+Still to write: KTX2 and DDS output, resizing (`--max_extent`,
+`--resize_filter`, `--resize_round_mode`), and the gamma and gamut options.
 
 Four measurements settled the pixel path, and none was guessable:
 
@@ -867,7 +897,11 @@ Four measurements settled the pixel path, and none was guessable:
 The four compression qualities are astcenc's own presets, measured by
 compressing the same image both ways: Fastest is FASTEST, Normal FAST,
 Production MEDIUM, and Highest the EXHAUSTIVE search rather than the
-very-thorough one below it.  `--channel_weighting` decides
+very-thorough one below it.  NVTT's quality enum is Apple's four names in
+Apple's order, so BC passes straight through; etc2comp takes a number from
+0 to 100 instead and the four land on 0, 40, 80 and 100, with REC709 as the
+error metric for all five of its formats.  stb spends its extra refinement
+pass only at Highest.  `--channel_weighting` decides
 `ASTCENC_FLG_USE_PERCEPTUAL` and is Perceptual by default; `--alpha_weight`
 adds `ASTCENC_FLG_USE_ALPHA_WEIGHT`.
 
