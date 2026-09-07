@@ -44,6 +44,11 @@ PORTS+=	python/cpython python3 usr/bin
 # that port just put in place.
 PORTS+=	python/pip pip usr/bin
 
+# 2to3, which Xcode ships as 2to3 and 2to3-3.9.  Built from fissix, the
+# maintained lib2to3 fork, since CPython removed lib2to3 in 3.13.  After
+# cpython for the same reason pip is.
+PORTS+=	python/fissix 2to3 usr/bin
+
 # perl, also Apple's: perl-175 carries the 5.34.1 /usr/bin/perl reports.
 # See mk/port.d/perl.mk for the two things their build assumes and this
 # one cannot -- running as root, and an x86_64 host.
