@@ -1419,6 +1419,7 @@ cmp_load(NSString *path, struct cmp_image *im)
 	const char *name;
 	uint32_t gl, base, metal;
 	int bx, by, i;
+	bool hdr;
 
 	memset(im, 0, sizeof(*im));
 	if (data == nil)
@@ -1445,6 +1446,7 @@ cmp_load(NSString *path, struct cmp_image *im)
 		ktx_free(&k);
 		return (false);
 	}
+	hdr = strcmp(name, "BC6U") == 0 || strcmp(name, "BC6S") == 0;
 	im->n = (int)k.nlevel;
 	if (im->n > CMP_MAX_LEVELS)
 		im->n = CMP_MAX_LEVELS;
@@ -1479,10 +1481,34 @@ cmp_load(NSString *path, struct cmp_image *im)
 			    strcmp(name, "EAC_RG11") == 0);
 		} else {
 			enum tc_decode dec;
-
-			im->level[i] = decode_format_of(name, &dec) ?
+			float *px = decode_format_of(name, &dec) ?
 			    decode_blocks(lv->data, lv->len, im->w[i],
 			        im->h[i], dec) : NULL;
+
+			/*
+			 * Everything but BC6 is an eight bit image, and is
+			 * quantised to eight bits here for the same reason
+			 * --mode=decompress writes bytes for it: comparing
+			 * NVTT's float against the same value that has been
+			 * through a byte is otherwise off by a fraction of a
+			 * unit in the last place, which is enough to report
+			 * a difference where Apple report none.
+			 */
+			if (px != NULL && !hdr) {
+				size_t j, n = (size_t)im->w[i] * im->h[i] * 4;
+
+				for (j = 0; j < n; j++) {
+					float v = px[j];
+
+					if (v < 0.0f)
+						v = 0.0f;
+					if (v > 1.0f)
+						v = 1.0f;
+					px[j] = (float)lrintf(255.0f * v) *
+					    (1.0f / 255.0f);
+				}
+			}
+			im->level[i] = px;
 		}
 		if (im->level[i] == NULL) {
 			im->n = i;
@@ -1508,14 +1534,23 @@ cmp_load(NSString *path, struct cmp_image *im)
  * tool still prints the zeroed line after it, so this does too.
  *
  * Where their own compare is self-consistent this agrees with it exactly.
- * It is not always self-consistent: asked to compare a compressed file with
- * the very file its own --mode=decompress produced from it, their tool
- * answers "identical" for ASTC, BC1 and BC3 but reports an error for BC4,
- * ETC2_RGB8, EAC_R11 and EAC_RG11, so its compare reads those through
- * something other than its own decompressor.  For BC5 it reports a
- * difference of exactly zero and then prints PSNR:1.79...e308, which is
- * 10*log10(255^2/0) -- its identity test and its measure disagree and the
- * divide by zero is not guarded.  None of that is reproduced here.
+ * It often is not, and the shape of that is worth writing down, because it
+ * is the whole of the remaining difference:
+ *
+ * Their compare does not read a compressed container through their own
+ * decompressor.  Decompress a 64x64 BC1 file with their tool, compare the
+ * result against an ASTC file, and they answer 603.47; compare the BC1 file
+ * itself against the same ASTC decompressed the same way and they answer
+ * 639.19.  One of those two numbers is measured against a decode they
+ * published and the other is not.  Asked to compare a compressed file with
+ * the very file its own decompress produced from it, they report a
+ * difference for BC4, ETC2_RGB8, EAC_R11 and EAC_RG11 -- and for BC5 a
+ * difference of exactly zero followed by PSNR:1.79...e308, which is
+ * 10*log10(255^2/0), so their identity test and their measure disagree and
+ * the divide by zero is unguarded.
+ *
+ * This reads every container through the decoders the rest of the tool
+ * uses, so its answers agree with its own --mode=decompress throughout.
  */
 static int
 do_compare(NSString *path, NSDictionary<NSString *, NSString *> *opts)
