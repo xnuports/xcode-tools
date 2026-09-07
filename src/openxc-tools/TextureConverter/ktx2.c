@@ -98,7 +98,7 @@ uint8_t *
 ktx2_write(void **levels, const size_t *sizes, const int *widths,
     const int *heights, int nlevels, uint32_t vk_format, int block_bytes,
     int block_x, int block_y, int type_size, const struct format_dfd *dfd,
-    bool premultiplied, const char *writer, const char *options,
+    bool premultiplied, bool srgb, const char *writer, const char *options,
     const char *version, size_t *out_len)
 {
 	struct buf b = { NULL, 0, 0, 0 };
@@ -196,7 +196,7 @@ ktx2_write(void **levels, const size_t *sizes, const int *widths,
 		uint8_t hdr[8] = {
 			dfd->color_model,
 			1,			/* colorPrimaries: BT709 */
-			1,			/* transferFunction: linear */
+			srgb ? 2 : 1,		/* transferFunction */
 			premultiplied ? 1 : 0,	/* flags */
 			(uint8_t)(block_x - 1), (uint8_t)(block_y - 1), 0, 0
 		};

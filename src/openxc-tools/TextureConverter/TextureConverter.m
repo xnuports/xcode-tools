@@ -53,7 +53,7 @@ static NSString *tc_options_string(NSDictionary<NSString *, NSString *> *,
 static bool wants_ktx2(NSString *output);
 static NSData *write_ktx2_generic(void **levels, const size_t *sizes,
     const int *widths, const int *heights, int nlevels, const char *name,
-    bool premultiplied, NSString *options, bool annotate);
+    bool premultiplied, bool srgb, NSString *options, bool annotate);
 
 /*
  * Every option the tool takes, with the default the usage text advertises.
@@ -742,7 +742,7 @@ do_convert(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 
 		data = wants_ktx2(output) ?
 		    write_ktx2_generic(ptrs, sizes, widths, heights, n,
-		        "RGBA32", prem, options, annotate) :
+		        "RGBA32", prem, false, options, annotate) :
 		    write_ktx_generic(ptrs, sizes, widths, heights, n,
 		        0x8814, 0x1908, GL_FLOAT, 4, 0x1908, 0, prem,
 		        options, annotate);
@@ -781,16 +781,16 @@ wants_ktx2(NSString *output)
 static NSData *
 write_ktx2_generic(void **levels, const size_t *sizes, const int *widths,
     const int *heights, int nlevels, const char *name, bool premultiplied,
-    NSString *options, bool annotate)
+    bool srgb, NSString *options, bool annotate)
 {
 	struct format_dfd dfd;
-	uint32_t gl, base, metal;
+	uint32_t gl, base, metal, vk = 0, srgb_gl;
 	int bx, by, block_bytes, type_size;
 	uint8_t *bytes;
 	size_t len;
 	NSData *out;
 
-	if (!format_dfd_for(name, &dfd) ||
+	if (!format_dfd_for(name, srgb, &dfd) ||
 	    !format_lookup(name, &gl, &base, &bx, &by, &metal))
 		return (nil);
 	/*
@@ -803,9 +803,11 @@ write_ktx2_generic(void **levels, const size_t *sizes, const int *widths,
 	    ((size_t)((widths[0] + bx - 1) / bx) *
 	     (size_t)((heights[0] + by - 1) / by)));
 	type_size = format_is_float(name) ? 4 : 1;
+	if (!srgb || !format_srgb_for(name, &srgb_gl, &vk))
+		vk = format_vk_for(name);
 	bytes = ktx2_write(levels, sizes, widths, heights, nlevels,
-	    format_vk_for(name), block_bytes, bx, by, type_size, &dfd,
-	    premultiplied,
+	    vk, block_bytes, bx, by, type_size, &dfd,
+	    premultiplied, srgb,
 	    annotate ? "Apple TextureConverter " TC_VERSION " / libktx v4.0" :
 	    "Unidentified app / libktx v4.0",
 	    /*
@@ -965,6 +967,7 @@ do_compress(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 	bool normal = opts[@"normal_map"] != nil;
 	enum tc_bc bc = TC_BC1;
 	enum tc_etc etc = TC_ETC2_RGB8;
+	bool srgb = opts[@"srgb_format"] != nil;
 	NSString *compressor;
 	uint32_t gl, base, metal;
 	NSData *data;
@@ -976,6 +979,24 @@ do_compress(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 		    [fmt UTF8String]);
 		short_usage();
 		return (255);
+	}
+	/*
+	 * --srgb_format asks for the sRGB spelling of the format, which is
+	 * a different enumerant in both containers and, for ASTC, a Metal
+	 * one eighteen below the linear one.  The formats that carry no
+	 * colour have no such spelling; Apple's tool crashes on those, and
+	 * this says so.
+	 */
+	if (srgb) {
+		uint32_t vk;
+
+		if (!format_srgb_for([fmt UTF8String], &gl, &vk)) {
+			printf("Error: Compression format \"%s\" has no "
+			    "sRGB pixel format!\n", [fmt UTF8String]);
+			return (255);
+		}
+		if (metal != 0)
+			metal -= 18;
 	}
 	/*
 	 * Which back end.  Apple's --compressor defaults to Auto, and Auto
@@ -1128,8 +1149,8 @@ do_compress(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 		data = wants_ktx2(output) ?
 		    write_ktx2_generic(blocks, sizes, widths, heights, n,
 		        [fmt UTF8String],
-		        alpha_mode_of(opts) == ALPHA_PREMULTIPLY, options,
-		        annotate) :
+		        alpha_mode_of(opts) == ALPHA_PREMULTIPLY, srgb,
+		        options, annotate) :
 		    write_ktx_generic(blocks, sizes, widths, heights, n,
 		        gl, base, 0, 1, 0, metal,
 		        alpha_mode_of(opts) == ALPHA_PREMULTIPLY, options,
@@ -1420,7 +1441,8 @@ do_decompress(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 				}
 			}
 			file = write_ktx2_generic(outs, sizes, widths,
-			    heights, n, oname, false, options, annotate);
+			    heights, n, oname, false, false, options,
+			    annotate);
 		} else {
 			file = write_ktx_generic(outs, sizes, widths, heights,
 			    n, ogl, obase, hdr ? GL_FLOAT : GL_UNSIGNED_BYTE,

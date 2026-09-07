@@ -26,61 +26,62 @@ struct entry {
 	uint32_t	 base;			/* glBaseInternalFormat */
 	int		 block_x, block_y;	/* 1x1 when uncompressed */
 	uint32_t	 metal;			/* MTLPixelFormat, 0 if none */
+	uint32_t	 srgb_gl, srgb_vk;	/* --srgb_format, 0 if none */
 };
 
 static const struct entry table[] = {
 	/* Uncompressed.  Only the float formats are ever written by the
 	 * conversion path, but a container from elsewhere may name others. */
-	{ "RGBA32",	0x8814, 109, GL_RGBA, 1, 1, 0 },	/* GL_RGBA32F, VK_..R32G32B32A32_SFLOAT */
-	{ "RGB32",	0x8815, 106, GL_RGB,  1, 1, 0 },
-	{ "RG32",	0x8230, 103, GL_RG,   1, 1, 0 },
-	{ "R32",	0x822E, 100, GL_RED,  1, 1, 0 },
-	{ "RGBA16",	0x881A, 97,  GL_RGBA, 1, 1, 0 },
-	{ "RGB16",	0x881B, 90,  GL_RGB,  1, 1, 0 },
-	{ "RG16",	0x822F, 83,  GL_RG,   1, 1, 0 },
-	{ "R16",	0x822D, 76,  GL_RED,  1, 1, 0 },
-	{ "RGBA8",	0x8058, 37,  GL_RGBA, 1, 1, 0 },
-	{ "RGB8",	0x8051, 23,  GL_RGB,  1, 1, 0 },
-	{ "RG8",	0x822B, 16,  GL_RG,   1, 1, 0 },
-	{ "R8",		0x8229, 9,   GL_RED,  1, 1, 0 },
-	{ "BGRA8",	0x93A1, 44,  GL_RGBA, 1, 1, 0 },
+	{ "RGBA32",	0x8814, 109, GL_RGBA, 1, 1, 0, 0, 0 },	/* GL_RGBA32F, VK_..R32G32B32A32_SFLOAT */
+	{ "RGB32",	0x8815, 106, GL_RGB,  1, 1, 0, 0, 0 },
+	{ "RG32",	0x8230, 103, GL_RG,   1, 1, 0, 0, 0 },
+	{ "R32",	0x822E, 100, GL_RED,  1, 1, 0, 0, 0 },
+	{ "RGBA16",	0x881A, 97,  GL_RGBA, 1, 1, 0, 0, 0 },
+	{ "RGB16",	0x881B, 90,  GL_RGB,  1, 1, 0, 0, 0 },
+	{ "RG16",	0x822F, 83,  GL_RG,   1, 1, 0, 0, 0 },
+	{ "R16",	0x822D, 76,  GL_RED,  1, 1, 0, 0, 0 },
+	{ "RGBA8",	0x8058, 37,  GL_RGBA, 1, 1, 0, 0x8C43, 43 },
+	{ "RGB8",	0x8051, 23,  GL_RGB,  1, 1, 0, 0x8C41, 29 },
+	{ "RG8",	0x822B, 16,  GL_RG,   1, 1, 0, 0x8FBE, 22 },
+	{ "R8",		0x8229, 9,   GL_RED,  1, 1, 0, 0x8FBD, 15 },
+	{ "BGRA8",	0x93A1, 44,  GL_RGBA, 1, 1, 0, 0, 0 },
 
 	/* ASTC, LDR. */
-	{ "ASTC4x4",	0x93B0, 157, GL_RGBA, 4, 4, 204 },
-	{ "ASTC5x4",	0x93B1, 159, GL_RGBA, 5, 4, 205 },
-	{ "ASTC5x5",	0x93B2, 161, GL_RGBA, 5, 5, 206 },
-	{ "ASTC6x5",	0x93B3, 163, GL_RGBA, 6, 5, 207 },
-	{ "ASTC6x6",	0x93B4, 165, GL_RGBA, 6, 6, 208 },
-	{ "ASTC8x5",	0x93B5, 167, GL_RGBA, 8, 5, 210 },
-	{ "ASTC8x6",	0x93B6, 169, GL_RGBA, 8, 6, 211 },
-	{ "ASTC8x8",	0x93B7, 171, GL_RGBA, 8, 8, 212 },
-	{ "ASTC10x5",	0x93B8, 173, GL_RGBA, 10, 5, 213 },
-	{ "ASTC10x6",	0x93B9, 175, GL_RGBA, 10, 6, 214 },
-	{ "ASTC10x8",	0x93BA, 177, GL_RGBA, 10, 8, 215 },
-	{ "ASTC10x10",	0x93BB, 179, GL_RGBA, 10, 10, 216 },
-	{ "ASTC12x10",	0x93BC, 181, GL_RGBA, 12, 10, 217 },
-	{ "ASTC12x12",	0x93BD, 183, GL_RGBA, 12, 12, 218 },
+	{ "ASTC4x4",	0x93B0, 157, GL_RGBA, 4, 4, 204, 0x93D0, 158 },
+	{ "ASTC5x4",	0x93B1, 159, GL_RGBA, 5, 4, 205, 0x93D1, 160 },
+	{ "ASTC5x5",	0x93B2, 161, GL_RGBA, 5, 5, 206, 0x93D2, 162 },
+	{ "ASTC6x5",	0x93B3, 163, GL_RGBA, 6, 5, 207, 0x93D3, 164 },
+	{ "ASTC6x6",	0x93B4, 165, GL_RGBA, 6, 6, 208, 0x93D4, 166 },
+	{ "ASTC8x5",	0x93B5, 167, GL_RGBA, 8, 5, 210, 0x93D5, 168 },
+	{ "ASTC8x6",	0x93B6, 169, GL_RGBA, 8, 6, 211, 0x93D6, 170 },
+	{ "ASTC8x8",	0x93B7, 171, GL_RGBA, 8, 8, 212, 0x93D7, 172 },
+	{ "ASTC10x5",	0x93B8, 173, GL_RGBA, 10, 5, 213, 0x93D8, 174 },
+	{ "ASTC10x6",	0x93B9, 175, GL_RGBA, 10, 6, 214, 0x93D9, 176 },
+	{ "ASTC10x8",	0x93BA, 177, GL_RGBA, 10, 8, 215, 0x93DA, 178 },
+	{ "ASTC10x10",	0x93BB, 179, GL_RGBA, 10, 10, 216, 0x93DB, 180 },
+	{ "ASTC12x10",	0x93BC, 181, GL_RGBA, 12, 10, 217, 0x93DC, 182 },
+	{ "ASTC12x12",	0x93BD, 183, GL_RGBA, 12, 12, 218, 0x93DD, 184 },
 
 	/* BC.  BC4 carries one channel and BC5 two, and BC6 is colour with
 	 * no alpha, so these are the three that are not GL_RGBA. */
-	{ "BC1",	0x83F1, 133, GL_RGBA, 4, 4, 0 },
-	{ "BC2",	0x83F2, 135, GL_RGBA, 4, 4, 0 },
-	{ "BC3",	0x83F3, 137, GL_RGBA, 4, 4, 0 },
-	{ "BC4",	0x8DBB, 139, GL_RED,  4, 4, 0 },
-	{ "BC5",	0x8DBD, 141, GL_RG,   4, 4, 0 },
-	{ "BC6U",	0x8E8F, 143, GL_RGB,  4, 4, 0 },
-	{ "BC6S",	0x8E8E, 144, GL_RGB,  4, 4, 0 },
-	{ "BC7",	0x8E8C, 145, GL_RGBA, 4, 4, 0 },
+	{ "BC1",	0x83F1, 133, GL_RGBA, 4, 4, 0, 0x8C4D, 134 },
+	{ "BC2",	0x83F2, 135, GL_RGBA, 4, 4, 0, 0x8C4E, 136 },
+	{ "BC3",	0x83F3, 137, GL_RGBA, 4, 4, 0, 0x8C4F, 138 },
+	{ "BC4",	0x8DBB, 139, GL_RED,  4, 4, 0, 0, 0 },
+	{ "BC5",	0x8DBD, 141, GL_RG,   4, 4, 0, 0, 0 },
+	{ "BC6U",	0x8E8F, 143, GL_RGB,  4, 4, 0, 0, 0 },
+	{ "BC6S",	0x8E8E, 144, GL_RGB,  4, 4, 0, 0, 0 },
+	{ "BC7",	0x8E8C, 145, GL_RGBA, 4, 4, 0, 0x8E8D, 146 },
 
 	/* ETC2 and EAC, the same way: R11 is one channel, RG11 two, and
 	 * ETC2_RGB8 has no alpha. */
-	{ "ETC2_RGB8",	0x9274, 147, GL_RGB,  4, 4, 0 },
-	{ "ETC2_RGB8A1", 0x9276, 149, GL_RGBA, 4, 4, 0 },
-	{ "EAC_RGBA8",	0x9278, 151, GL_RGBA, 4, 4, 0 },
-	{ "EAC_R11",	0x9270, 153, GL_RED,  4, 4, 0 },
-	{ "EAC_RG11",	0x9272, 155, GL_RG,   4, 4, 0 },
+	{ "ETC2_RGB8",	0x9274, 147, GL_RGB,  4, 4, 0, 0x9275, 148 },
+	{ "ETC2_RGB8A1", 0x9276, 149, GL_RGBA, 4, 4, 0, 0x9277, 150 },
+	{ "EAC_RGBA8",	0x9278, 151, GL_RGBA, 4, 4, 0, 0x9279, 152 },
+	{ "EAC_R11",	0x9270, 153, GL_RED,  4, 4, 0, 0, 0 },
+	{ "EAC_RG11",	0x9272, 155, GL_RG,   4, 4, 0, 0, 0 },
 
-	{ NULL,		0, 0, 0, 0, 0, 0 }
+	{ NULL,		0, 0, 0, 0, 0, 0, 0, 0 }
 };
 
 const char *
@@ -121,6 +122,34 @@ format_lookup(const char *name, uint32_t *gl, uint32_t *base, int *block_x,
 		*block_x = e->block_x;
 		*block_y = e->block_y;
 		*metal = e->metal;
+		return (1);
+	}
+	return (0);
+}
+
+/*
+ * The sRGB spelling of a format, which --srgb_format asks for.  BC4, BC5,
+ * BC6, EAC_R11 and EAC_RG11 have none -- they carry no colour to encode --
+ * and neither do the float and sixteen bit formats.  Apple's tool does not
+ * check: given --srgb_format and one of those it dereferences a null and
+ * crashes, so this says so instead.
+ *
+ * The Metal enumerant is not tabulated because the sRGB block formats sit
+ * eighteen below the LDR ones with the same hole in the middle: 204 is
+ * ASTC4x4 and 186 its sRGB, 209 and 191 are both unused.
+ */
+_Bool
+format_srgb_for(const char *name, uint32_t *gl, uint32_t *vk)
+{
+	const struct entry *e;
+
+	for (e = table; e->name != NULL; e++) {
+		if (strcmp(e->name, name) != 0)
+			continue;
+		if (e->srgb_gl == 0)
+			return (0);
+		*gl = e->srgb_gl;
+		*vk = e->srgb_vk;
 		return (1);
 	}
 	return (0);
@@ -178,8 +207,25 @@ format_vk_for(const char *name)
 	return (0);
 }
 
+/*
+ * --srgb_format sets the transfer function, which names the colour channels
+ * only: alpha is never encoded, so its sample gains the linear bit, 0x10.
+ * It is the sample rather than the format that carries this, so it holds
+ * for a block format's alpha sample as much as for a plain channel.
+ */
+static void
+mark_alpha_linear(struct format_dfd *dfd)
+{
+	int i;
+
+	for (i = 0; i < dfd->nsamples; i++) {
+		if ((dfd->sample[i].channel_type & 0x0f) == 15)
+			dfd->sample[i].channel_type |= 0x10;
+	}
+}
+
 _Bool
-format_dfd_for(const char *name, struct format_dfd *out)
+format_dfd_for(const char *name, _Bool srgb, struct format_dfd *out)
 {
 	uint32_t gl, base, metal;
 	int bx, by, i;
@@ -194,6 +240,7 @@ format_dfd_for(const char *name, struct format_dfd *out)
 	 * rather than 3, and a float sample carries the signed and float
 	 * bits (0xc0) and is bounded by the patterns of -1.0f and 1.0f
 	 * rather than by its integer range.
+	 *
 	 */
 	if (format_lookup(name, &gl, &base, &bx, &by, &metal) && bx == 1) {
 		_Bool flt = format_is_float(name);
@@ -211,6 +258,8 @@ format_dfd_for(const char *name, struct format_dfd *out)
 			out->sample[i].lower = flt ? 0xbf800000 : 0x00000000;
 			out->sample[i].upper = flt ? 0x3f800000 : 0x000000ff;
 		}
+		if (srgb)
+			mark_alpha_linear(out);
 		return (1);
 	}
 
@@ -228,6 +277,8 @@ format_dfd_for(const char *name, struct format_dfd *out)
 	for (i = 0; dfds[i].name != NULL; i++) {
 		if (strcmp(dfds[i].name, name) == 0) {
 			*out = dfds[i].dfd;
+			if (srgb)
+				mark_alpha_linear(out);
 			return (1);
 		}
 	}

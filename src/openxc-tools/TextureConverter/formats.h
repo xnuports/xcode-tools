@@ -57,7 +57,14 @@ struct format_dfd {
 /* The Vulkan enumerant a name is written as, or zero. */
 uint32_t format_vk_for(const char *name);
 
+/*
+ * The OpenGL and Vulkan enumerants --srgb_format asks for.  False for a
+ * format with no sRGB spelling, which is every one that carries no colour:
+ * BC4, BC5, BC6, EAC_R11, EAC_RG11 and the float formats.
+ */
+_Bool	format_srgb_for(const char *name, uint32_t *gl, uint32_t *vk);
+
 /* False only for a name this tool does not know at all. */
-_Bool	format_dfd_for(const char *name, struct format_dfd *);
+_Bool	format_dfd_for(const char *name, _Bool srgb, struct format_dfd *);
 
 #endif /* TEXTURECONVERTER_FORMATS_H */
