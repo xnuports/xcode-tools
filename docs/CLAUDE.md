@@ -990,10 +990,21 @@ containers, four output formats and eight images; the 24 are RGBA32 on the
 three images whose chain does not halve exactly, where Apple rebuild part
 of the tail on a rule that does not fall out of the level sizes.
 
-Still to write: `--crop_uniform_content`, `--scale_range`,
-`--alpha_to_coverage`, `--gamut_in`/`--gamut_out` beyond the `.h` output,
-`--build_cubemap`, `--build_volume`, and the DDS, EXR and HDR inputs
-Apple's usage also lists.
+`--build_cubemap` takes six inputs into six faces, in both modes and all
+four output formats.  The faces are six independent chains -- a face is
+bit for bit what converting that image alone gives -- so the work is in
+the containers: version 1 writes the level's imageSize once and then each
+face behind it padded to four bytes, version 2 counts the whole level, and
+the `.h` output names its arrays `Mip<n>Face<n>` and calls
+`ATC_CreateTextureCube`, which takes one side rather than two.  DDS gets
+none, as Apple write none.  Six inputs exactly: one, two, five and seven
+are all refused.
+
+Still to write: `--build_volume`, whose levels halve in depth as well and
+so want a filter across slices rather than six chains side by side;
+`--crop_uniform_content`, `--scale_range` and `--alpha_to_coverage`;
+`--gamut_in`/`--gamut_out` beyond the `.h` output; and the DDS, EXR and
+HDR inputs Apple's usage also lists.
 
 Five measurements settled the pixel path, and none was guessable:
 
