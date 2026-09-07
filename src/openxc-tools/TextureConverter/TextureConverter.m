@@ -553,18 +553,6 @@ write_ktx_generic(void **levels, const size_t *sizes, const int *widths,
 			put_kv(kvd, "TC_Options", [options UTF8String]);
 	}
 	/*
-	 * A reader has to be told the colour has alpha folded into it, so
-	 * this is part of describing the file rather than an annotation and
-	 * --disable_annotation leaves it alone.  Written only when the
-	 * colour actually was premultiplied.
-	 */
-	if (premultiplied) {
-		static const uint8_t one[4] = { 1, 0, 0, 0 };
-
-		put_kv_bytes(kvd, "com.apple.image.premultipliedAlpha", one,
-		    sizeof(one));
-	}
-	/*
 	 * The Metal format is not an annotation either.  Only the ASTC
 	 * formats carry one; Apple record none for the BC or ETC families.
 	 */
@@ -575,6 +563,18 @@ write_ktx_generic(void **levels, const size_t *sizes, const int *widths,
 		};
 
 		put_kv_bytes(kvd, "KTXmetalPixelFormat", v, sizeof(v));
+	}
+	/*
+	 * A reader has to be told the colour has alpha folded into it, so
+	 * this is part of describing the file rather than an annotation and
+	 * --disable_annotation leaves it alone.  Written only when the
+	 * colour actually was premultiplied.
+	 */
+	if (premultiplied) {
+		static const uint8_t one[4] = { 1, 0, 0, 0 };
+
+		put_kv_bytes(kvd, "com.apple.image.premultipliedAlpha", one,
+		    sizeof(one));
 	}
 
 	[out appendBytes:ktx1_id length:sizeof(ktx1_id)];
