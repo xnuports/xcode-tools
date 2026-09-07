@@ -135,6 +135,12 @@ PORTS+=	extras/bsdiff bsdiff usr/local/bin
 PORTS+=	extras/patchelf patchelf usr/local/bin
 PORTS+=	extras/unxip unxip usr/local/bin
 
+# macho, an Xcode project rather than a Makefile; see mk/port.d/macho.mk
+# for why it is a port and not a mk/tool.mk entry.  Its own submodules have
+# to be checked out for this to build -- git submodule update --init
+# --recursive src/extras/macho.
+PORTS+=	extras/macho macho ${XCTOOLCHAIN}/usr/bin
+
 # Compatibility libraries and libplist.  These are not tools; they are
 # carried so that source written for Linux or BSD, and code that speaks
 # property lists, can be built against this tree.  Headers and
