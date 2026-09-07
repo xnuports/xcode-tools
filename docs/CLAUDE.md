@@ -890,8 +890,8 @@ compare and its decompress agree with each other.
 All four output formats are selected by the output path's extension and by
 nothing else -- `--file_format` reaches none of them in Apple's tool
 either -- and all four are byte-identical across `convert`, `compress` and
-`decompress`: 1788 of 1812 over four containers, forty formats, seven
-images and both sRGB settings, excluding the 204 combinations where their
+`decompress`: 4556 of 4560 over four containers, twenty-four formats, six
+images and nine option sets, excluding the 144 combinations where their
 own tool crashes.
 
 The `.h` output is the one place `--gamut_out` leaves a mark: no container
@@ -919,10 +919,49 @@ wrap mode passed straight through.  Mirror is the default, which is why
 nothing noticed it was missing for so long: the chain was already
 Mirror's.
 
-Still to write: resizing (`--max_extent`, `--resize_filter`,
-`--resize_round_mode`), the gamma options, and reading the input formats
-ImageIO does not -- Apple's usage lists DDS, EXR, HDR, KTX and KTX2, and
-this tree reads only what CoreGraphics decodes.
+The pixel path runs in this order, and every step of it was measured
+rather than assumed:
+
+  1. read the image
+  2. `--flip_x`, `--flip_y` (`--flip_z` is accepted and does nothing)
+  3. `--gamma_in`, over the colour channels only
+  4. `--max_extent`, which is not a resize -- Apple halve with the mipmap
+     filter until neither side is longer than the extent, so 64 pixels
+     with `--max_extent=12` comes out 8 and is bit for bit the chain's
+     third level.  `--resize_filter` and `--resize_round_mode` are
+     recorded in TC_Options and change nothing, in their tool as in this
+     one.
+  5. `--normal_map` normalisation
+  6. the mip chain
+  7. `--alpha_mode=Premultiply`, base level only
+  8. `--gamma_out`, over every level
+  9. `--rgbm_encoding`, over every level
+
+`--normal_map` turns off steps 3, 7, 8 and 9: the channels are a
+direction rather than a colour, and Apple write the same texels with each
+of those as without.  `--rgbm_encoding` turns off step 7 for the same
+reason -- alpha stops being coverage once it carries the multiplier.
+
+The gamma is NVTT's, and at exactly 2.2 nvimage does not call powf but a
+table-and-polynomial pair good to three parts in a million, so a correctly
+rounded powf is wrong in every second sample.  RGBM packs into a range of
+six with the multiplier floored at 32/255, which is the floor astcenc's
+own documentation recommends for RGBM data, and astcenc is told: its RGBM
+map flag, the reconstruction scale, and alpha weighed at twice it.
+
+A gamma of one is skipped rather than applied.  That is not an
+optimisation: the exponentiation clamps at zero and the Kaiser filter
+undershoots there, so running it would lift every negative sample the
+chain produced -- which is what the default gamma of 1.000000 does if the
+option is read as present rather than as a value.
+
+Still to write: `--crop_uniform_content`, `--scale_range`,
+`--alpha_to_coverage`, `--gamut_in`/`--gamut_out` beyond the `.h` output,
+`--build_cubemap`, `--build_volume`, and reading the input formats ImageIO
+does not -- Apple's usage lists DDS, EXR, HDR, KTX and KTX2, and this tree
+reads only what CoreGraphics decodes.  The first three change nothing in
+Apple's own output on any image tried so far, so what they are for is
+still to be found.
 
 Five measurements settled the pixel path, and none was guessable:
 
