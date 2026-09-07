@@ -1111,16 +1111,62 @@ Two outside projects were looked at and are not being taken up:
   submodules are laid out here, and gofrontend is GPL-3 — the same objection
   that ruled out libdwarf for `atos`, only stronger.
 
-- **macos-minimal-sdk** (`tinygo-org/macos-minimal-sdk`) — read against
-  `mk/sdk-headers.mk`; there is nothing to take. It exists to cross-compile
-  to macOS *from Linux*, which is out of scope for a macOS-only tree. Its
-  headers are macOS 11.5 and C/POSIX only, with no frameworks, where ours are
-  macOS 26.5 and include CoreFoundation, Security, IOKit, WebKit, Foundation
-  and Kernel. Its link stubs are a `libSystem.s` of symbol names harvested by
-  parsing headers with clang; ours are real `.tbd` files generated from the
-  host's own dylibs (`mk/scripts/make-tbd.sh`), which is both more faithful
-  and something only a macOS host can do — exactly the assumption this tree
-  is allowed to make and that one is not.
+- **macos-minimal-sdk** (`tinygo-org/macos-minimal-sdk`) — not adopted, but
+  worth having read. It exists to cross-compile to macOS *from Linux*, which
+  is out of scope here. Its headers are macOS 11.5 and C/POSIX only, with no
+  frameworks, where ours are macOS 26.5 and include CoreFoundation, Security,
+  IOKit, WebKit, Foundation and Kernel. Its link stubs are a `libSystem.s` of
+  symbol names harvested by parsing headers with clang; ours are real `.tbd`
+  files generated from the host's own dylibs (`mk/scripts/make-tbd.sh`),
+  which is more faithful and is something only a macOS host can do — exactly
+  the assumption this tree may make and that one may not.
+
+  The two hardest things its `update.sh` does, we already do: stripping the
+  `//Begin-Libc` / `//End-Libc` blocks out of Libc's headers
+  (`mk/scripts/strip-libc-private.sh`), and running xnu's
+  `make_symbol_aliasing.sh` and `make_posix_availability.sh` to generate
+  `sys/_symbol_aliasing.h` and `sys/_posix_availability.h`
+  (`mk/sdk-headers.mk`, plus our own `mk/scripts/availability.pl`).
+
+  Two things it does that we do not, both recorded here rather than adopted:
+
+  - It rewrites `__API_AVAILABLE` and `__API_UNAVAILABLE` in `Availability.h`
+    into variadic no-ops. That is a blunt instrument, and our availability
+    story is already delicate — `mk/sdk-headers.mk` explains at length why
+    xnu's `EXTERNAL_HEADERS` set and darwin-xnu-build's fakeroot set are not
+    interchangeable. But it is the same wall MTool hits above:
+    `__API_UNAVAILABLE(bridgeos)` will not parse against the public
+    `Availability.h`, because `bridgeos` is not a platform it knows. If that
+    ever needs solving, this is the cheap version of the answer.
+  - It replaces the headers whose Apple copyright carries no licence grant
+    with public-domain rewrites. See the note below.
+
+### Headers with no per-file licence grant
+
+A sweep of the 2,661 headers this tree installs into `MacOSX.sdk/usr/include`
+finds 14 that say only "Copyright (c) … Apple Inc. All rights reserved." with
+no grant of any kind in the file:
+
+| Path | Comes from |
+|------|------------|
+| `stdint.h` | `src/apple/libc/include` (and xnu's `EXTERNAL_HEADERS`, identical) |
+| `removefile.h` | `src/apple/removefile` |
+| `arm/_limits.h`, `arm/_param.h`, `arm/_types.h`, `arm/cpu_x86_64_capabilities.h`, `arm/disklabel.h`, `arm/profile.h`, `arm/psl.h`, `arm/reg.h`, `arm/signal.h`, `arm/vmparam.h` | `src/apple/xnu/bsd/arm` |
+| `objc/NSObjCRuntime.h`, `objc/NSObject.h` | `src/apple/objc4` |
+
+Every other header carries APSL 2.0, Apache 2.0, CDDL, a BSD notice, or
+`@APPLE_LLVM_LICENSE_HEADER@`. The 14 are not unlicensed code: each comes
+from a submodule whose *distribution* is APSL 2.0, and the omission is a
+missing per-file notice rather than a missing grant. So this is a note, not
+a blocker.
+
+It is worth knowing because macos-minimal-sdk hit the same list and took the
+cautious route — its author rewrote them from scratch and put the rewrites in
+the public domain, which is why that repo can claim to be open source end to
+end. If this tree ever wants the same claim, the work is small and mechanical:
+these headers hold ABI constants and standard C typedefs, not expression.
+`stdint.h` is ISO C99's table, `arm/_limits.h` is a single `#define`, and the
+`objc/` two are the runtime's public declarations.
 
 
 ## 10. Development Workflow
@@ -1294,6 +1340,10 @@ All code must comply with these rules:
 4. No copying of Apple's closed-source binaries
 5. All third-party dependencies must have compatible licenses
 6. Build system must be reproducible from source alone
+
+Fourteen of the SDK headers carry an Apple copyright with no per-file licence
+grant. They are covered by their submodules' APSL 2.0 distributions and are
+named under "Headers with no per-file licence grant" in Stage 5 above.
 
 ---
 
