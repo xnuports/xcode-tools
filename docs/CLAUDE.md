@@ -1000,11 +1000,21 @@ the `.h` output names its arrays `Mip<n>Face<n>` and calls
 none, as Apple write none.  Six inputs exactly: one, two, five and seven
 are all refused.
 
-Still to write: `--build_volume`, whose levels halve in depth as well and
-so want a filter across slices rather than six chains side by side;
-`--crop_uniform_content`, `--scale_range` and `--alpha_to_coverage`;
-`--gamut_in`/`--gamut_out` beyond the `.h` output; and the DDS, EXR and
-HDR inputs Apple's usage also lists.
+`--build_volume` stacks its inputs into one image with a depth, and the
+chain halves that too, dropping an odd slice at the end.  The filter
+across slices is not a three dimensional kernel -- which is what nvimage's
+`downSample` would have given -- but the plain mean of two slices that
+have each been through the two dimensional mip filter.  Both containers
+carry the whole slab as one level, so only `pixelDepth` is new; the
+encoders take a two dimensional image, so a compressed volume is encoded a
+slice at a time and the slices laid end to end.  The `.h` output names its
+arrays `Mip<n>Slice<n>` and calls `ATC_CreateTexture3D`, keeping the Slice
+names once the levels are one slice deep, because the name follows the
+texture and not the level.  Two slices at least, and DDS gets none.
+
+Still to write: `--crop_uniform_content`, `--scale_range` and
+`--alpha_to_coverage`; `--gamut_in`/`--gamut_out` beyond the `.h` output;
+and the DDS, EXR and HDR inputs Apple's usage also lists.
 
 Five measurements settled the pixel path, and none was guessable:
 
