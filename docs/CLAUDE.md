@@ -843,7 +843,8 @@ Two back ends are not ported:
 
 The tool itself is in `src/openxc-tools/TextureConverter`, and all five
 modes are written: `examine`, `convert`, `compress`, `decompress` and
-`compare`.  It is gated on `MK_PORTS`, since it links the encoders it
+`compare`, and four of the five output formats: KTX, KTX2 and `.h`, with
+DDS still to write.  It is gated on `MK_PORTS`, since it links the encoders it
 drives.
 
 Compression is byte-identical to Apple's across all twenty-seven formats --
@@ -853,6 +854,22 @@ tool says so rather than encoding with something else.  Which encoder each
 format goes to is a table rather than a search: ASTC to ARM's, every BC
 format to NVTT except BC1 at Highest which goes to STB, and every ETC2 and
 EAC format to ETC2COMP.
+
+The thirteen uncompressed formats go to no encoder at all -- Apple call
+that compressor RAW -- and are byte-identical too, 156 of 156 over both
+containers and six images.  Two measurements settled the packing: a byte
+is the sample times 256 truncated, not times 255 rounded, which only the
+mip levels can tell apart since every sample the decompress path produces
+is already a multiple of 1/255; and a half rounds a tie up rather than to
+even, so 0.4659423828125 comes out one step above what the hardware
+conversion gives.
+
+`--srgb_format` is byte-identical over the twenty-one formats that have an
+sRGB spelling.  It changes the OpenGL and Vulkan enumerants, moves the
+Metal one eighteen down, sets the version 2 transfer function to 2, and
+sets the linear bit on whichever sample is alpha.  The formats that carry
+no colour have no sRGB spelling and Apple's tool segfaults on all five of
+them; this prints an error.
 
 `decompress` is byte-identical for all 53 cases, in both containers.  Two
 formats are refused because NVTT cannot read them -- BC7, whose decoder is
@@ -870,13 +887,19 @@ surfaces as `PSNR:1.79...e308` from an unguarded divide by zero.  Ours reads
 every container through the decoders the rest of the tool uses, so its
 compare and its decompress agree with each other.
 
-KTX2 is written wherever the output path ends in `.ktx2`, which is the only
-thing that selects it -- `--file_format=KTX2` is ignored by Apple's tool as
-well.  All twenty-seven block formats and the five uncompressed ones are
-byte-identical, across `convert`, `compress` and `decompress`.
+KTX2 and the `.h` output are both written wherever the output path ends in
+`.ktx2` or `.h`, which is the only thing that selects either -- neither
+`--file_format=KTX2` nor `--file_format=H` reaches them in Apple's tool
+either.  Both are byte-identical across `convert`, `compress` and
+`decompress`.
 
-Still to write: DDS and `.h` output, resizing (`--max_extent`,
-`--resize_filter`, `--resize_round_mode`), and the gamma and gamut options.
+The `.h` output is the one place `--gamut_out` leaves a mark: neither
+container records it.  It is also the only place a format is named rather
+than enumerated, and the names are not derivable from Apple's own -- BC6U
+is `atcFormatBc6Uf16` -- so they are tabulated in `formats.c`.
+
+Still to write: DDS output, resizing (`--max_extent`, `--resize_filter`,
+`--resize_round_mode`), and the gamma options.
 
 Five measurements settled the pixel path, and none was guessable:
 
