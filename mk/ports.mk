@@ -141,6 +141,11 @@ PORTS+=	extras/unxip unxip usr/local/bin
 # --recursive src/extras/macho.
 PORTS+=	extras/macho macho ${XCTOOLCHAIN}/usr/bin
 
+# ktool, a Python package rather than a build.  After python/cpython for
+# the same reason pip and 2to3 are: it installs into that interpreter's
+# site-packages.
+PORTS+=	extras/ktool ktool ${XCTOOLCHAIN}/usr/bin
+
 # Compatibility libraries and libplist.  These are not tools; they are
 # carried so that source written for Linux or BSD, and code that speaks
 # property lists, can be built against this tree.  Headers and

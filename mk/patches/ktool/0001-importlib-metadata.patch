@@ -1,0 +1,71 @@
+Replace pkg_resources in ktool with importlib.metadata.
+
+ktool imports pkg_resources at module scope and so will not start on this
+tree's interpreter:
+
+    ModuleNotFoundError: No module named 'pkg_resources'
+
+pkg_resources came from setuptools, which CPython stopped installing by
+default, and setuptools has since removed it from its own main branch, so
+there is nothing to install that would bring it back.  Upstream ktool has
+not moved off it on any branch as of 2.0.0-14-gfaed829.
+
+Both uses have a stdlib answer.  The version lookup is exactly
+importlib.metadata.version, down to the not-installed exception, and it
+already falls back to "1.0.0" -- which is what it will do here, since
+nothing installs a dist-info for ktool.  The other is packaging.version,
+used by nothing but check_for_update, which asks PyPI whether a newer
+ktool exists; without packaging that check now returns instead of failing
+to import, which is the same thing its own try/except was reaching for.
+
+Applied to the installed copy by mk/scripts/install-ktool.sh.  The
+submodule itself is not touched.
+
+--- a/ktool/util.py	2026-09-07 03:19:26
++++ b/ktool/util.py	2026-09-07 03:19:26
+@@ -24,7 +24,7 @@
+ from ktool_macho import Struct, FAT_CIGAM, FAT_MAGIC, MH_CIGAM, MH_CIGAM_64, MH_MAGIC, MH_MAGIC_64
+ from ktool.exceptions import *
+ 
+-import pkg_resources
++import importlib.metadata
+ 
+ import lib0cyn.log as log
+ 
+@@ -39,8 +39,8 @@
+     JsonLexer = None
+ 
+ try:
+-    KTOOL_VERSION = pkg_resources.get_distribution('k2l').version
+-except pkg_resources.DistributionNotFound:
++    KTOOL_VERSION = importlib.metadata.version('k2l')
++except importlib.metadata.PackageNotFoundError:
+     KTOOL_VERSION = '1.0.0'
+ THREAD_COUNT = os.cpu_count() - 1
+ 
+--- a/ktool/ktool_script.py	2026-09-07 03:19:26
++++ b/ktool/ktool_script.py	2026-09-07 03:19:26
+@@ -26,11 +26,9 @@
+ from typing import Union
+ 
+ try:
+-    # noinspection PyProtectedMember
+-    from pkg_resources import packaging
++    import packaging.version
+ except ImportError:
+-    # noinspection PyProtectedMember
+-    from pkg_resources._vendor import packaging
++    packaging = None
+ 
+ import ktool
+ from ktool_macho import LOAD_COMMAND
+@@ -64,6 +62,9 @@
+ 
+ 
+ def check_for_update():
++    if packaging is None:
++        return
++
+     endpoint = "https://pypi.org/pypi/k2l/json"
+     # noinspection PyBroadException
+     try:
