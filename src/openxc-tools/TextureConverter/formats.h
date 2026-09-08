@@ -90,4 +90,7 @@ int	format_atc_channels(const char *name, _Bool srgb);
  */
 uint32_t format_dxgi_for(const char *name, _Bool srgb);
 
+/* NULL for an enumerant this tool has no name for. */
+const char *format_name_for_dxgi(uint32_t dxgi);
+
 #endif /* TEXTURECONVERTER_FORMATS_H */

@@ -478,6 +478,56 @@ enum alpha_mode {
  * converting an image file writes RGBA32.  A compressed container is
  * refused, as Apple's is.
  */
+/*
+ * A DDS handed in as an input.  It carries the same uncompressed formats
+ * the Khronos containers do, packed tight and largest first, so once the
+ * shape is read the levels are walked from the format.  A compressed one
+ * is refused, as Apple's is.
+ */
+static int
+load_dds(NSData *data, float **levels, int *widths, int *heights, int max,
+    const char **namep)
+{
+	const uint8_t *p;
+	const char *name;
+	uint32_t dxgi, gl, base, metal;
+	size_t left;
+	int w, h, nl, bx, by, channels, bits, n, i;
+
+	if (!dds_parse([data bytes], [data length], &dxgi, &w, &h, &nl, &p,
+	    &left))
+		return (0);
+	name = format_name_for_dxgi(dxgi);
+	if (name == NULL ||
+	    !format_lookup(name, &gl, &base, &bx, &by, &metal) || bx != 1)
+		return (-1);
+	channels = base == 0x1903 ? 1 : base == 0x8227 ? 2 :
+	    base == 0x1907 ? 3 : 4;
+	bits = format_channel_bits(name);
+	n = nl > max ? max : nl;
+	for (i = 0; i < n; i++) {
+		struct ktx_level lv;
+
+		lv.width = (uint32_t)(w >> i ? w >> i : 1);
+		lv.height = (uint32_t)(h >> i ? h >> i : 1);
+		lv.len = (size_t)lv.width * lv.height * channels *
+		    (size_t)(bits / 8);
+		if (lv.len > left)
+			break;
+		lv.data = p;
+		levels[i] = unpack_level(&lv, name[0] == 'B', channels, bits,
+		    2);
+		if (levels[i] == NULL)
+			break;
+		widths[i] = (int)lv.width;
+		heights[i] = (int)lv.height;
+		p += lv.len;
+		left -= lv.len;
+	}
+	*namep = name;
+	return (i);
+}
+
 static int
 load_container(NSString *path, float **levels, int *widths, int *heights,
     int max, const char **namep)
@@ -488,14 +538,16 @@ load_container(NSString *path, float **levels, int *widths, int *heights,
 	uint32_t gl, base, metal;
 	int bx, by, channels, bits, n, i;
 
-	if (data == nil || !ktx_parse([data bytes], [data length], &k))
+	if (data == nil)
 		return (0);
+	if (!ktx_parse([data bytes], [data length], &k))
+		return (load_dds(data, levels, widths, heights, max, namep));
 	name = k.version == 1 ? format_name_for_gl(k.gl_internal_format) :
 	    format_name_for_vk(k.vk_format);
 	if (name == NULL || k.nlevel == 0 ||
 	    !format_lookup(name, &gl, &base, &bx, &by, &metal) || bx != 1) {
 		ktx_free(&k);
-		return (0);
+		return (-1);
 	}
 	channels = base == 0x1903 ? 1 : base == 0x8227 ? 2 :
 	    base == 0x1907 ? 3 : 4;
@@ -523,9 +575,7 @@ load_container(NSString *path, float **levels, int *widths, int *heights,
 	n = i;
 	*namep = name;
 	ktx_free(&k);
-	if (n == 0)
-		return (0);
-	return (n);
+	return (n == 0 ? -1 : n);
 }
 
 static float *
@@ -1029,10 +1079,18 @@ do_convert(NSArray<NSString *> *paths,
 		fn = f[0] != NULL ? 1 : 0;
 	} else if ((fn = load_container(paths[face], f, widths, heights,
 	    MAX_LEVELS, &oname)) == 0) {
+		/*
+		 * Not a container at all: an image file, and one level.  A
+		 * container this tool cannot use -- a compressed one -- is
+		 * refused rather than handed to ImageIO, which would decode
+		 * some of them and give an answer Apple's tool does not.
+		 */
 		oname = "RGBA32";
 		f[0] = load_rgba(paths[face], alpha_mode_of(opts), &widths[0],
 		    &heights[0]);
 		fn = f[0] != NULL ? 1 : 0;
+	} else if (fn < 0) {
+		fn = 0;
 	}
 	if (fn == 0) {
 		printf("Error: Could not read input file!\n");
@@ -1655,12 +1713,14 @@ do_compress(NSArray<NSString *> *paths,
 	} else {
 		const char *iname;
 
-		if (load_container(paths[face], levels, widths, heights, 1,
-		    &iname) == 0)
-			levels[0] = NULL;
-		if (levels[0] == NULL)
+		int got = load_container(paths[face], levels, widths, heights,
+		    1, &iname);
+
+		if (got == 0)
 			levels[0] = load_rgba(paths[face],
 			    alpha_mode_of(opts), &widths[0], &heights[0]);
+		else if (got < 0)
+			levels[0] = NULL;
 	}
 	if (levels[0] == NULL) {
 		printf("Error: Could not read input file!\n");

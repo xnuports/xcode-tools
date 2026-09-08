@@ -89,3 +89,39 @@ dds_write(void **levels, const size_t *sizes, int width, int height,
 	*out_len = total;
 	return (out);
 }
+
+static uint32_t
+get32(const uint8_t *p)
+{
+	return ((uint32_t)p[0] | ((uint32_t)p[1] << 8) |
+	    ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24));
+}
+
+/*
+ * Reading one back.  Only the shape the writer above produces is accepted:
+ * a DX10 header, no cubemap, no volume.  The levels behind it are packed
+ * tight, largest first, so the caller walks them from the format.
+ */
+_Bool
+dds_parse(const void *bytes, size_t len, uint32_t *dxgi, int *width,
+    int *height, int *nlevels, const uint8_t **data, size_t *data_len)
+{
+	const uint8_t *p = bytes;
+	enum { HEADER = 4 + 124 + 20 };
+	uint32_t mips;
+
+	if (len < HEADER || memcmp(p, "DDS ", 4) != 0 || get32(p + 4) != 124)
+		return (0);
+	if (memcmp(p + 84, "DX10", 4) != 0)
+		return (0);
+	if (get32(p + 128 + 4) != 3)		/* 2D textures only */
+		return (0);
+	mips = get32(p + 28);
+	*dxgi = get32(p + 128);
+	*height = (int)get32(p + 12);
+	*width = (int)get32(p + 16);
+	*nlevels = mips == 0 ? 1 : (int)mips;
+	*data = p + HEADER;
+	*data_len = len - HEADER;
+	return (1);
+}

@@ -480,6 +480,21 @@ static const struct { const char *name; uint32_t dxgi, srgb; } dxgis[] = {
 	{ NULL,		0,   0 }
 };
 
+/* The other way: what a DDS file's DXGI enumerant names. */
+const char *
+format_name_for_dxgi(uint32_t dxgi)
+{
+	size_t i;
+
+	if (dxgi == 0)
+		return (NULL);
+	for (i = 0; dxgis[i].name != NULL; i++) {
+		if (dxgis[i].dxgi == dxgi || dxgis[i].srgb == dxgi)
+			return (dxgis[i].name);
+	}
+	return (NULL);
+}
+
 uint32_t
 format_dxgi_for(const char *name, _Bool srgb)
 {
