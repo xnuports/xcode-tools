@@ -520,6 +520,8 @@ load_dds(NSData *data, enum alpha_mode amode, float **levels, int *widths,
 	    base == 0x1907 ? 3 : 4;
 	bits = format_channel_bits(name);
 	n = nl > max ? max : nl;
+	if (amode == ALPHA_IGNORE && channels == 4)
+		n = 1;
 	for (i = 0; i < n; i++) {
 		struct ktx_level lv;
 
@@ -571,6 +573,17 @@ load_container(NSString *path, enum alpha_mode amode, float **levels,
 	    base == 0x1907 ? 3 : 4;
 	bits = format_channel_bits(name);
 	n = (int)k.nlevel > max ? max : (int)k.nlevel;
+	/*
+	 * The levels the file holds are kept, unless reading it has changed
+	 * the base they belong to.  Forcing alpha to one does: a four
+	 * channel container read with --alpha_mode=Ignore, which is the
+	 * default, has a different base than the one its levels were
+	 * filtered from, and Apple rebuild the chain there.  Under Preserve
+	 * or Premultiply, and for every format with fewer than four
+	 * channels, nothing has changed and the levels stand.
+	 */
+	if (amode == ALPHA_IGNORE && channels == 4)
+		n = 1;
 	for (i = 0; i < n; i++) {
 		/*
 		 * Read as version 2 does, with the rows tight, whichever
@@ -1056,6 +1069,7 @@ do_convert(NSArray<NSString *> *paths,
 	enum mip_wrap wrap = MIP_WRAP_MIRROR;
 	bool normal = opts[@"normal_map"] != nil;
 	const char *oname = "RGBA32";
+	bool opaque = false;
 	NSData *data;
 	int n = 0, i, maxlevels;
 
@@ -1098,7 +1112,14 @@ do_convert(NSArray<NSString *> *paths,
 		    &heights[0], &depths[0]);
 		fn = f[0] != NULL ? 1 : 0;
 	} else if ((fn = load_container(paths[face], alpha_mode_of(opts), f,
-	    widths, heights, MAX_LEVELS, &oname)) == 0) {
+	    widths, heights, MAX_LEVELS, &oname)) != 0) {
+		/*
+		 * A container read with the alpha thrown away stays opaque
+		 * all the way down: Apple write exactly one at every level,
+		 * where filtering a constant one gives 1.0000002.
+		 */
+		opaque = fn > 0 && alpha_mode_of(opts) == ALPHA_IGNORE;
+	} else {
 		/*
 		 * Not a container at all: an image file, and one level.  A
 		 * container this tool cannot use -- a compressed one -- is
@@ -1109,9 +1130,9 @@ do_convert(NSArray<NSString *> *paths,
 		f[0] = load_rgba(paths[face], alpha_mode_of(opts), &widths[0],
 		    &heights[0]);
 		fn = f[0] != NULL ? 1 : 0;
-	} else if (fn < 0) {
-		fn = 0;
 	}
+	if (fn < 0)
+		fn = 0;
 	if (fn == 0) {
 		printf("Error: Could not read input file!\n");
 		return (255);
@@ -1128,19 +1149,11 @@ do_convert(NSArray<NSString *> *paths,
 	}
 	/*
 	 * A container's own levels are kept and the chain is only extended
-	 * past them.  Apple do not do this -- zero a level in a container
-	 * and their convert writes a rebuilt one back -- but their rebuild
-	 * and the levels the file already holds agree on every input tried,
-	 * and this tree's rebuild does not: it is one byte in a hundred out
-	 * on the narrow and the sixteen bit formats, which is a difference
-	 * in how the chain is built from a quantised base and is not yet
-	 * understood.  Keeping the levels lands on their answer wherever
-	 * the file was written by a tool that builds the same chain; a
-	 * container whose stored levels disagree with a rebuild is where
-	 * the two part company.
-	 *
-	 * Anything that changes the base's geometry or its colour throws
-	 * them away, since they would no longer belong to it.
+	 * past them: converting a two level container gives a full chain
+	 * whose first two levels are the ones that came in.  Anything that
+	 * changes the base throws them away, since they would no longer
+	 * belong to it -- a flip, a gamma, a --max_extent that bites, a
+	 * normal map, and the alpha rewrite the reader handles.
 	 */
 	if (n > 1 && (opts[@"flip_x"] != nil || opts[@"flip_y"] != nil ||
 	    [opts[@"gamma_in"] floatValue] != 1.0f || normal ||
@@ -1218,6 +1231,11 @@ do_convert(NSArray<NSString *> *paths,
 	if (!normal && opts[@"rgbm_encoding"] != nil) {
 		for (i = 0; i < n; i++)
 			rgbm_encode(levels[i], widths[i], heights[i]);
+	}
+
+	if (opaque) {
+		for (i = 0; i < n; i++)
+			drop_alpha(levels[i], widths[i], heights[i]);
 	}
 
 	for (i = 0; i < n; i++)
