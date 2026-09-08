@@ -479,14 +479,29 @@ enum alpha_mode {
  * refused, as Apple's is.
  */
 /*
+ * --alpha_mode=Ignore, which is the default, treats the image as opaque.
+ * The image reading path does this as it decodes; a container's levels
+ * want the same, or an RGBA container converts with the alpha it came in
+ * with where Apple's writes ones.
+ */
+static void
+drop_alpha(float *rgba, int w, int h)
+{
+	size_t n = (size_t)w * (size_t)h, i;
+
+	for (i = 0; i < n; i++)
+		rgba[i * 4 + 3] = 1.0f;
+}
+
+/*
  * A DDS handed in as an input.  It carries the same uncompressed formats
  * the Khronos containers do, packed tight and largest first, so once the
  * shape is read the levels are walked from the format.  A compressed one
  * is refused, as Apple's is.
  */
 static int
-load_dds(NSData *data, float **levels, int *widths, int *heights, int max,
-    const char **namep)
+load_dds(NSData *data, enum alpha_mode amode, float **levels, int *widths,
+    int *heights, int max, const char **namep)
 {
 	const uint8_t *p;
 	const char *name;
@@ -519,6 +534,8 @@ load_dds(NSData *data, float **levels, int *widths, int *heights, int max,
 		    2);
 		if (levels[i] == NULL)
 			break;
+		if (amode == ALPHA_IGNORE)
+			drop_alpha(levels[i], (int)lv.width, (int)lv.height);
 		widths[i] = (int)lv.width;
 		heights[i] = (int)lv.height;
 		p += lv.len;
@@ -529,8 +546,8 @@ load_dds(NSData *data, float **levels, int *widths, int *heights, int max,
 }
 
 static int
-load_container(NSString *path, float **levels, int *widths, int *heights,
-    int max, const char **namep)
+load_container(NSString *path, enum alpha_mode amode, float **levels,
+    int *widths, int *heights, int max, const char **namep)
 {
 	NSData *data = [NSData dataWithContentsOfFile:path];
 	struct ktx k;
@@ -541,7 +558,8 @@ load_container(NSString *path, float **levels, int *widths, int *heights,
 	if (data == nil)
 		return (0);
 	if (!ktx_parse([data bytes], [data length], &k))
-		return (load_dds(data, levels, widths, heights, max, namep));
+		return (load_dds(data, amode, levels, widths, heights, max,
+		    namep));
 	name = k.version == 1 ? format_name_for_gl(k.gl_internal_format) :
 	    format_name_for_vk(k.vk_format);
 	if (name == NULL || k.nlevel == 0 ||
@@ -571,6 +589,8 @@ load_container(NSString *path, float **levels, int *widths, int *heights,
 			break;
 		widths[i] = (int)k.level[i].width;
 		heights[i] = (int)k.level[i].height;
+		if (amode == ALPHA_IGNORE)
+			drop_alpha(levels[i], widths[i], heights[i]);
 	}
 	n = i;
 	*namep = name;
@@ -1077,8 +1097,8 @@ do_convert(NSArray<NSString *> *paths,
 		f[0] = load_volume(paths, alpha_mode_of(opts), &widths[0],
 		    &heights[0], &depths[0]);
 		fn = f[0] != NULL ? 1 : 0;
-	} else if ((fn = load_container(paths[face], f, widths, heights,
-	    MAX_LEVELS, &oname)) == 0) {
+	} else if ((fn = load_container(paths[face], alpha_mode_of(opts), f,
+	    widths, heights, MAX_LEVELS, &oname)) == 0) {
 		/*
 		 * Not a container at all: an image file, and one level.  A
 		 * container this tool cannot use -- a compressed one -- is
@@ -1107,11 +1127,20 @@ do_convert(NSArray<NSString *> *paths,
 			depths[i] = 1;
 	}
 	/*
-	 * A container's own levels are kept, and the chain is only extended
-	 * past them: converting a two level container gives a full chain
-	 * whose first two levels are the ones that came in, not two rebuilt
-	 * from the base.  Anything that changes the base's geometry or its
-	 * colour throws them away, since they would no longer belong to it.
+	 * A container's own levels are kept and the chain is only extended
+	 * past them.  Apple do not do this -- zero a level in a container
+	 * and their convert writes a rebuilt one back -- but their rebuild
+	 * and the levels the file already holds agree on every input tried,
+	 * and this tree's rebuild does not: it is one byte in a hundred out
+	 * on the narrow and the sixteen bit formats, which is a difference
+	 * in how the chain is built from a quantised base and is not yet
+	 * understood.  Keeping the levels lands on their answer wherever
+	 * the file was written by a tool that builds the same chain; a
+	 * container whose stored levels disagree with a rebuild is where
+	 * the two part company.
+	 *
+	 * Anything that changes the base's geometry or its colour throws
+	 * them away, since they would no longer belong to it.
 	 */
 	if (n > 1 && (opts[@"flip_x"] != nil || opts[@"flip_y"] != nil ||
 	    [opts[@"gamma_in"] floatValue] != 1.0f || normal ||
@@ -1713,8 +1742,8 @@ do_compress(NSArray<NSString *> *paths,
 	} else {
 		const char *iname;
 
-		int got = load_container(paths[face], levels, widths, heights,
-		    1, &iname);
+		int got = load_container(paths[face], alpha_mode_of(opts),
+		    levels, widths, heights, 1, &iname);
 
 		if (got == 0)
 			levels[0] = load_rgba(paths[face],
