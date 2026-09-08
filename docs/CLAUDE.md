@@ -973,22 +973,38 @@ not the fraction of texels above a threshold.
 output on any image tried, including one with a uniform black border and
 one with a full alpha ramp, so what they are for is still to be found.
 
-KTX and KTX2 are read as inputs.  `ktx_parse` had never read version 2's
-level index, so every version 2 container looked empty; it does now, and
-the unpacker learnt halves, floats, version 2's tight rows and BGRA8's
-reversed channels.  Converting a container keeps its format -- an RGBA8
-container converts to RGBA8, only an image file converts to RGBA32 -- and
-keeps its levels, building only the rest of the chain; a flip, a gamma, a
-`--max_extent` that bites or `--normal_map` throws them away first.
+KTX, KTX2 and DDS are read as inputs.  `ktx_parse` had never read version
+2's level index, so every version 2 container looked empty; it does now,
+and the unpacker learnt halves, floats, version 2's tight rows and BGRA8's
+reversed channels.  The DDS reader is the writer's header backwards.  A
+compressed container is refused whichever of the three it is, as Apple's
+tool refuses it -- ImageIO will decode some of them, and answering where
+Apple says nothing is not the same tool.
+
+Converting a container keeps its format: an RGBA8 container converts to
+RGBA8, an R16 one to R16, and only an image file converts to RGBA32.  The
+alpha mode applies on the way in, which is easy to miss -- Ignore is the
+default, so a four channel container converts with ones in alpha whatever
+it came in with, and because the Kaiser filter over a constant one gives
+1.0000002 rather than one, getting this wrong surfaces two levels down and
+looks like a mip chain problem.
+
+This tree keeps a container's levels and only extends the chain past them.
+Apple do not: zero a level in a container and their convert writes a
+rebuilt one back.  Their rebuild and the levels the file already holds
+agree on every input tried, and this tree's rebuild does not -- it is out
+on the narrow and sixteen bit formats, which is a difference in how a
+chain is built from a quantised base and is not yet understood.  Keeping
+the levels lands on Apple's answer wherever the file was written by a tool
+that builds the same chain; a container whose stored levels disagree with
+a rebuild is where the two part company.
 
 Version 1's padded rows are read as if they were tight, which is Apple's
 bug and is reproduced deliberately: an R8 level two texels wide comes back
 as its two bytes and then the two bytes of padding behind them.  Reading
 the file correctly would put a different image through the rest of the
-tool than their tool has.  696 of 720 across thirteen formats, two input
-containers, four output formats and eight images; the 24 are RGBA32 on the
-three images whose chain does not halve exactly, where Apple rebuild part
-of the tail on a rule that does not fall out of the level sizes.
+tool than their tool has.  248 of 248 across thirteen formats, three input
+containers and eight images.
 
 `--build_cubemap` takes six inputs into six faces, in both modes and all
 four output formats.  The faces are six independent chains -- a face is
@@ -1014,7 +1030,7 @@ texture and not the level.  Two slices at least, and DDS gets none.
 
 Still to write: `--crop_uniform_content`, `--scale_range` and
 `--alpha_to_coverage`; `--gamut_in`/`--gamut_out` beyond the `.h` output;
-and the DDS, EXR and HDR inputs Apple's usage also lists.
+and the EXR and HDR inputs Apple's usage also lists.
 
 Five measurements settled the pixel path, and none was guessable:
 
