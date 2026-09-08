@@ -989,22 +989,35 @@ it came in with, and because the Kaiser filter over a constant one gives
 1.0000002 rather than one, getting this wrong surfaces two levels down and
 looks like a mip chain problem.
 
-This tree keeps a container's levels and only extends the chain past them.
-Apple do not: zero a level in a container and their convert writes a
-rebuilt one back.  Their rebuild and the levels the file already holds
-agree on every input tried, and this tree's rebuild does not -- it is out
-on the narrow and sixteen bit formats, which is a difference in how a
-chain is built from a quantised base and is not yet understood.  Keeping
-the levels lands on Apple's answer wherever the file was written by a tool
-that builds the same chain; a container whose stored levels disagree with
-a rebuild is where the two part company.
+A container's own levels are kept and the chain only extended past them,
+unless reading the file changed the base those levels were filtered from.
+Forcing alpha to one changes it: a four channel container read with
+`--alpha_mode=Ignore`, the default, no longer has the base its levels came
+from, so the chain is rebuilt.  Under Preserve or Premultiply, and for
+every format with fewer than four channels, the levels stand.  Patching a
+level and converting shows it cleanly -- kept for R8, RG8, RGB8 and the
+one, two and three channel float formats under any alpha mode, kept for
+RGBA8 and RGBA32 under Preserve and Premultiply, rebuilt only for the four
+channel formats under Ignore.
+
+The alpha stays gone all the way down as well: Apple write exactly one at
+every level of such a file, where filtering a constant one gives
+1.0000002, so it is thrown away again after the chain and not only on the
+way in.
 
 Version 1's padded rows are read as if they were tight, which is Apple's
 bug and is reproduced deliberately: an R8 level two texels wide comes back
 as its two bytes and then the two bytes of padding behind them.  Reading
 the file correctly would put a different image through the rest of the
-tool than their tool has.  248 of 248 across thirteen formats, three input
-containers and eight images.
+tool than their tool has.
+
+227 of 248 across thirteen formats, three input containers and eight
+images, and 16 of 21 on containers with a level patched to disagree with a
+rebuild.  What is left is RGBA16: converting a half float container
+rebuilds colour a unit in the last place of a half away from Apple's, in
+the mip levels only, with level zero identical.  The same rebuild agrees
+when the floats are exact, so it is the half decode or the precision the
+chain runs at, and it is not yet pinned down.
 
 `--build_cubemap` takes six inputs into six faces, in both modes and all
 four output formats.  The faces are six independent chains -- a face is
