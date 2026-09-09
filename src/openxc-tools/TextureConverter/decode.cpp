@@ -130,6 +130,31 @@ decode_astc_u8(const uint8_t *blocks, size_t len, int w, int h, int bx,
 	return (out);
 }
 
+/*
+ * Whether any block in a BC7 level is a mode 0 block.
+ *
+ * NVTT decodes the other seven modes correctly and cannot decode this one
+ * at all: avpcl_mode0.cpp's read_header has the line that consumes the
+ * mode bit commented out, where every other mode's read_header begins with
+ * it, so its own "did we land where the header ends" assertion fires and
+ * NVTT's assert handler calls exit(2).  No message, no output, and a shell
+ * that sees a status it cannot explain.
+ *
+ * The mode is the position of the lowest set bit of the first byte, and a
+ * byte of zero is the reserved mode that decodes to black.
+ */
+extern "C" bool
+bc7_has_mode0(const uint8_t *blocks, size_t len)
+{
+	size_t i;
+
+	for (i = 0; i + 16 <= len; i += 16) {
+		if ((blocks[i] & 1) != 0)
+			return (true);
+	}
+	return (false);
+}
+
 extern "C" float *
 decode_blocks(const uint8_t *blocks, size_t len, int w, int h,
     enum tc_decode fmt)

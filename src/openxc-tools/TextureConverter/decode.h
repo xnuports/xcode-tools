@@ -47,6 +47,9 @@ float	*decode_blocks(const uint8_t *blocks, size_t len, int w, int h,
 float	*decode_eac(const uint8_t *blocks, size_t len, int w, int h,
 	    bool two);
 
+/* Whether a BC7 level holds a mode 0 block, which NVTT cannot read. */
+bool	 bc7_has_mode0(const uint8_t *blocks, size_t len);
+
 #ifdef __cplusplus
 }
 #endif

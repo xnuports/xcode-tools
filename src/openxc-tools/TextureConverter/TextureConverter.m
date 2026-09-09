@@ -2111,20 +2111,24 @@ do_compress(NSArray<NSString *> *paths,
  * goes to astcenc and everything else to NVTT.  etc2comp has no decoder at
  * all, which is why Apple's --decompressor list names it nowhere.
  *
- * Four formats are missing from this table on purpose, because NVTT cannot
- * read them:
+ * EAC_R11 and EAC_RG11 are missing from this table on purpose: NVTT has
+ * their call sites commented out and marked "@@ Not implemented", so
+ * eac.c reads them instead.
  *
- *	BC7		its decoder is the old avpcl prototype, whose
- *			mode 0 header layout is not the one the format
- *			was standardised with.  Handed a conforming
- *			block -- including one its own encoder just
- *			wrote -- it fails an assertion and calls exit.
- *	EAC_R11		nvtt/Surface.cpp has the call sites for these two
- *	EAC_RG11	commented out and marked "@@ Not implemented",
- *			so eac.c reads them instead.
+ * BC7 is here and reads seven of its eight modes byte for byte as Apple's
+ * does.  The eighth is mode 0, which NVTT cannot read at all:
+ * avpcl_mode0.cpp's read_header has the line that consumes the mode bit
+ * commented out, where every other mode's read_header begins with it, so
+ * its own assertion fires and NVTT's handler calls exit(2) -- silently,
+ * with no output and no message.  A level holding such a block is refused
+ * here instead, by bc7_has_mode0.
  *
- * Leaving BC7 out is what stops the assertion from taking the process
- * down with no message at all.
+ * Apple's answer for one of those blocks is not a decode of it.  It is
+ * neither what the specification gives nor what NVTT's mis-parse gives,
+ * and a dozen variations around the two -- the bit offset, the anchor
+ * widths, the two subset partition table, the endpoint order -- reproduce
+ * none of its sixteen pixels.  Their other seven modes are exactly
+ * avpcl's, which is why the rest of the format is byte for byte theirs.
  *
  * ETC2_RGB8A1 is in the table and goes to the plain ETC2 decoder, which
  * is wrong and is what Apple do.  NVTT has no punchthrough: it reads the
@@ -2143,7 +2147,7 @@ decode_format_of(const char *name, enum tc_decode *out)
 		{ "BC1", TC_DEC_BC1 }, { "BC2", TC_DEC_BC2 },
 		{ "BC3", TC_DEC_BC3 }, { "BC4", TC_DEC_BC4 },
 		{ "BC5", TC_DEC_BC5 }, { "BC6U", TC_DEC_BC6 },
-		{ "BC6S", TC_DEC_BC6S },
+		{ "BC6S", TC_DEC_BC6S }, { "BC7", TC_DEC_BC7 },
 		{ "ETC2_RGB8", TC_DEC_ETC2_RGB },
 		{ "ETC2_RGB8A1", TC_DEC_ETC2_RGB },
 		{ "EAC_RGBA8", TC_DEC_ETC2_RGBA }
@@ -2444,7 +2448,19 @@ do_decompress(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 			    channels, &sizes[i]);
 			free(px);
 		} else {
-			float *pixels = eac ?
+			float *pixels;
+
+			/*
+			 * A mode 0 block would take NVTT's assert handler
+			 * and this process with it.  See decode_format_of.
+			 */
+			if (!eac && dec == TC_DEC_BC7 &&
+			    bc7_has_mode0(k.level[i].data, k.level[i].len)) {
+				printf("Error: Decompression failed!\n");
+				ktx_free(&k);
+				return (255);
+			}
+			pixels = eac ?
 			    decode_eac(k.level[i].data, k.level[i].len,
 			        widths[i], heights[i],
 			        strcmp(name, "EAC_RG11") == 0) :
