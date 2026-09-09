@@ -2380,8 +2380,17 @@ do_decompress(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 		return (255);
 	}
 
+	/*
+	 * The decompressed pixels keep the channel count the compressed
+	 * format had -- BC4 comes out R8, BC5 RG8 -- everywhere but DDS,
+	 * which is always the four channel spelling: Apple write DXGI 28
+	 * and a full RGBA surface for every one of them, three times the
+	 * bytes of the KTX beside it.
+	 */
 	if (hdr)
 		oname = "RGBA32";
+	else if (wants_dds(out))
+		oname = "RGBA8";
 	else if (base == 0x1903)
 		oname = "R8";
 	else if (base == 0x8227)
