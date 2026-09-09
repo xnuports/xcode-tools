@@ -520,8 +520,6 @@ load_dds(NSData *data, enum alpha_mode amode, float **levels, int *widths,
 	    base == 0x1907 ? 3 : 4;
 	bits = format_channel_bits(name);
 	n = nl > max ? max : nl;
-	if (amode == ALPHA_IGNORE && channels == 4)
-		n = 1;
 	for (i = 0; i < n; i++) {
 		struct ktx_level lv;
 
@@ -574,16 +572,16 @@ load_container(NSString *path, enum alpha_mode amode, float **levels,
 	bits = format_channel_bits(name);
 	n = (int)k.nlevel > max ? max : (int)k.nlevel;
 	/*
-	 * The levels the file holds are kept, unless reading it has changed
-	 * the base they belong to.  Forcing alpha to one does: a four
-	 * channel container read with --alpha_mode=Ignore, which is the
-	 * default, has a different base than the one its levels were
-	 * filtered from, and Apple rebuild the chain there.  Under Preserve
-	 * or Premultiply, and for every format with fewer than four
-	 * channels, nothing has changed and the levels stand.
+	 * Every level the file holds is kept, whatever the format and
+	 * whatever --alpha_mode says: a container carries a chain, and
+	 * conversion carries it across rather than filtering a new one.
+	 * Forcing alpha to one is done to each level in turn, which is
+	 * not the same as rebuilding from a base whose alpha is one --
+	 * the colour is the file's, level for level.
+	 *
+	 * Patching a level and converting shows it: the patched level
+	 * comes back out, unchanged except for its alpha.
 	 */
-	if (amode == ALPHA_IGNORE && channels == 4)
-		n = 1;
 	for (i = 0; i < n; i++) {
 		/*
 		 * Read as version 2 does, with the rows tight, whichever
