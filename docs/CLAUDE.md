@@ -964,19 +964,33 @@ six came from in the first place.  The complaint only fires when
 `--rgbm_encoding` is there to use it: the range alone is accepted and
 recorded and does nothing.
 
-`--alpha_to_coverage` is measured but not solved, and is left inert rather
-than guessed at.  What is known: it does nothing when alpha is being
-ignored, which is the default; under Preserve or Premultiply it scales the
-alpha of the smaller levels and leaves level zero alone; and the scales it
-picks are dyadic from a start of one over a range of four -- 1.005859 is
-one plus 3/512, 1.398437 one plus 204/512 -- which is exactly the ten-step
-binary search in nvimage's `scaleAlphaToCoverage`.  So the search is
-NVTT's.  The coverage measure is not: neither nvimage's subsampled
-`alphaTestCoverage` nor a plain count above the reference reproduces
-Apple's scales at any reference tried (0.5, 0.25, 0.75, 0.9, 0.95, 1/256,
-0.125), and on one image Apple scale four levels where both measures say
-the coverage is already one at every level.  Whatever they measure, it is
-not the fraction of texels above a threshold.
+`--alpha_to_coverage` is nvimage's, both halves of it.  A mip chain loses
+coverage -- filtering an alpha channel that a shader is going to threshold
+makes the thresholded area shrink -- so each image's alpha is scaled until
+the fraction of it above `--alpha_reference` matches the first image's.
+The search is `scaleAlphaToCoverage`'s: bisect over [0, 4] from a start of
+one, ten steps, keeping whichever step came closest rather than the last,
+which is why the scales are dyadic (1.005859 is one plus 3/512, the tenth
+step of a path that goes 1, 2.5, 1.75, 1.375 and halves inward).  The
+measure is `alphaTestCoverage`'s: not a count of texels above the
+reference but sixteen bilinear samples of each 2x2 of neighbours, which is
+what a magnified texture is actually thresholded at, so an image narrower
+than two texels has no measure and is left alone.  The reference is 0.95
+unless `--alpha_reference` says otherwise, and no other value fits.
+
+An earlier note here said the measure was not nvimage's.  It is; the
+mistake was about which image is the reference.  It is the *first* image
+and not the first of each face: a cubemap measures face zero's base and
+scales the other five faces' bases against it as well as every level
+behind them, so level zero of face zero is the only image in the file left
+alone.  An array's elements and a volume's slices go the same way, slice
+by slice.  Measured against something that scaled per face, every face
+past the first looks like a coverage measure that does not fit.
+
+Under `--alpha_mode=Ignore` it is inert without being guarded: alpha is
+one everywhere, so every image already covers everything, the search's
+first step has zero error and stops there.  The only thing that changes is
+the `TC_Options` string.
 
 `--crop_uniform_content` and `--scale_range` change nothing in Apple's own
 output on any image tried, including one with a uniform black border and
@@ -1173,9 +1187,6 @@ names once the levels are one slice deep, because the name follows the
 texture and not the level.  Two slices at least, and DDS gets none.
 
 Still to write, in the order they are worth doing:
-
-`--alpha_to_coverage` with its `--alpha_reference`, measured and left
-inert rather than guessed at, as above.
 
 `--gamut_in`/`--gamut_out` beyond the `.h` output; the EXR and HDR inputs
 Apple's usage also lists; and BC7 mode 0.

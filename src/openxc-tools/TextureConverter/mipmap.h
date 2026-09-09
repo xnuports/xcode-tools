@@ -42,6 +42,11 @@ float	*mip_downsample(const float *rgba, int w, int h, int d,
 	    enum mip_filter, enum mip_wrap, int *out_w, int *out_h,
 	    int *out_d);
 
+/* --alpha_to_coverage, through nvimage.  See mipmap.cpp. */
+float	 mip_alpha_coverage(const float *rgba, int w, int h, float ref);
+void	 mip_scale_alpha_to_coverage(float *rgba, int w, int h, float desired,
+	    float ref);
+
 #ifdef __cplusplus
 }
 #endif

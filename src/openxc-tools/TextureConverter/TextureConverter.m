@@ -225,6 +225,9 @@ static void *pack_raw(const float *rgba, int w, int h, const char *name,
     size_t *out_len);
 static float *unpack_level(const struct ktx_level *, bool bgra,
     int channels, int bits, int version);
+static void alpha_to_coverage(float **levels, const int *widths,
+    const int *heights, const int *depths, int n, int face, float *desired,
+    NSDictionary<NSString *, NSString *> *opts);
 static bool wants_header(NSString *output);
 static bool wants_dds(NSString *output);
 static NSData *write_dds_generic(void **levels, const size_t *sizes,
@@ -1225,6 +1228,7 @@ do_convert(NSArray<NSString *> *paths,
 	bool opaque = false;
 	NSData *data;
 	int n = 0, i, maxlevels, nresized = 0, ew = 0, eh = 0;
+	float coverage = -1.0f;
 
 
 	if ([filter caseInsensitiveCompare:@"Box"] == NSOrderedSame)
@@ -1507,6 +1511,9 @@ do_convert(NSArray<NSString *> *paths,
 	 * the multiplier: Apple write the same file with the two together
 	 * as with --rgbm_encoding alone.
 	 */
+	alpha_to_coverage(levels, widths, heights, depths, n, face, &coverage,
+	    opts);
+
 	/*
 	 * Before the RGBM encoding and not after it: a container read with
 	 * the alpha thrown away stays opaque all the way down, and Apple
@@ -1816,6 +1823,51 @@ write_ktx2_generic(void **levels, const size_t *sizes, const int *widths,
 /* ------------------------------------------------------------------ */
 
 /*
+ * --alpha_to_coverage: every image after the first is scaled so that the
+ * fraction of its alpha above --alpha_reference matches the first's.
+ *
+ * The first is the first, not the first of each face: a cubemap measures
+ * face zero's base and scales the other five faces' bases against it as
+ * well as every level behind them.  So the desired coverage is worked out
+ * once, on face zero, and carried across the rest.
+ *
+ * Under --alpha_mode=Ignore it does nothing on its own -- alpha is one
+ * everywhere, so every level already covers everything and the search
+ * stops at a scale of one on its first step -- which is why it is not
+ * guarded by the mode.
+ */
+static void
+alpha_to_coverage(float **levels, const int *widths, const int *heights,
+    const int *depths, int n, int face, float *desired,
+    NSDictionary<NSString *, NSString *> *opts)
+{
+	float ref;
+	int i, sl;
+
+	if (opts[@"alpha_to_coverage"] == nil)
+		return;
+	ref = opts[@"alpha_reference"] != nil ?
+	    [opts[@"alpha_reference"] floatValue] : 0.95f;
+	if (face == 0)
+		*desired = mip_alpha_coverage(levels[0], widths[0],
+		    heights[0], ref);
+	if (*desired < 0.0f)
+		return;
+	for (i = 0; i < n; i++) {
+		int slices = depths != NULL && depths[i] > 1 ? depths[i] : 1;
+		size_t each = (size_t)widths[i] * heights[i] * 4;
+
+		for (sl = 0; sl < slices; sl++) {
+			if (face == 0 && i == 0 && sl == 0)
+				continue;
+			mip_scale_alpha_to_coverage(levels[i] +
+			    (size_t)sl * each, widths[i], heights[i],
+			    *desired, ref);
+		}
+	}
+}
+
+/*
  * The TC_Options annotation.
  *
  * Apple record what the texture was actually made with, and they record it
@@ -1838,7 +1890,7 @@ tc_options_string(NSDictionary<NSString *, NSString *> *opts,
 		"compressor", "compression_format",
 		"compression_quality", "gamma_in", "gamma_out", "srgb_format",
 		"max_mipmaps", "mipmap_filter", "alpha_mode",
-		"alpha_to_coverage", "alpha_weight", "flip_x", "flip_y",
+		"alpha_reference", "alpha_to_coverage", "alpha_weight", "flip_x", "flip_y",
 		"flip_z", "max_extent", "resize_filter", "resize_round_mode",
 		"crop_uniform_content", "wrap_mode", "normal_map",
 		"rgbm_encoding", "rgbm_range", "scale_range",
@@ -1982,6 +2034,7 @@ do_compress(NSArray<NSString *> *paths,
 	NSData *data;
 	bool opaque = false;
 	int n = 0, i, fn = 1, maxlevels, ew = 0, eh = 0;
+	float coverage = -1.0f;
 
 	if (!format_lookup([fmt UTF8String], &gl, &base, &aopt.block_x,
 	    &aopt.block_y, &metal)) {
@@ -2332,6 +2385,9 @@ do_compress(NSArray<NSString *> *paths,
 	 * the multiplier: Apple write the same file with the two together
 	 * as with --rgbm_encoding alone.
 	 */
+	alpha_to_coverage(levels, widths, heights, depths, n, face, &coverage,
+	    opts);
+
 	/*
 	 * Before the RGBM encoding, for the reason the conversion path
 	 * gives: RGBM's multiplier lives in alpha and dropping alpha after

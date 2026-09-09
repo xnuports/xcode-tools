@@ -119,3 +119,66 @@ mip_downsample(const float *rgba, int w, int h, int d, enum mip_filter which,
 		*out_d = nd;
 	return (out);
 }
+
+/*
+ * --alpha_to_coverage, which is nvimage's, both halves of it.
+ *
+ * A mip chain loses coverage: filtering an alpha channel that a shader is
+ * going to threshold makes the thresholded area shrink, and a leaf texture
+ * thins out as it recedes.  The cure is to scale each level's alpha so that
+ * the fraction of it above the reference matches the base's, and NVTT finds
+ * that scale by bisecting over [0, 4] from a start of one, ten steps, and
+ * keeping whichever step came closest rather than the last.
+ *
+ * The measure is not a count of texels above the reference.  It bilinearly
+ * samples each 2x2 of neighbours sixteen times and counts the samples,
+ * which is what a magnified texture is actually thresholded at, so a level
+ * narrower than two texels has no measure at all and is left alone.
+ *
+ * The reference is --alpha_reference, 0.95 unless it is given.
+ */
+extern "C" float
+mip_alpha_coverage(const float *rgba, int w, int h, float ref)
+{
+	nv::FloatImage img;
+	int x, y, c;
+
+	if (w < 2 || h < 2)
+		return (-1.0f);
+	img.allocate(4, (unsigned)w, (unsigned)h);
+	for (y = 0; y < h; y++) {
+		for (x = 0; x < w; x++) {
+			for (c = 0; c < 4; c++)
+				img.pixel((unsigned)c, (unsigned)x,
+				    (unsigned)y, 0) =
+				    rgba[((size_t)y * w + x) * 4 + c];
+		}
+	}
+	return (img.alphaTestCoverage(ref, 3));
+}
+
+extern "C" void
+mip_scale_alpha_to_coverage(float *rgba, int w, int h, float desired,
+    float ref)
+{
+	nv::FloatImage img;
+	int x, y, c;
+
+	if (w < 2 || h < 2 || desired < 0.0f)
+		return;
+	img.allocate(4, (unsigned)w, (unsigned)h);
+	for (y = 0; y < h; y++) {
+		for (x = 0; x < w; x++) {
+			for (c = 0; c < 4; c++)
+				img.pixel((unsigned)c, (unsigned)x,
+				    (unsigned)y, 0) =
+				    rgba[((size_t)y * w + x) * 4 + c];
+		}
+	}
+	img.scaleAlphaToCoverage(desired, ref, 3);
+	for (y = 0; y < h; y++) {
+		for (x = 0; x < w; x++)
+			rgba[((size_t)y * w + x) * 4 + 3] =
+			    img.pixel(3, (unsigned)x, (unsigned)y, 0);
+	}
+}
