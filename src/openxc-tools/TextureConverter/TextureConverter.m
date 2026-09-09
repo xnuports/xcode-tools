@@ -1633,11 +1633,14 @@ write_dds_generic(void **levels, const size_t *sizes, const int *widths,
 	NSData *out;
 
 	/*
-	 * A cubemap or a volume gets no DDS at all; Apple write none and
-	 * say nothing.
+	 * A cubemap or a volume gets no DDS at all; Apple write none, say
+	 * so, and still exit zero.
 	 */
-	if (faces > 1 || (depths != NULL && depths[0] > 1))
+	if (faces > 1 || (depths != NULL && depths[0] > 1)) {
+		fprintf(stderr, "Error: DDS file support only supports 2D "
+		    "images\n");
 		return (nil);
+	}
 	if (dxgi == 0) {
 		fprintf(stderr, "Error: Compression format %s not supported "
 		    "for DDS files\n", format_atc_for(name, srgb, buf,
