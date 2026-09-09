@@ -2938,6 +2938,32 @@ main(int argc, char *argv[])
 		return (255);
 	}
 
+	/*
+	 * The four combining modes are mutually exclusive, and the pair
+	 * Apple name is the first two present in this order whichever way
+	 * round they were given.  The usage goes to stdout and the
+	 * complaint to stderr, before anything else is printed.
+	 */
+	{
+		static const char *const builds[] = { "build_array",
+		    "build_cubemap", "build_volume", "build_mips" };
+		const char *first = NULL;
+		size_t bi;
+
+		for (bi = 0; bi < sizeof(builds) / sizeof(builds[0]); bi++) {
+			if (opts[[NSString stringWithUTF8String:builds[bi]]]
+			    == nil)
+				continue;
+			if (first != NULL) {
+				short_usage();
+				fprintf(stderr, "Error: Can not combine --%s "
+				    "with --%s!\n", first, builds[bi]);
+				return (255);
+			}
+			first = builds[bi];
+		}
+	}
+
 	mode = opts[@"mode"];
 	if ([mode caseInsensitiveCompare:@"examine"] == NSOrderedSame)
 		return (do_examine(inputs[0]));
