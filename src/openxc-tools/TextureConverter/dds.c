@@ -72,7 +72,12 @@ dds_write(void **levels, const size_t *sizes, int width, int height,
 	p += 4;
 	for (i = 0; i < 5; i++)			/* bit count, four masks */
 		put32(&p, 0);
-	put32(&p, 0x00401008);			/* complex, texture, mipmap */
+	/*
+	 * Complex, texture and mipmap when there is a chain; plain texture
+	 * when there is one level, which is the same distinction dwFlags
+	 * already makes between 0x00821007 and 0x00801007.
+	 */
+	put32(&p, nlevels > 1 ? 0x00401008 : 0x00001000);
 	for (i = 0; i < 4; i++)			/* dwCaps2..4, dwReserved2 */
 		put32(&p, 0);
 
