@@ -1204,8 +1204,19 @@ do_convert(NSArray<NSString *> *paths,
 	 * alone, so the premultiply is simply not done.
 	 */
 	if (!normal && opts[@"rgbm_encoding"] == nil &&
-	    alpha_mode_of(opts) == ALPHA_PREMULTIPLY)
-		premultiply_base(levels[0], widths[0], heights[0]);
+	    alpha_mode_of(opts) == ALPHA_PREMULTIPLY) {
+		/*
+		 * Every level the input brought with it, not just the base:
+		 * a container carries a chain and each of its levels has its
+		 * own alpha to fold in.  The levels this tool filtered are
+		 * left alone -- they came off a base that had not been
+		 * multiplied yet, which is what Apple write for an image
+		 * file, where the input is one level and one is all that is
+		 * multiplied.
+		 */
+		for (i = 0; i < fn && i < n; i++)
+			premultiply_base(levels[i], widths[i], heights[i]);
+	}
 
 	/*
 	 * A gamma of one is no gamma at all, and skipping it is not just an
@@ -2487,7 +2498,24 @@ unpack_level(const struct ktx_level *lv, bool bgra, int channels,
 			const uint8_t *p = lv->data + (size_t)y * stride +
 			    (size_t)x * texel;
 
-			o[3] = 1.0f;
+			/*
+			 * A channel the format does not carry reads as
+			 * zero, and alpha as one -- except in the half
+			 * float formats, where Apple's fill is the
+			 * float whose bits are the integer one rather
+			 * than the float one: 1.4e-45, the smallest
+			 * denormal.  Converting an R16 container to
+			 * RGBA32 with --alpha_mode=Preserve writes
+			 * 0x00000001 in every alpha where R8 and R32
+			 * write 1.0, and --alpha_mode=Premultiply
+			 * multiplies the colour away to nothing.
+			 */
+			if (bits == 16) {
+				uint32_t one = 1;
+
+				memcpy(&o[3], &one, sizeof(o[3]));
+			} else
+				o[3] = 1.0f;
 			for (c = 0; c < channels; c++) {
 				int d = bgra && c < 3 ? 2 - c : c;
 
