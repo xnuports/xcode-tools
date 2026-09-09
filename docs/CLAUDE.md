@@ -981,29 +981,53 @@ compressed container is refused whichever of the three it is, as Apple's
 tool refuses it -- ImageIO will decode some of them, and answering where
 Apple says nothing is not the same tool.
 
-Converting a container keeps its format: an RGBA8 container converts to
-RGBA8, an R16 one to R16, and only an image file converts to RGBA32.  The
-alpha mode applies on the way in, which is easy to miss -- Ignore is the
-default, so a four channel container converts with ones in alpha whatever
-it came in with, and because the Kaiser filter over a constant one gives
-1.0000002 rather than one, getting this wrong surfaces two levels down and
-looks like a mip chain problem.
+The input's format is the default and `--compression_format` is the
+answer: an RGBA8 container converts to RGBA8 unless asked for something
+else, an image file to RGBA32.  Channels the target does not carry are
+dropped and channels it gains are filled.  A compressed format is not
+accepted here; Apple's segmentation faults on it.
 
-A container's own levels are kept and the chain only extended past them,
-unless reading the file changed the base those levels were filtered from.
-Forcing alpha to one changes it: a four channel container read with
-`--alpha_mode=Ignore`, the default, no longer has the base its levels came
-from, so the chain is rebuilt.  Under Preserve or Premultiply, and for
-every format with fewer than four channels, the levels stand.  Patching a
-level and converting shows it cleanly -- kept for R8, RG8, RGB8 and the
-one, two and three channel float formats under any alpha mode, kept for
-RGBA8 and RGBA32 under Preserve and Premultiply, rebuilt only for the four
-channel formats under Ignore.
+The alpha mode applies on the way in, which is easy to miss -- Ignore is
+the default, so a four channel container converts with ones in alpha
+whatever it came in with, and because the Kaiser filter over a constant
+one gives 1.0000002 rather than one, getting this wrong surfaces two
+levels down and looks like a mip chain problem.  The alpha stays gone all
+the way down: Apple write exactly one at every level, so it is thrown away
+again after the chain and not only on the way in.
 
-The alpha stays gone all the way down as well: Apple write exactly one at
-every level of such a file, where filtering a constant one gives
-1.0000002, so it is thrown away again after the chain and not only on the
-way in.
+A container carries a chain and conversion carries it across.  Every level
+the file holds is kept, whatever the format and whatever `--alpha_mode`
+says, and the chain is only extended past them.
+
+That last sentence replaced a wrong one, and the way it was wrong is worth
+keeping.  The experiment was to zero a level and ask whether the zeros
+came back.  They did not, for the four channel formats under Ignore, so
+the chain looked rebuilt there.  What actually came back was the zeroed
+level with its alpha rewritten to one -- which under Ignore is exactly
+what keeping it looks like, the RGB zero as written and only the alpha
+moved.  Patch a level's colour and leave its alpha alone and the patched
+level comes back out unchanged, for every uncompressed format and all
+three alpha modes.  An experiment that disturbs the thing being measured
+answers a different question.
+
+That is also what the RGBA16 gap was.  Converting a half float container
+rebuilt colour one unit in the last place of a half away from Apple's, in
+the mip levels only, level zero identical -- because it rebuilt at all.
+The source's levels were filtered from the image before it was quantised
+to half, and filtering the quantised base again cannot land in the same
+place.  Handed the same level zero as a one level file, the rebuild here
+is byte for byte Apple's.
+
+Alpha in the half float formats is its own quirk.  A channel the format
+does not carry reads as zero and alpha reads as one, except at sixteen
+bits, where Apple's fill is the float whose bits are the integer one
+rather than the float one: 1.4e-45, the smallest denormal.  An R16
+container to RGBA32 with `--alpha_mode=Preserve` writes 0x00000001 in
+every alpha where R8 and R32 write 1.0, and `--alpha_mode=Premultiply`
+multiplies the colour away to nothing.  The premultiply itself applies to
+every level the input brought with it, not only the base, since each of
+those levels has its own alpha; levels this tool filtered are left alone,
+which is what an image file gets, being one level.
 
 Version 1's padded rows are read as if they were tight, which is Apple's
 bug and is reproduced deliberately: an R8 level two texels wide comes back
@@ -1011,13 +1035,15 @@ as its two bytes and then the two bytes of padding behind them.  Reading
 the file correctly would put a different image through the rest of the
 tool than their tool has.
 
-227 of 248 across thirteen formats, three input containers and eight
-images, and 16 of 21 on containers with a level patched to disagree with a
-rebuild.  What is left is RGBA16: converting a half float container
-rebuilds colour a unit in the last place of a half away from Apple's, in
-the mip levels only, with level zero identical.  The same rebuild agrees
-when the floats are exact, so it is the half decode or the precision the
-chain runs at, and it is not yet pinned down.
+1521 of 1521 -- thirteen uncompressed formats each way, three images,
+three alpha modes -- against 106 of 1521 before this work, most of that
+being `--compression_format` reaching nothing.
+
+Compressing a container is the gap that is left: `do_compress` reads one
+level and rebuilds the chain, where conversion now keeps it, and 37 of 75
+match across five input formats and six block formats.  Decompressing to
+DDS is a smaller one, 12 cases of 84, all of them formats with fewer than
+four channels.
 
 `--build_cubemap` takes six inputs into six faces, in both modes and all
 four output formats.  The faces are six independent chains -- a face is
