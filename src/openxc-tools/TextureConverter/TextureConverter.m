@@ -1148,22 +1148,27 @@ do_convert(NSArray<NSString *> *paths,
 	/*
 	 * A container's own levels are kept and the chain is only extended
 	 * past them: converting a two level container gives a full chain
-	 * whose first two levels are the ones that came in.  Anything that
-	 * changes the base throws them away, since they would no longer
-	 * belong to it -- a flip, a gamma, a --max_extent that bites, a
-	 * normal map, and the alpha rewrite the reader handles.
+	 * whose first two levels are the ones that came in.  A flip, a
+	 * gamma or a normal map does not change that -- each is applied to
+	 * every level the file brought, and patching one of those levels
+	 * shows up in that level of the output and nowhere else.
+	 *
+	 * --max_extent is the one that does throw them away, because it
+	 * resizes the base and the levels behind it no longer line up: a
+	 * five level sixteen square container cut to eight comes out with
+	 * four levels that owe nothing to the ones it had.
 	 */
-	if (n > 1 && (opts[@"flip_x"] != nil || opts[@"flip_y"] != nil ||
-	    [opts[@"gamma_in"] floatValue] != 1.0f || normal ||
-	    [opts[@"max_extent"] intValue] < widths[0] ||
+	if (n > 1 && ([opts[@"max_extent"] intValue] < widths[0] ||
 	    [opts[@"max_extent"] intValue] < heights[0])) {
 		for (i = 1; i < n; i++)
 			free(levels[i]);
 		n = 1;
 	}
+	fn = n;
 
-	flip_image(levels[0], widths[0], heights[0],
-	    opts[@"flip_x"] != nil, opts[@"flip_y"] != nil);
+	for (i = 0; i < n; i++)
+		flip_image(levels[i], widths[i], heights[i],
+		    opts[@"flip_x"] != nil, opts[@"flip_y"] != nil);
 	/*
 	 * --gamma_in takes the colour to linear before anything samples it,
 	 * so the chain is filtered in linear space; --gamma_out puts every
@@ -1175,17 +1180,28 @@ do_convert(NSArray<NSString *> *paths,
 	 * same texels with --normal_map --gamma_in=2.2 as with --normal_map
 	 * alone, at every level.
 	 */
-	if (!normal && [opts[@"gamma_in"] floatValue] != 1.0f)
-		image_gamma(levels[0], widths[0], heights[0],
-		    [opts[@"gamma_in"] floatValue], 1);
+	if (!normal && [opts[@"gamma_in"] floatValue] != 1.0f) {
+		for (i = 0; i < n; i++)
+			image_gamma(levels[i], widths[i], heights[i],
+			    [opts[@"gamma_in"] floatValue], 1);
+	}
 	levels[0] = fit_extent(levels[0], &widths[0], &heights[0], &depths[0],
 	    [opts[@"max_extent"] intValue], which, wrap);
-	if (normal)
-		normalize_normals(levels[0], widths[0], heights[0]);
+	if (normal) {
+		for (i = 0; i < n; i++)
+			normalize_normals(levels[i], widths[i], heights[i]);
+	}
 
 	maxlevels = [opts[@"max_mipmaps"] intValue];
 	if (maxlevels <= 0 || maxlevels > MAX_LEVELS)
 		maxlevels = MAX_LEVELS;
+	/*
+	 * --max_mipmaps cuts a chain that came in too long as readily as it
+	 * stops one being built: a five level container asked for two comes
+	 * out with two.
+	 */
+	while (n > maxlevels)
+		free(levels[--n]);
 	while (n < maxlevels && (widths[n - 1] > 1 || heights[n - 1] > 1)) {
 		levels[n] = mip_downsample(levels[n - 1], widths[n - 1],
 		    heights[n - 1], depths[n - 1], which, wrap, &widths[n],
@@ -1237,14 +1253,21 @@ do_convert(NSArray<NSString *> *paths,
 	 * the multiplier: Apple write the same file with the two together
 	 * as with --rgbm_encoding alone.
 	 */
-	if (!normal && opts[@"rgbm_encoding"] != nil) {
-		for (i = 0; i < n; i++)
-			rgbm_encode(levels[i], widths[i], heights[i]);
-	}
-
+	/*
+	 * Before the RGBM encoding and not after it: a container read with
+	 * the alpha thrown away stays opaque all the way down, and Apple
+	 * write exactly one at every level where filtering a constant one
+	 * gives 1.0000002 -- but RGBM puts its multiplier in alpha, and
+	 * that multiplier is what the file is for.
+	 */
 	if (opaque) {
 		for (i = 0; i < n; i++)
 			drop_alpha(levels[i], widths[i], heights[i]);
+	}
+
+	if (!normal && opts[@"rgbm_encoding"] != nil) {
+		for (i = 0; i < n; i++)
+			rgbm_encode(levels[i], widths[i], heights[i]);
 	}
 
 	for (i = 0; i < n; i++)
@@ -1652,7 +1675,8 @@ do_compress(NSArray<NSString *> *paths,
 	NSString *compressor;
 	uint32_t gl, base, metal;
 	NSData *data;
-	int n = 0, i, maxlevels;
+	bool opaque = false;
+	int n = 0, i, fn = 1, maxlevels;
 
 	if (!format_lookup([fmt UTF8String], &gl, &base, &aopt.block_x,
 	    &aopt.block_y, &metal)) {
@@ -1796,20 +1820,49 @@ do_compress(NSArray<NSString *> *paths,
 		const char *iname;
 
 		int got = load_container(paths[face], alpha_mode_of(opts),
-		    levels, widths, heights, 1, &iname);
+		    levels, widths, heights, MAX_LEVELS, &iname);
 
 		if (got == 0)
 			levels[0] = load_rgba(paths[face],
 			    alpha_mode_of(opts), &widths[0], &heights[0]);
 		else if (got < 0)
 			levels[0] = NULL;
+		else {
+			/*
+			 * A container carries a chain and compressing one
+			 * carries it across, exactly as conversion does:
+			 * each level the file holds is encoded as it
+			 * stands and the chain is only extended past them.
+			 * Patching a level of an RGBA8 container and
+			 * asking for BC1 changes that level's blocks and
+			 * no others.
+			 */
+			fn = got;
+			opaque = alpha_mode_of(opts) == ALPHA_IGNORE;
+			for (i = 1; i < fn; i++)
+				depths[i] = 1;
+		}
 	}
 	if (levels[0] == NULL) {
 		printf("Error: Could not read input file!\n");
 		return (255);
 	}
-	flip_image(levels[0], widths[0], heights[0],
-	    opts[@"flip_x"] != nil, opts[@"flip_y"] != nil);
+	/*
+	 * --max_extent is the one thing that throws the levels that came
+	 * with the file away: it resizes the base and the levels behind it
+	 * no longer line up.  A flip, a gamma and a normal map are applied
+	 * to each of those levels instead.
+	 */
+	if (fn > 1 && ([opts[@"max_extent"] intValue] < widths[0] ||
+	    [opts[@"max_extent"] intValue] < heights[0])) {
+		for (i = 1; i < fn; i++)
+			free(levels[i]);
+		fn = 1;
+	}
+
+	for (i = 0; i < fn; i++)
+		flip_image(levels[i], widths[i], heights[i],
+		    opts[@"flip_x"] != nil, opts[@"flip_y"] != nil);
 	/*
 	 * --gamma_in takes the colour to linear before anything samples it,
 	 * so the chain is filtered in linear space; --gamma_out puts every
@@ -1821,17 +1874,28 @@ do_compress(NSArray<NSString *> *paths,
 	 * same texels with --normal_map --gamma_in=2.2 as with --normal_map
 	 * alone, at every level.
 	 */
-	if (!normal && [opts[@"gamma_in"] floatValue] != 1.0f)
-		image_gamma(levels[0], widths[0], heights[0],
-		    [opts[@"gamma_in"] floatValue], 1);
+	if (!normal && [opts[@"gamma_in"] floatValue] != 1.0f) {
+		for (i = 0; i < fn; i++)
+			image_gamma(levels[i], widths[i], heights[i],
+			    [opts[@"gamma_in"] floatValue], 1);
+	}
 	levels[0] = fit_extent(levels[0], &widths[0], &heights[0], &depths[0],
 	    [opts[@"max_extent"] intValue], which, wrap);
-	if (normal)
-		normalize_normals(levels[0], widths[0], heights[0]);
-	n = 1;
+	if (normal) {
+		for (i = 0; i < fn; i++)
+			normalize_normals(levels[i], widths[i], heights[i]);
+	}
+	n = fn;
 	maxlevels = [opts[@"max_mipmaps"] intValue];
 	if (maxlevels <= 0 || maxlevels > MAX_LEVELS)
 		maxlevels = MAX_LEVELS;
+	/*
+	 * --max_mipmaps cuts a chain that came in too long as readily as it
+	 * stops one being built: a five level container asked for two comes
+	 * out with two.
+	 */
+	while (n > maxlevels)
+		free(levels[--n]);
 	while (n < maxlevels && (widths[n - 1] > 1 || heights[n - 1] > 1)) {
 		levels[n] = mip_downsample(levels[n - 1], widths[n - 1],
 		    heights[n - 1], depths[n - 1], which, wrap, &widths[n],
@@ -1850,8 +1914,16 @@ do_compress(NSArray<NSString *> *paths,
 	 * alone, so the premultiply is simply not done.
 	 */
 	if (!normal && opts[@"rgbm_encoding"] == nil &&
-	    alpha_mode_of(opts) == ALPHA_PREMULTIPLY)
-		premultiply_base(levels[0], widths[0], heights[0]);
+	    alpha_mode_of(opts) == ALPHA_PREMULTIPLY) {
+		/*
+		 * Every level the input brought with it, as conversion does:
+		 * each of a container's levels has its own alpha to fold in,
+		 * and the levels this tool filtered came off a base that had
+		 * not been multiplied yet.
+		 */
+		for (i = 0; i < fn && i < n; i++)
+			premultiply_base(levels[i], widths[i], heights[i]);
+	}
 
 	/*
 	 * A gamma of one is no gamma at all, and skipping it is not just an
@@ -1872,6 +1944,16 @@ do_compress(NSArray<NSString *> *paths,
 	 * the multiplier: Apple write the same file with the two together
 	 * as with --rgbm_encoding alone.
 	 */
+	/*
+	 * Before the RGBM encoding, for the reason the conversion path
+	 * gives: RGBM's multiplier lives in alpha and dropping alpha after
+	 * it would throw the multiplier away.
+	 */
+	if (opaque) {
+		for (i = 0; i < n; i++)
+			drop_alpha(levels[i], widths[i], heights[i]);
+	}
+
 	if (!normal && opts[@"rgbm_encoding"] != nil) {
 		for (i = 0; i < n; i++)
 			rgbm_encode(levels[i], widths[i], heights[i]);
