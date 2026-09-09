@@ -157,18 +157,46 @@ static float *
 fit_extent(float *rgba, int *w, int *h, int *d, int extent,
     enum mip_filter which, enum mip_wrap wrap)
 {
+	/*
+	 * A slice at a time, and the slice count is left alone: --max_extent
+	 * bounds the width and the height and says nothing about the depth.
+	 * Halving a volume's depth here as the mip chain does would leave a
+	 * two slice volume one slice deep, where Apple keep both -- and
+	 * they announce one resize per slice, which is the same thing said
+	 * out loud.
+	 */
 	while (extent > 0 && (*w > extent || *h > extent)) {
-		int nw, nh, nd;
-		float *half = mip_downsample(rgba, *w, *h, *d, which, wrap,
-		    &nw, &nh, &nd);
+		int slices = *d > 1 ? *d : 1;
+		int nw = 0, nh = 0, nd, z;
+		float *out = NULL;
 
-		if (half == NULL)
+		for (z = 0; z < slices; z++) {
+			float *half = mip_downsample(rgba +
+			    (size_t)z * *w * *h * 4, *w, *h, 1, which, wrap,
+			    &nw, &nh, &nd);
+
+			if (half == NULL)
+				break;
+			if (out == NULL) {
+				out = malloc((size_t)nw * nh * slices * 4 *
+				    sizeof(*out));
+				if (out == NULL) {
+					free(half);
+					break;
+				}
+			}
+			memcpy(out + (size_t)z * nw * nh * 4, half,
+			    (size_t)nw * nh * 4 * sizeof(*out));
+			free(half);
+		}
+		if (out == NULL || z < slices) {
+			free(out);
 			break;
+		}
 		free(rgba);
-		rgba = half;
+		rgba = out;
 		*w = nw;
 		*h = nh;
-		*d = nd;
 	}
 	return (rgba);
 }
