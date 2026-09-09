@@ -53,6 +53,9 @@ bool	 bc7_has_mode0(const uint8_t *blocks, size_t len);
 /* An image file through NVTT's reader.  See decode.cpp. */
 uint8_t	*image_load_rgba8(const char *path, int *wp, int *hp);
 
+/* A float as a half, NVTT's way, which is Apple's.  See decode.cpp. */
+uint16_t float_to_half(float f);
+
 #ifdef __cplusplus
 }
 #endif

@@ -860,9 +860,19 @@ containers, seven images and all three wrap modes.  Two measurements
 settled the packing: a byte is the sample rounded to a sixteen bit unorm
 and reduced to its top byte, which only the mip levels can tell from
 either one-step rule since every sample the decompress path produces is
-already a multiple of 1/255; and a half rounds a tie up rather than to
-even, so 0.4659423828125 comes out one step above what the hardware
-conversion gives.
+already a multiple of 1/255; and a half is NVTT's `to_half`,
+which rounds a tie up rather than to even -- 0.4659423828125 comes out one
+step above what the hardware conversion gives.
+
+That last one was written here by hand for a long time and was wrong in
+the subnormals.  A conversion cannot be fitted from the rounding of the
+exact value there: Apple's answer is the truncation of it except within
+about 0.07 of a unit below the next step up, where it rounds instead,
+which is what a conversion that does its rounding before the exponent is
+decided looks like and not a rule that can be written as one.  NVTT's
+reproduces every one of them -- 5460 halves of an image with subnormals in
+it, exactly -- so that is what is called now.  It only showed on an image
+dark enough to make subnormal mip levels, which is why it lasted.
 
 `--srgb_format` is byte-identical over the twenty-one formats that have an
 sRGB spelling.  It changes the OpenGL and Vulkan enumerants, moves the

@@ -2694,38 +2694,6 @@ pack_bytes_bgra(const float *rgba, int w, int h, size_t *out_len)
  * whose channels are not in order.  Rows are padded to four bytes as
  * version 1 wants, which is what pack_bytes does for the byte formats.
  */
-/*
- * A sample as a half.  Not __fp16, which rounds a tie to even: Apple round
- * a tie up, so 0.4659423828125 -- exactly between two halves -- comes out
- * 0x3775 where the hardware conversion gives 0x3774.  Adding half of the
- * low bit kept before the shift is what does it.
- */
-static uint16_t
-to_half(float f)
-{
-	uint32_t u, sign;
-	int exp, shift;
-
-	memcpy(&u, &f, sizeof(u));
-	sign = (u >> 16) & 0x8000;
-	u &= 0x7fffffff;
-
-	if (u >= 0x7f800000)		/* infinity, or not a number */
-		return ((uint16_t)(sign | 0x7c00 |
-		    ((u & 0x007fffff) ? 0x0200 : 0)));
-	if (u >= 0x477ff000)		/* rounds past the largest half */
-		return ((uint16_t)(sign | 0x7c00));
-	if (u >= 0x38800000)		/* a normal half */
-		return ((uint16_t)(sign |
-		    (((u + 0x00001000) - 0x38000000) >> 13)));
-	if (u < 0x33000000)		/* rounds to zero */
-		return ((uint16_t)sign);
-	/* Subnormal: put the hidden bit back and round at the same place. */
-	exp = (int)(u >> 23);
-	shift = 126 - exp;
-	u = (u & 0x007fffff) | 0x00800000;
-	return ((uint16_t)(sign | ((u + (1u << (shift - 1))) >> shift)));
-}
 
 static void *
 pack_raw(const float *rgba, int w, int h, const char *name, size_t *out_len)
@@ -2758,7 +2726,7 @@ pack_raw(const float *rgba, int w, int h, const char *name, size_t *out_len)
 				if (bits == 32) {
 					memcpy(o + c * 4, &px[c], 4);
 				} else {
-					uint16_t h16 = to_half(px[c]);
+					uint16_t h16 = float_to_half(px[c]);
 
 					memcpy(o + c * 2, &h16, 2);
 				}
@@ -3001,7 +2969,7 @@ bytes_to_float(uint8_t *px, size_t n)
 	return (out);
 }
 
-/* A half back to a float.  The other direction is to_half. */
+/* A half back to a float.  The other direction is float_to_half. */
 static float
 from_half(uint16_t h)
 {

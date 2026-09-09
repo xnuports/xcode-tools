@@ -19,6 +19,7 @@
 #include <bc6h/zoh_utils.h>
 #include <nvimage/Image.h>
 #include <nvimage/ImageIO.h>
+#include <nvmath/Half.h>
 /*
  * Color32's four-argument constructor lists its members out of order, and
  * this tree builds with -Werror.  The header is a submodule's and is left
@@ -164,6 +165,27 @@ bc7_has_mode0(const uint8_t *blocks, size_t len)
 			return (true);
 	}
 	return (false);
+}
+
+/*
+ * A float as a half, NVTT's way.
+ *
+ * Apple's is NVTT's, exactly: 5460 halves of an image with subnormals in
+ * it come back identical, where a conversion written here got 11 of them
+ * wrong.  The disagreements are all subnormal and all small -- their value
+ * is the truncation of the exact one except within about 0.07 of a unit
+ * below the next step up, where it rounds -- which is what a conversion
+ * that does its rounding before the exponent is decided looks like, and
+ * not any rule that can be written as one.
+ *
+ * It is also where the rounding of halves at a tie comes from: this rounds
+ * up rather than to even, which was measured from their output long before
+ * the reason for it was known.
+ */
+extern "C" uint16_t
+float_to_half(float f)
+{
+	return (nv::to_half(f));
 }
 
 /*
