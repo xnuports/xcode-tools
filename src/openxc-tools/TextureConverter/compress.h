@@ -25,7 +25,7 @@ enum tc_quality {
 	TC_QUALITY_HIGHEST
 };
 
-/* The range --rgbm_encoding packs into, measured from Apple's output. */
+/* The range --rgbm_encoding packs into when --rgbm_range is not given. */
 #define	TC_RGBM_RANGE	6.0f
 
 struct tc_astc_options {
@@ -35,6 +35,7 @@ struct tc_astc_options {
 	bool		alpha_weight;	/* --alpha_weight */
 	bool		normal;		/* --normal_map */
 	bool		rgbm;		/* --rgbm_encoding */
+	float		rgbm_range;	/* --rgbm_range */
 };
 
 /*

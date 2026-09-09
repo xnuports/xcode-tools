@@ -112,10 +112,23 @@ flip_image(float *rgba, int w, int h, bool flip_x, bool flip_y)
  * multiple of 1/255 rounds up either way with the reciprocal, and stays
  * put with the divide, which is one step low for one texel in seven.
  */
-static void
-rgbm_encode(float *rgba, int w, int h)
+/*
+ * --rgbm_range, which is the range the encoding packs into: six unless it
+ * is given, and it has to be at least one.  Apple parse it with stof, so
+ * a fraction is allowed and a word is an error of its own.
+ */
+static float
+rgbm_range_of(NSDictionary<NSString *, NSString *> *opts)
 {
-	static const float inv6 = 1.0f / TC_RGBM_RANGE;
+	NSString *v = opts[@"rgbm_range"];
+
+	return (v == nil ? TC_RGBM_RANGE : [v floatValue]);
+}
+
+static void
+rgbm_encode(float *rgba, int w, int h, float range)
+{
+	const float inv6 = 1.0f / range;
 	size_t n = (size_t)w * (size_t)h, i;
 	int c;
 
@@ -1210,6 +1223,12 @@ do_convert(NSArray<NSString *> *paths,
 		    "input textures!\n");
 		return (255);
 	}
+	if (opts[@"rgbm_encoding"] != nil && rgbm_range_of(opts) < 1.0f) {
+		short_usage();
+		fprintf(stderr, "Error: The value for the RGBM range must be "
+		    "greater than or equal to 1.0!\n");
+		return (255);
+	}
 
 	for (face = 0; face < faces; face++) {
 	float *f[MAX_LEVELS];
@@ -1440,7 +1459,8 @@ do_convert(NSArray<NSString *> *paths,
 
 	if (!normal && opts[@"rgbm_encoding"] != nil) {
 		for (i = 0; i < n; i++)
-			rgbm_encode(levels[i], widths[i], heights[i]);
+			rgbm_encode(levels[i], widths[i], heights[i],
+			    rgbm_range_of(opts));
 	}
 
 	for (i = 0; i < n; i++)
@@ -1752,7 +1772,8 @@ tc_options_string(NSDictionary<NSString *, NSString *> *opts,
 		"alpha_to_coverage", "alpha_weight", "flip_x", "flip_y",
 		"flip_z", "max_extent", "resize_filter", "resize_round_mode",
 		"crop_uniform_content", "wrap_mode", "normal_map",
-		"rgbm_encoding", "scale_range", "channel_weighting"
+		"rgbm_encoding", "rgbm_range", "scale_range",
+		"channel_weighting"
 	};
 	NSMutableString *out = [NSMutableString string];
 	size_t i;
@@ -2001,6 +2022,7 @@ do_compress(NSArray<NSString *> *paths,
 	aopt.alpha_weight = opts[@"alpha_weight"] != nil;
 	aopt.normal = normal;
 	aopt.rgbm = opts[@"rgbm_encoding"] != nil;
+	aopt.rgbm_range = rgbm_range_of(opts);
 
 	if ([filter caseInsensitiveCompare:@"Box"] == NSOrderedSame)
 		which = MIP_FILTER_BOX;
@@ -2033,6 +2055,12 @@ do_compress(NSArray<NSString *> *paths,
 		short_usage();
 		fprintf(stderr, "Error: --build_mips requires at least two "
 		    "input textures!\n");
+		return (255);
+	}
+	if (opts[@"rgbm_encoding"] != nil && rgbm_range_of(opts) < 1.0f) {
+		short_usage();
+		fprintf(stderr, "Error: The value for the RGBM range must be "
+		    "greater than or equal to 1.0!\n");
 		return (255);
 	}
 
@@ -2224,7 +2252,8 @@ do_compress(NSArray<NSString *> *paths,
 
 	if (!normal && opts[@"rgbm_encoding"] != nil) {
 		for (i = 0; i < n; i++)
-			rgbm_encode(levels[i], widths[i], heights[i]);
+			rgbm_encode(levels[i], widths[i], heights[i],
+			    rgbm_range_of(opts));
 	}
 
 	for (i = 0; i < n; i++) {

@@ -955,6 +955,15 @@ undershoots there, so running it would lift every negative sample the
 chain produced -- which is what the default gamma of 1.000000 does if the
 option is read as present rather than as a value.
 
+`--rgbm_range` is the range the encoding packs into, six unless it is
+given and never less than one -- Apple parse it with stof, so a fraction
+is allowed, a word is an error of its own, and anything below one is
+refused with the usage on stdout.  It reaches the ASTC encoder as
+`rgbm_m_scale` and, at twice its value, `cw_a_weight`, which is where the
+six came from in the first place.  The complaint only fires when
+`--rgbm_encoding` is there to use it: the range alone is accepted and
+recorded and does nothing.
+
 `--alpha_to_coverage` is measured but not solved, and is left inert rather
 than guessed at.  What is known: it does nothing when alpha is being
 ignored, which is the default; under Preserve or Premultiply it scales the
@@ -1153,9 +1162,6 @@ Still to write, in the order they are worth doing:
 with `numberOfArrayElements` set.  Its exclusivity check is in place, so
 naming it beside another combining mode says the right thing; naming it
 alone does not yet build anything.
-
-`--rgbm_range`, which is the one recorded option that still changes
-Apple's pixels and does nothing here.  The default is 6.
 
 `--alpha_to_coverage` with its `--alpha_reference`, measured and left
 inert rather than guessed at, as above.

@@ -90,8 +90,8 @@ compress_astc(const float *rgba, int w, int h,
 	    &config) != ASTCENC_SUCCESS)
 		return (NULL);
 	if (opt->rgbm) {
-		config.rgbm_m_scale = TC_RGBM_RANGE;
-		config.cw_a_weight = 2.0f * TC_RGBM_RANGE;
+		config.rgbm_m_scale = opt->rgbm_range;
+		config.cw_a_weight = 2.0f * opt->rgbm_range;
 	}
 	if (astcenc_context_alloc(&config, 1, &ctx, NULL) != ASTCENC_SUCCESS)
 		return (NULL);
