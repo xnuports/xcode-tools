@@ -748,6 +748,78 @@ load_rgba(NSString *path, enum alpha_mode amode, int *wp, int *hp)
 }
 
 /*
+ * One input of a --build_mips chain: a container or an image file, and
+ * only its level zero either way, since the inputs are the levels.  The
+ * name it comes in as is what the level's format has to be -- an image
+ * file is RGBA32 and a container is whatever it says -- and Apple check
+ * that every level agrees with level zero on it.
+ *
+ * Returns 1 with the level, 0 if the file could not be read at all.
+ */
+static int
+load_mip_input(NSString *path, enum alpha_mode amode, float **out, int *w,
+    int *h, const char **namep)
+{
+	float *f[1];
+	const char *name = NULL;
+	int ws[1], hs[1], got;
+
+	got = load_container(path, amode, f, ws, hs, 1, &name);
+	if (got <= 0) {
+		if (got < 0)
+			return (0);
+		name = "RGBA32";
+		f[0] = load_rgba(path, amode, &ws[0], &hs[0]);
+		if (f[0] == NULL)
+			return (0);
+	}
+	*out = f[0];
+	*w = ws[0];
+	*h = hs[0];
+	*namep = name;
+	return (1);
+}
+
+/*
+ * The levels of a --build_mips chain, level zero already in hand.  Each
+ * one has to be the level it claims to be: the dimensions are checked
+ * against the base shifted right, with no clamp at one, so a sixteen by
+ * eight base takes four levels and not five -- level four would have to
+ * be one by zero.  The check runs after --max_extent has resized the
+ * base, which is Apple's order and is visible in their message.
+ *
+ * Dimensions first and the format second, which is also theirs: an image
+ * file beside a container fails on the size if the size is wrong and on
+ * the format if it is not.
+ */
+static int
+check_mip_levels(NSArray<NSString *> *paths, int n, const int *widths,
+    const int *heights, const char *base, const char **names)
+{
+	int i;
+
+	for (i = 1; i < n; i++) {
+		int ew = widths[0] >> i, eh = heights[0] >> i;
+
+		if (widths[i] != ew || heights[i] != eh) {
+			fprintf(stderr, "Error: Mipmap mip %d error: \"%s\" "
+			    "dimensions (%dx%d) do not match expected mip "
+			    "(%dx%d)>>%d = (%dx%d)!\n", i,
+			    [paths[i] UTF8String], widths[i], heights[i],
+			    widths[0], heights[0], i, ew, eh);
+			return (0);
+		}
+		if (strcmp(names[i], base) != 0) {
+			fprintf(stderr, "Error: Mipmap mip %d error: \"%s\" "
+			    "format (%s) does not match mip 0 (%s)!\n", i,
+			    [paths[i] UTF8String], names[i], base);
+			return (0);
+		}
+	}
+	return (1);
+}
+
+/*
  * Fold alpha into colour.  Only the base level: the mip chain is built from
  * the straight colour and left alone, which is what Apple's does -- their
  * --alpha_mode=Premultiply and --alpha_mode=Preserve write byte for byte the
@@ -1061,18 +1133,21 @@ do_convert(NSArray<NSString *> *paths,
 	int face;
 	bool cube = opts[@"build_cubemap"] != nil;
 	bool volume = opts[@"build_volume"] != nil;
+	bool mips = opts[@"build_mips"] != nil;
 	NSString *output = opts[@"output"];
 	NSString *filter = opts[@"mipmap_filter"];
 	enum mip_filter which = MIP_FILTER_KAISER;
 	enum mip_wrap wrap = MIP_WRAP_MIRROR;
 	bool normal = opts[@"normal_map"] != nil;
 	bool srgb = opts[@"srgb_format"] != nil;
+	const char *mnames[MAX_LEVELS];
 	const char *oname = "RGBA32";
 	bool opaque = false;
 	NSData *data;
 	int n = 0, i, maxlevels;
 
-	printf("Converting %s\n\n", [path UTF8String]);
+	if (!cube && !volume && !mips)
+		printf("Converting %s\n\n", [path UTF8String]);
 
 	if ([filter caseInsensitiveCompare:@"Box"] == NSOrderedSame)
 		which = MIP_FILTER_BOX;
@@ -1085,15 +1160,43 @@ do_convert(NSArray<NSString *> *paths,
 	    NSOrderedSame)
 		wrap = MIP_WRAP_REPEAT;
 
-	/* Six faces exactly, and a volume wants at least two slices. */
+	/*
+	 * Six faces exactly, and a volume or a chain wants at least two.
+	 * The usage goes to stdout and the complaint to stderr, which is
+	 * how Apple's tool splits these -- and "at size" is their typo,
+	 * kept because the text is what a caller matches on.
+	 */
 	if (cube && faces != MAX_FACES) {
-		printf("Error: A cubemap needs six input files!\n");
+		short_usage();
+		fprintf(stderr, "Error: --build_cubemap requires at size "
+		    "input textures!\n");
 		return (255);
 	}
 	if (volume && paths.count < 2) {
-		printf("Error: A volume needs more than one input file!\n");
+		short_usage();
+		fprintf(stderr, "Error: --build_volume requires at least two "
+		    "input textures!\n");
 		return (255);
 	}
+	if (mips && paths.count < 2) {
+		short_usage();
+		fprintf(stderr, "Error: --build_mips requires at least two "
+		    "input textures!\n");
+		return (255);
+	}
+
+	/*
+	 * The combining modes name themselves and the file they are making,
+	 * where an ordinary conversion names the file it is reading.  A
+	 * chain announces itself later still, once its levels have been
+	 * checked: Apple write nothing at all when one is the wrong size.
+	 */
+	if (cube)
+		printf("Building cubemap texture %s\n\n",
+		    [output UTF8String]);
+	else if (volume)
+		printf("Building volume texture %s\n\n",
+		    [output UTF8String]);
 
 	for (face = 0; face < faces; face++) {
 	float *f[MAX_LEVELS];
@@ -1110,6 +1213,24 @@ do_convert(NSArray<NSString *> *paths,
 		f[0] = load_volume(paths, alpha_mode_of(opts), &widths[0],
 		    &heights[0], &depths[0]);
 		fn = f[0] != NULL ? 1 : 0;
+	} else if (mips) {
+		/*
+		 * The inputs are the levels of one chain.  Only level zero
+		 * of each is taken, even from a container that carries a
+		 * chain of its own.
+		 */
+		fn = (int)paths.count > MAX_LEVELS ? MAX_LEVELS :
+		    (int)paths.count;
+		for (i = 0; i < fn; i++) {
+			if (!load_mip_input(paths[i], alpha_mode_of(opts),
+			    &f[i], &widths[i], &heights[i], &mnames[i])) {
+				fn = 0;
+				break;
+			}
+			depths[i] = 1;
+		}
+		if (fn > 0)
+			oname = mnames[0];
 	} else if ((fn = load_container(paths[face], alpha_mode_of(opts), f,
 	    widths, heights, MAX_LEVELS, &oname)) != 0) {
 		/*
@@ -1159,7 +1280,7 @@ do_convert(NSArray<NSString *> *paths,
 	 * five level sixteen square container cut to eight comes out with
 	 * four levels that owe nothing to the ones it had.
 	 */
-	if (n > 1 && ([opts[@"max_extent"] intValue] < widths[0] ||
+	if (!mips && n > 1 && ([opts[@"max_extent"] intValue] < widths[0] ||
 	    [opts[@"max_extent"] intValue] < heights[0])) {
 		for (i = 1; i < n; i++)
 			free(levels[i]);
@@ -1188,6 +1309,20 @@ do_convert(NSArray<NSString *> *paths,
 	}
 	levels[0] = fit_extent(levels[0], &widths[0], &heights[0], &depths[0],
 	    [opts[@"max_extent"] intValue], which, wrap);
+	/*
+	 * After the resize and not before it: --max_extent moves the base
+	 * the levels are measured against, and a chain that lined up with
+	 * the file on disk need not line up with what the resize left.
+	 */
+	if (mips) {
+		if (!check_mip_levels(paths, n, widths, heights, mnames[0],
+		    mnames)) {
+			fprintf(stderr, "Error: File Not Found!\n");
+			return (255);
+		}
+		printf("Building mip mapped texture %s\n\n",
+		    [output UTF8String]);
+	}
 	if (normal) {
 		for (i = 0; i < n; i++)
 			normalize_normals(levels[i], widths[i], heights[i]);
@@ -1690,7 +1825,9 @@ do_compress(NSArray<NSString *> *paths,
 	enum tc_bc bc = TC_BC1;
 	enum tc_etc etc = TC_ETC2_RGB8;
 	bool srgb = opts[@"srgb_format"] != nil;
+	bool mips = opts[@"build_mips"] != nil;
 	uint32_t type = 0, type_size = 1, gl_format = 0, texel = 0;
+	const char *mnames[MAX_LEVELS];
 	NSString *compressor;
 	uint32_t gl, base, metal;
 	NSData *data;
@@ -1818,23 +1955,54 @@ do_compress(NSArray<NSString *> *paths,
 	    NSOrderedSame)
 		wrap = MIP_WRAP_REPEAT;
 
-	printf("Using Compressor: %s\n", [compressor UTF8String]);
-
-	/* Six faces exactly, and a volume wants at least two slices. */
+	/*
+	 * Before the compressor is named, which is where Apple check them:
+	 * a wrong count prints the usage and nothing else.
+	 */
 	if (cube && faces != MAX_FACES) {
-		printf("Error: A cubemap needs six input files!\n");
+		short_usage();
+		fprintf(stderr, "Error: --build_cubemap requires at size "
+		    "input textures!\n");
 		return (255);
 	}
 	if (volume && paths.count < 2) {
-		printf("Error: A volume needs more than one input file!\n");
+		short_usage();
+		fprintf(stderr, "Error: --build_volume requires at least two "
+		    "input textures!\n");
 		return (255);
 	}
+	if (mips && paths.count < 2) {
+		short_usage();
+		fprintf(stderr, "Error: --build_mips requires at least two "
+		    "input textures!\n");
+		return (255);
+	}
+
+	printf("Using Compressor: %s\n", [compressor UTF8String]);
+
 
 	for (face = 0; face < faces; face++) {
 	depths[0] = 1;
 	if (volume) {
 		levels[0] = load_volume(paths, alpha_mode_of(opts),
 		    &widths[0], &heights[0], &depths[0]);
+	} else if (mips) {
+		/*
+		 * The inputs are the levels of one chain, level zero of
+		 * each and no more, as the conversion path takes them.
+		 */
+		fn = (int)paths.count > MAX_LEVELS ? MAX_LEVELS :
+		    (int)paths.count;
+		for (i = 0; i < fn; i++) {
+			if (!load_mip_input(paths[i], alpha_mode_of(opts),
+			    &levels[i], &widths[i], &heights[i],
+			    &mnames[i])) {
+				levels[0] = NULL;
+				break;
+			}
+			depths[i] = 1;
+		}
+		opaque = alpha_mode_of(opts) == ALPHA_IGNORE;
 	} else {
 		const char *iname;
 
@@ -1872,7 +2040,7 @@ do_compress(NSArray<NSString *> *paths,
 	 * no longer line up.  A flip, a gamma and a normal map are applied
 	 * to each of those levels instead.
 	 */
-	if (fn > 1 && ([opts[@"max_extent"] intValue] < widths[0] ||
+	if (!mips && fn > 1 && ([opts[@"max_extent"] intValue] < widths[0] ||
 	    [opts[@"max_extent"] intValue] < heights[0])) {
 		for (i = 1; i < fn; i++)
 			free(levels[i]);
@@ -1900,6 +2068,12 @@ do_compress(NSArray<NSString *> *paths,
 	}
 	levels[0] = fit_extent(levels[0], &widths[0], &heights[0], &depths[0],
 	    [opts[@"max_extent"] intValue], which, wrap);
+	/* After the resize, as the conversion path explains. */
+	if (mips && !check_mip_levels(paths, fn, widths, heights, mnames[0],
+	    mnames)) {
+		fprintf(stderr, "Error: Failed to compress texture\n");
+		return (255);
+	}
 	if (normal) {
 		for (i = 0; i < fn; i++)
 			normalize_normals(levels[i], widths[i], heights[i]);
