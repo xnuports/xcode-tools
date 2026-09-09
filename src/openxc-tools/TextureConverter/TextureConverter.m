@@ -1172,10 +1172,8 @@ do_convert(NSArray<NSString *> *paths,
 	const char *oname = "RGBA32";
 	bool opaque = false;
 	NSData *data;
-	int n = 0, i, maxlevels;
+	int n = 0, i, maxlevels, nresized = 0;
 
-	if (!cube && !volume && !mips)
-		printf("Converting %s\n\n", [path UTF8String]);
 
 	if ([filter caseInsensitiveCompare:@"Box"] == NSOrderedSame)
 		which = MIP_FILTER_BOX;
@@ -1212,19 +1210,6 @@ do_convert(NSArray<NSString *> *paths,
 		    "input textures!\n");
 		return (255);
 	}
-
-	/*
-	 * The combining modes name themselves and the file they are making,
-	 * where an ordinary conversion names the file it is reading.  A
-	 * chain announces itself later still, once its levels have been
-	 * checked: Apple write nothing at all when one is the wrong size.
-	 */
-	if (cube)
-		printf("Building cubemap texture %s\n\n",
-		    [output UTF8String]);
-	else if (volume)
-		printf("Building volume texture %s\n\n",
-		    [output UTF8String]);
 
 	for (face = 0; face < faces; face++) {
 	float *f[MAX_LEVELS];
@@ -1335,21 +1320,45 @@ do_convert(NSArray<NSString *> *paths,
 			image_gamma(levels[i], widths[i], heights[i],
 			    [opts[@"gamma_in"] floatValue], 1);
 	}
-	levels[0] = fit_extent(levels[0], &widths[0], &heights[0], &depths[0],
-	    [opts[@"max_extent"] intValue], which, wrap);
+	{
+		int ow = widths[0], oh = heights[0], od = depths[0];
+
+		levels[0] = fit_extent(levels[0], &widths[0], &heights[0],
+		    &depths[0], [opts[@"max_extent"] intValue], which, wrap);
+		/*
+		 * --max_extent announces what it left, once for every image
+		 * it resized -- a face each for a cubemap, a slice each for
+		 * a volume -- and the conversion path announces it twice
+		 * over, once before the banner and once after.  Apple run
+		 * the load and the resize as a pass of their own before the
+		 * one that does the work, which is also why a chain whose
+		 * levels do not line up prints the first of these and no
+		 * banner at all.
+		 */
+		if (widths[0] != ow || heights[0] != oh || depths[0] != od) {
+			int k = volume ? (int)paths.count : 1, j;
+
+			/*
+			 * Once for each image that was resized, and the
+			 * depth is that image's own: a volume is resized a
+			 * slice at a time, so every one of these says one.
+			 */
+			for (j = 0; j < k; j++)
+				printf("Resized image to (width: %d, "
+				    "height: %d, depth: %d)\n", widths[0],
+				    heights[0], volume ? 1 : depths[0]);
+			nresized += k;
+		}
+	}
 	/*
 	 * After the resize and not before it: --max_extent moves the base
 	 * the levels are measured against, and a chain that lined up with
 	 * the file on disk need not line up with what the resize left.
 	 */
-	if (mips) {
-		if (!check_mip_levels(paths, n, widths, heights, mnames[0],
-		    mnames)) {
-			fprintf(stderr, "Error: File Not Found!\n");
-			return (255);
-		}
-		printf("Building mip mapped texture %s\n\n",
-		    [output UTF8String]);
+	if (mips && !check_mip_levels(paths, n, widths, heights, mnames[0],
+	    mnames)) {
+		fprintf(stderr, "Error: File Not Found!\n");
+		return (255);
 	}
 	if (normal) {
 		for (i = 0; i < n; i++)
@@ -1437,6 +1446,27 @@ do_convert(NSArray<NSString *> *paths,
 	for (i = 0; i < n; i++)
 		all[i * faces + face] = levels[i];
 	}
+
+	/*
+	 * The combining modes name themselves and the file they are making,
+	 * where an ordinary conversion names the file it is reading; then
+	 * the resizes are announced again, being the second pass.
+	 */
+	if (cube)
+		printf("Building cubemap texture %s\n\n",
+		    [output UTF8String]);
+	else if (volume)
+		printf("Building volume texture %s\n\n",
+		    [output UTF8String]);
+	else if (mips)
+		printf("Building mip mapped texture %s\n\n",
+		    [output UTF8String]);
+	else
+		printf("Converting %s\n\n", [path UTF8String]);
+	for (i = 0; i < nresized; i++)
+		printf("Resized image to (width: %d, height: %d, "
+		    "depth: %d)\n", widths[0], heights[0],
+		    volume ? 1 : depths[0]);
 
 	{
 		void *ptrs[MAX_LEVELS * MAX_FACES];
@@ -2094,8 +2124,25 @@ do_compress(NSArray<NSString *> *paths,
 			image_gamma(levels[i], widths[i], heights[i],
 			    [opts[@"gamma_in"] floatValue], 1);
 	}
-	levels[0] = fit_extent(levels[0], &widths[0], &heights[0], &depths[0],
-	    [opts[@"max_extent"] intValue], which, wrap);
+	{
+		int ow = widths[0], oh = heights[0], od = depths[0];
+
+		levels[0] = fit_extent(levels[0], &widths[0], &heights[0],
+		    &depths[0], [opts[@"max_extent"] intValue], which, wrap);
+		/*
+		 * Once for every image resized, as the conversion path
+		 * explains -- but only once over, this path having no
+		 * second pass to announce.
+		 */
+		if (widths[0] != ow || heights[0] != oh || depths[0] != od) {
+			int k = volume ? (int)paths.count : 1, j;
+
+			for (j = 0; j < k; j++)
+				printf("Resized image to (width: %d, "
+				    "height: %d, depth: %d)\n", widths[0],
+				    heights[0], volume ? 1 : depths[0]);
+		}
+	}
 	/* After the resize, as the conversion path explains. */
 	if (mips && !check_mip_levels(paths, fn, widths, heights, mnames[0],
 	    mnames)) {

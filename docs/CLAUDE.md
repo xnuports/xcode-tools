@@ -1163,12 +1163,24 @@ inert rather than guessed at, as above.
 `--gamut_in`/`--gamut_out` beyond the `.h` output; the EXR and HDR inputs
 Apple's usage also lists; and BC7 mode 0.
 
-Two divergences found while measuring `--build_mips`, both older than it
-and both invisible to a sweep that compares only files.  `--max_extent`
-prints `Resized image to (width: %d, height: %d, depth: %d)` when it
-resizes -- once in the compression path and, oddly, twice in the
-conversion one, before the banner and again after it -- and this tool
-prints nothing.  And a PNG whose every pixel is transparent comes back
+`--max_extent` announces itself: `Resized image to (width: %d, height:
+%d, depth: %d)`, once for every image it resized -- a face each for a
+cubemap, a slice each for a volume -- and the conversion path says it
+twice over, once before the banner and once after.  That is two passes
+showing through: Apple load and resize in one, then do the work in
+another, which is also why a `--build_mips` chain whose levels do not
+line up prints the first of these and no banner at all.  This tool
+printed none of it, and the count is what gave away the next one.
+
+A volume is resized a slice at a time and keeps its slice count.  Here
+`--max_extent` was halving the depth along with the width and the height,
+because it went through the mip filter, which pairs slices -- so a two
+slice volume cut to eight came out one slice deep where Apple keep both.
+Their message says `depth: 1` each time, being the depth of the image
+being resized rather than of the volume it goes into, which is the same
+thing said out loud.
+
+A PNG whose every pixel is transparent comes back
 from ImageIO with its colour zeroed, where Apple keep it: a one by one
 image of (244, 131, 157, 0) converts to (244, 131, 157, 255) there and to
 (0, 0, 0, 255) here under the default alpha mode.  Every option
