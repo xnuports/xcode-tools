@@ -1060,11 +1060,38 @@ spelling: BC4 comes out R8 in a KTX and DXGI 28 in a DDS, three times the
 bytes, with the EAC decoder's invented alpha of one showing through as
 the difference until it was made zero.
 
-What is left is the two formats nothing here can decode.  Apple's
-`decompress` reads BC7 and ETC2_RGB8A1; NVTT's decoder asserts on the
-first and is unimplemented for the second, so 40 of 220 decompression
-cases have no answer rather than a wrong one.  Both would need a decoder
-written.
+Two formats that had no decoder here now have one, and both are lessons
+about which answer is the right one.
+
+ETC2_RGB8A1 got a punchthrough decoder written from the specification --
+all four modes, the `{ 0, +m, 0, -m }` modifier table the opaque bit
+selects, selector two as a transparent texel.  It agreed with Apple byte
+for byte on four images, and then the images turned out to hold no
+punchthrough blocks at all: `--alpha_mode=Ignore` had forced alpha to one
+before the encoder saw them.  Two images with hard zero-or-255 alpha
+encoded under Preserve come out three quarters punchthrough, and there
+the correct decoder disagrees everywhere.  Apple write alpha 255 across a
+texture encoded with holes in it: they hand the block to the plain ETC2
+decoder, which has no punchthrough and reads the bit that carries it as
+ETC1's `diff`, so a block with the bit clear comes back decoded as an
+individual mode block.  The answer was a table entry, and the decoder was
+thrown away.
+
+BC7 was said here to fail an assertion on any conforming block.  It does
+not: NVTT reads seven of the eight modes correctly and byte for byte as
+Apple do.  Only mode 0 dies, because `avpcl_mode0.cpp`'s `read_header`
+has the line that consumes the mode bit commented out where every other
+mode's begins with it, so its own bounds assertion fires and NVTT's
+handler calls `exit(2)` -- silently.  BC7 is in the table now and a level
+holding a mode 0 block is refused with a message instead; three of eight
+test images have one.  Apple's answer for such a block is not a decode of
+it: a reference mode 0 written from the specification reproduces none of
+its sixteen pixels, nor does a model of NVTT's mis-parse, nor a dozen
+variations around the two.  Whatever they run there is not this code
+path and has not been identified.
+
+Decompression is 215 of 220, against 180 before, the five being that one
+image's BC7.
 
 `--build_cubemap` takes six inputs into six faces, in both modes and all
 four output formats.  The faces are six independent chains -- a face is
@@ -1088,9 +1115,29 @@ arrays `Mip<n>Slice<n>` and calls `ATC_CreateTexture3D`, keeping the Slice
 names once the levels are one slice deep, because the name follows the
 texture and not the level.  Two slices at least, and DDS gets none.
 
-Still to write: `--crop_uniform_content`, `--scale_range` and
-`--alpha_to_coverage`; `--gamut_in`/`--gamut_out` beyond the `.h` output;
-and the EXR and HDR inputs Apple's usage also lists.
+Still to write, in the order they are worth doing:
+
+`--build_array` and `--build_mips`, the two remaining combining modes.
+Both take several inputs, as `--build_cubemap` and `--build_volume` do,
+and neither is implemented at all; the array one wants a KTX with
+`numberOfArrayElements` set, and the mip one takes each input as a level
+of the chain rather than filtering one.
+
+`--rgbm_range`, which is the one recorded option that still changes
+Apple's pixels and does nothing here.  The default is 6.
+
+`--alpha_to_coverage` with its `--alpha_reference`, measured and left
+inert rather than guessed at, as above.
+
+`--gamut_in`/`--gamut_out` beyond the `.h` output; the EXR and HDR inputs
+Apple's usage also lists; and BC7 mode 0.
+
+Accepted and inert in Apple's tool as well, so nothing is owed until a
+case is found where they bite: `--crop_uniform_content`, `--scale_range`,
+`--resize_filter` (even with a `--max_extent` that resizes),
+`--resize_round_mode` (which rejects every value tried, its vocabulary
+unknown), `--flip_z` (even on a volume), `--metrics`, `--decompressor`
+and `--decompression_format`.
 
 Five measurements settled the pixel path, and none was guessable:
 
