@@ -21,6 +21,7 @@
  */
 uint8_t	*ktx2_write(void **levels, const size_t *sizes, const int *widths,
 	    const int *heights, const int *depths, int nlevels, int faces,
+	    _Bool array,
 	    uint32_t vk_format,
 	    int block_bytes, int block_x, int block_y, int type_size,
 	    const struct format_dfd *, bool premultiplied, bool srgb,

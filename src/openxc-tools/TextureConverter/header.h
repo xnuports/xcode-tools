@@ -17,7 +17,8 @@
 char	*header_write(void **levels, const size_t *sizes, const int *widths,
 	    const int *heights, int nlevels, const char *name,
 	    const char *atc_format, const char *gamut, const char *ident,
-	    _Bool srgb, _Bool normal, int faces, const int *depths,
+	    _Bool srgb, _Bool normal, int faces, _Bool array,
+	    const int *depths,
 	    size_t *out_len);
 
 #endif /* TEXTURECONVERTER_HEADER_H */

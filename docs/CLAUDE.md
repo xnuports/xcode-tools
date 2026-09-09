@@ -1109,8 +1109,9 @@ the containers: version 1 writes the level's imageSize once and then each
 face behind it padded to four bytes, version 2 counts the whole level, and
 the `.h` output names its arrays `Mip<n>Face<n>` and calls
 `ATC_CreateTextureCube`, which takes one side rather than two.  DDS gets
-none, as Apple write none.  Six inputs exactly: one, two, five and seven
-are all refused.
+none: Apple write none, say `Error: DDS file support only supports 2D
+images` on stderr, and still exit zero.  Six inputs exactly: one, two,
+five and seven are all refused.
 
 `--build_mips` takes its inputs as the levels of one chain rather than as
 one image: input zero is the base and each one after it is the level of
@@ -1144,6 +1145,21 @@ texture <output>`, `Building volume texture <output>`, `Building mip
 mapped texture <output>`, where an ordinary conversion says `Converting
 <input>`.  A chain says nothing at all until its levels have been checked.
 
+`--build_array` takes its inputs as the elements of a 2D array, each one
+an independent chain, bit for bit what converting that image alone gives
+-- the same shape as a cubemap's faces, and the writers differ in one
+place.  Version 1 counts `imageSize` per face for a cubemap and per level
+for an array, all its elements together, and the header says
+`numberOfArrayElements` where a cubemap says `numberOfFaces`; version 2
+says `layerCount` against `faceCount`.  The `.h` output names its arrays
+`Mip<n>Element<n>`, sets `numElements` to the count where everything else
+sets one, and calls `ATC_CreateTexture2DArray`, which takes the width,
+the height, the element count and then the level count.  DDS gets none.
+
+Every element has to be the size of the first, since they are one texture
+and not a collection.  At least two of them, and, like the other three,
+`--build_array` is not recorded in TC_Options.
+
 `--build_volume` stacks its inputs into one image with a depth, and the
 chain halves that too, dropping an odd slice at the end.  The filter
 across slices is not a three dimensional kernel -- which is what nvimage's
@@ -1157,11 +1173,6 @@ names once the levels are one slice deep, because the name follows the
 texture and not the level.  Two slices at least, and DDS gets none.
 
 Still to write, in the order they are worth doing:
-
-`--build_array`, the last of the four combining modes, which wants a KTX
-with `numberOfArrayElements` set.  Its exclusivity check is in place, so
-naming it beside another combining mode says the right thing; naming it
-alone does not yet build anything.
 
 `--alpha_to_coverage` with its `--alpha_reference`, measured and left
 inert rather than guessed at, as above.

@@ -74,7 +74,7 @@ char *
 header_write(void **levels, const size_t *sizes, const int *widths,
     const int *heights, int nlevels, const char *name,
     const char *atc_format, const char *gamut, const char *ident,
-    _Bool srgb, _Bool normal, int faces, const int *depths,
+    _Bool srgb, _Bool normal, int faces, _Bool array, const int *depths,
     size_t *out_len)
 {
 	struct text t = { NULL, 0, 0, 0 };
@@ -90,6 +90,7 @@ header_write(void **levels, const size_t *sizes, const int *widths,
 	addf(&t, "#include <stdint.h>\n");
 	addf(&t, "#include \"AppleTextureConverter.h\"\n\n");
 	addf(&t, "const uint32_t %s_type = atcTextureType%s;\n", ident,
+	    array ? "2DArray" :
 	    faces > 1 ? "Cube" : (depths != NULL && depths[0] > 1) ? "3D" :
 	    "2D");
 	addf(&t, "const uint32_t %s_format = %s;\n", ident, atc_format);
@@ -99,7 +100,13 @@ header_write(void **levels, const size_t *sizes, const int *widths,
 	addf(&t, "const uint32_t %s_depth = %d;\n", ident,
 	    depths != NULL && depths[0] > 1 ? depths[0] : 1);
 	addf(&t, "const uint32_t %s_numMipmaps = %d;\n", ident, nlevels);
-	addf(&t, "const uint32_t %s_numElements = 1;\n", ident);
+	/*
+	 * The element count, which is one for everything but an array --
+	 * a cubemap's six sides are faces and a volume's slices are depth,
+	 * and neither of those is an element.
+	 */
+	addf(&t, "const uint32_t %s_numElements = %d;\n", ident,
+	    array ? faces : 1);
 	addf(&t, "const uint32_t %s_numChannels = %d;\n\n", ident,
 	    format_atc_channels(name, srgb));
 
@@ -133,7 +140,10 @@ header_write(void **levels, const size_t *sizes, const int *widths,
 		 * that and a reader would never notice, but a byte compare
 		 * does.
 		 */
-		if (faces > 1)
+		if (array)
+			addf(&t, "uint8_t %s_Mip%dElement%d[%zu] = { \n",
+			    ident, lv, i % faces, each);
+		else if (faces > 1)
 			addf(&t, "uint8_t %s_Mip%dFace%d[%zu] = { \n", ident,
 			    lv, i % faces, each);
 		else if (vol)
@@ -177,7 +187,12 @@ header_write(void **levels, const size_t *sizes, const int *widths,
 	 * surfaces are addressed by face where a plain texture's element
 	 * is always zero.
 	 */
-	if (faces > 1)
+	if (array)
+		addf(&t, "\tATC_CreateTexture2DArray( NULL, %d, %d, %d, %d, "
+		    "%s, %s, %s, &pTexture );\n", widths[0], heights[0],
+		    faces, nlevels, atc_format, gamut,
+		    normal ? "true" : "false");
+	else if (faces > 1)
 		addf(&t, "\tATC_CreateTextureCube( NULL, %d, %d, %s, %s, "
 		    "%s, &pTexture );\n", widths[0], nlevels, atc_format,
 		    gamut, normal ? "true" : "false");
@@ -193,7 +208,13 @@ header_write(void **levels, const size_t *sizes, const int *widths,
 	for (i = 0; i < nlevels * faces; i++) {
 		int lvl = i / faces;
 
-		if (faces > 1)
+		if (array)
+			addf(&t, "%s\tSetSurface%s(pTexture, %d, %d, %d, "
+			    "%d, %zu, %s_Mip%dElement%d);\n",
+			    i % faces == 0 ? "\n" : "", ident, i % faces,
+			    lvl, widths[lvl], heights[lvl], sizes[lvl],
+			    ident, lvl, i % faces);
+		else if (faces > 1)
 			addf(&t, "%s\tSetSurface%s(pTexture, %d, %d, %d, "
 			    "%d, %zu, %s_Mip%dFace%d);\n",
 			    i % faces == 0 ? "\n" : "", ident, i % faces,

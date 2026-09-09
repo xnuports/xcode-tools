@@ -219,7 +219,7 @@ static NSString *tc_options_string(NSDictionary<NSString *, NSString *> *,
 static bool wants_ktx2(NSString *output);
 static NSData *write_ktx2_generic(void **levels, const size_t *sizes,
     const int *widths, const int *heights, const int *depths, int nlevels,
-    int faces, const char *name, bool premultiplied, bool srgb,
+    int faces, bool array, const char *name, bool premultiplied, bool srgb,
     NSString *options, bool annotate);
 static void *pack_raw(const float *rgba, int w, int h, const char *name,
     size_t *out_len);
@@ -230,10 +230,9 @@ static bool wants_dds(NSString *output);
 static NSData *write_dds_generic(void **levels, const size_t *sizes,
     const int *widths, const int *heights, const int *depths, int nlevels,
     int faces, const char *name, bool srgb);
-static NSData *write_header_generic(void **levels, const size_t *sizes,
-    const int *widths, const int *heights, const int *depths, int nlevels,
-    int faces, const char *name, bool srgb, bool normal, NSString *output,
-    NSDictionary<NSString *, NSString *> *opts);
+static NSData *write_header_generic(void **, const size_t *, const int *,
+    const int *, const int *, int, int, bool, const char *, bool, bool,
+    NSString *, NSDictionary<NSString *, NSString *> *);
 
 /*
  * Every option the tool takes, with the default the usage text advertises.
@@ -991,7 +990,7 @@ static const uint8_t ktx1_id[12] = {
 static NSData *
 write_ktx_generic(void **levels, const size_t *sizes, const int *widths,
     const int *heights, const int *depths, int nlevels, int faces,
-    uint32_t gl_internal,
+    bool array, uint32_t gl_internal,
     uint32_t gl_base, uint32_t gl_type, uint32_t gl_type_size,
     uint32_t gl_format, uint32_t texel_bytes, uint32_t metal,
     bool premultiplied, NSString *options, bool annotate)
@@ -1059,8 +1058,12 @@ write_ktx_generic(void **levels, const size_t *sizes, const int *widths,
 	/* A volume says how deep it is; everything else says nothing. */
 	put32(out, depths != NULL && depths[0] > 1 ?
 	    (uint32_t)depths[0] : 0);
-	put32(out, 0);			/* numberOfArrayElements */
-	put32(out, (uint32_t)faces);	/* numberOfFaces */
+	/*
+	 * An array's elements are elements and a cubemap's sides are faces,
+	 * and the two are counted in different words.
+	 */
+	put32(out, array ? (uint32_t)faces : 0);
+	put32(out, array ? 1 : (uint32_t)faces);
 	put32(out, (uint32_t)nlevels);
 	put32(out, (uint32_t)[kvd length]);
 	[out appendData:kvd];
@@ -1086,9 +1089,11 @@ write_ktx_generic(void **levels, const size_t *sizes, const int *widths,
 		/*
 		 * imageSize counts one face, not the level: a cubemap
 		 * writes it once and then the six faces behind it, each
-		 * padded to four bytes of its own.
+		 * padded to four bytes of its own.  An array counts the
+		 * level instead, all of its elements together, which is
+		 * the one place the two layouts differ.
 		 */
-		put32(out, (uint32_t)total);
+		put32(out, (uint32_t)(array ? total * (size_t)faces : total));
 		for (j = 0; j < faces; j++) {
 			const uint8_t *p = levels[i * faces + j];
 
@@ -1170,9 +1175,10 @@ do_convert(NSArray<NSString *> *paths,
 	NSString *path = paths[0];
 	float *levels[MAX_LEVELS], *all[MAX_LEVELS * MAX_FACES];
 	int widths[MAX_LEVELS], heights[MAX_LEVELS], depths[MAX_LEVELS];
-	int faces = opts[@"build_cubemap"] != nil ? (int)paths.count : 1;
-	int face;
 	bool cube = opts[@"build_cubemap"] != nil;
+	bool array = opts[@"build_array"] != nil;
+	int faces = cube || array ? (int)paths.count : 1;
+	int face;
 	bool volume = opts[@"build_volume"] != nil;
 	bool mips = opts[@"build_mips"] != nil;
 	NSString *output = opts[@"output"];
@@ -1185,7 +1191,7 @@ do_convert(NSArray<NSString *> *paths,
 	const char *oname = "RGBA32";
 	bool opaque = false;
 	NSData *data;
-	int n = 0, i, maxlevels, nresized = 0;
+	int n = 0, i, maxlevels, nresized = 0, ew = 0, eh = 0;
 
 
 	if ([filter caseInsensitiveCompare:@"Box"] == NSOrderedSame)
@@ -1220,6 +1226,12 @@ do_convert(NSArray<NSString *> *paths,
 	if (mips && paths.count < 2) {
 		short_usage();
 		fprintf(stderr, "Error: --build_mips requires at least two "
+		    "input textures!\n");
+		return (255);
+	}
+	if (array && paths.count < 2) {
+		short_usage();
+		fprintf(stderr, "Error: --build_array requires at least two "
 		    "input textures!\n");
 		return (255);
 	}
@@ -1288,6 +1300,23 @@ do_convert(NSArray<NSString *> *paths,
 	if (fn == 0) {
 		printf("Error: Could not read input file!\n");
 		return (255);
+	}
+	/*
+	 * Every element of an array is the same size as the first: they are
+	 * one texture with a stack of slices, not a collection.
+	 */
+	if (array && face > 0 &&
+	    (widths[0] != ew || heights[0] != eh)) {
+		fprintf(stderr, "Error: Array element %d error: \"%s\" "
+		    "dimensions (%dx%d) do not match element 0 (%dx%d)!\n",
+		    face, [paths[face] UTF8String], widths[0], heights[0],
+		    ew, eh);
+		fprintf(stderr, "Error: File Not Found!\n");
+		return (255);
+	}
+	if (face == 0) {
+		ew = widths[0];
+		eh = heights[0];
 	}
 	n = fn;
 	for (i = 0; i < n; i++) {
@@ -1475,6 +1504,9 @@ do_convert(NSArray<NSString *> *paths,
 	if (cube)
 		printf("Building cubemap texture %s\n\n",
 		    [output UTF8String]);
+	else if (array)
+		printf("Building array texture %s\n\n",
+		    [output UTF8String]);
 	else if (volume)
 		printf("Building volume texture %s\n\n",
 		    [output UTF8String]);
@@ -1558,13 +1590,14 @@ do_convert(NSArray<NSString *> *paths,
 		        faces, oname, srgb) :
 		    wants_header(output) ?
 		    write_header_generic(ptrs, sizes, widths, heights, depths,
-		        n, faces, oname, srgb, normal, output, opts) :
+		        n, faces, array, oname, srgb, normal, output, opts) :
 		    wants_ktx2(output) ?
 		    write_ktx2_generic(ptrs, sizes, widths, heights, depths,
-		        n, faces, oname, prem, srgb, options, annotate) :
+		        n, faces, array, oname, prem, srgb, options,
+		        annotate) :
 		    write_ktx_generic(ptrs, sizes, widths, heights, depths, n,
-		        faces, gl, base, type, (uint32_t)(bits / 8), base,
-		        texel, 0, prem, options, annotate);
+		        faces, array, gl, base, type, (uint32_t)(bits / 8),
+		        base, texel, 0, prem, options, annotate);
 		for (i = 0; i < n * faces; i++)
 			free(ptrs[i]);
 	}
@@ -1633,8 +1666,8 @@ write_dds_generic(void **levels, const size_t *sizes, const int *widths,
 	NSData *out;
 
 	/*
-	 * A cubemap or a volume gets no DDS at all; Apple write none, say
-	 * so, and still exit zero.
+	 * A cubemap, an array or a volume gets no DDS at all; Apple write
+	 * none, say so, and still exit zero.
 	 */
 	if (faces > 1 || (depths != NULL && depths[0] > 1)) {
 		fprintf(stderr, "Error: DDS file support only supports 2D "
@@ -1664,7 +1697,7 @@ write_dds_generic(void **levels, const size_t *sizes, const int *widths,
 static NSData *
 write_header_generic(void **levels, const size_t *sizes, const int *widths,
     const int *heights, const int *depths, int nlevels, int faces,
-    const char *name, bool srgb, bool normal, NSString *output,
+    bool array, const char *name, bool srgb, bool normal, NSString *output,
     NSDictionary<NSString *, NSString *> *opts)
 {
 	NSString *gamut = opts[@"gamut_out"];
@@ -1684,7 +1717,7 @@ write_header_generic(void **levels, const size_t *sizes, const int *widths,
 	text = header_write(levels, sizes, widths, heights, nlevels, name,
 	    format_atc_for(name, srgb, buf, sizeof(buf)), gname,
 	    [[[output lastPathComponent] stringByDeletingPathExtension]
-	    UTF8String], srgb, normal, faces, depths, &len);
+	    UTF8String], srgb, normal, faces, array, depths, &len);
 	if (text == NULL)
 		return (nil);
 	out = [NSData dataWithBytes:text length:len];
@@ -1699,8 +1732,8 @@ write_header_generic(void **levels, const size_t *sizes, const int *widths,
 static NSData *
 write_ktx2_generic(void **levels, const size_t *sizes, const int *widths,
     const int *heights, const int *depths, int nlevels, int faces,
-    const char *name, bool premultiplied, bool srgb, NSString *options,
-    bool annotate)
+    bool array, const char *name, bool premultiplied, bool srgb,
+    NSString *options, bool annotate)
 {
 	struct format_dfd dfd;
 	uint32_t gl, base, metal, vk = 0, srgb_gl;
@@ -1726,7 +1759,7 @@ write_ktx2_generic(void **levels, const size_t *sizes, const int *widths,
 	if (!srgb || !format_srgb_for(name, &srgb_gl, &vk))
 		vk = format_vk_for(name);
 	bytes = ktx2_write(levels, sizes, widths, heights, depths, nlevels,
-	    faces, vk, block_bytes, bx, by, type_size, &dfd,
+	    faces, array, vk, block_bytes, bx, by, type_size, &dfd,
 	    premultiplied, srgb,
 	    annotate ? "Apple TextureConverter " TC_VERSION " / libktx v4.0" :
 	    "Unidentified app / libktx v4.0",
@@ -1886,9 +1919,10 @@ static int
 do_compress(NSArray<NSString *> *paths,
     NSDictionary<NSString *, NSString *> *opts)
 {
-	int faces = opts[@"build_cubemap"] != nil ? (int)paths.count : 1;
-	int face;
 	bool cube = opts[@"build_cubemap"] != nil;
+	bool array = opts[@"build_array"] != nil;
+	int faces = cube || array ? (int)paths.count : 1;
+	int face;
 	bool volume = opts[@"build_volume"] != nil;
 	enum { MAX_LEVELS = 32 };
 	float *levels[MAX_LEVELS];
@@ -1914,7 +1948,7 @@ do_compress(NSArray<NSString *> *paths,
 	uint32_t gl, base, metal;
 	NSData *data;
 	bool opaque = false;
-	int n = 0, i, fn = 1, maxlevels;
+	int n = 0, i, fn = 1, maxlevels, ew = 0, eh = 0;
 
 	if (!format_lookup([fmt UTF8String], &gl, &base, &aopt.block_x,
 	    &aopt.block_y, &metal)) {
@@ -2060,6 +2094,12 @@ do_compress(NSArray<NSString *> *paths,
 		    "input textures!\n");
 		return (255);
 	}
+	if (array && paths.count < 2) {
+		short_usage();
+		fprintf(stderr, "Error: --build_array requires at least two "
+		    "input textures!\n");
+		return (255);
+	}
 	if (opts[@"rgbm_encoding"] != nil && rgbm_range_of(opts) < 1.0f) {
 		short_usage();
 		fprintf(stderr, "Error: The value for the RGBM range must be "
@@ -2122,6 +2162,22 @@ do_compress(NSArray<NSString *> *paths,
 	if (levels[0] == NULL) {
 		printf("Error: Could not read input file!\n");
 		return (255);
+	}
+	/*
+	 * Every element of an array is the same size as the first: they are
+	 * one texture with a stack of slices, not a collection.
+	 */
+	if (array && face > 0 && (widths[0] != ew || heights[0] != eh)) {
+		fprintf(stderr, "Error: Array element %d error: \"%s\" "
+		    "dimensions (%dx%d) do not match element 0 (%dx%d)!\n",
+		    face, [paths[face] UTF8String], widths[0], heights[0],
+		    ew, eh);
+		fprintf(stderr, "Error: Failed to compress texture\n");
+		return (255);
+	}
+	if (face == 0) {
+		ew = widths[0];
+		eh = heights[0];
 	}
 	/*
 	 * --max_extent is the one thing that throws the levels that came
@@ -2350,15 +2406,15 @@ do_compress(NSArray<NSString *> *paths,
 		        n, faces, [fmt UTF8String], srgb) :
 		    wants_header(output) ?
 		    write_header_generic(blocks, sizes, widths, heights,
-		        depths, n, faces, [fmt UTF8String], srgb, normal,
-		        output, opts) :
+		        depths, n, faces, array, [fmt UTF8String], srgb,
+		        normal, output, opts) :
 		    wants_ktx2(output) ?
 		    write_ktx2_generic(blocks, sizes, widths, heights, depths,
-		        n, faces, [fmt UTF8String],
+		        n, faces, array, [fmt UTF8String],
 		        alpha_mode_of(opts) == ALPHA_PREMULTIPLY, srgb,
 		        options, annotate) :
 		    write_ktx_generic(blocks, sizes, widths, heights, depths,
-		        n, faces, gl, base, type, type_size, gl_format,
+		        n, faces, array, gl, base, type, type_size, gl_format,
 		        texel, metal,
 		        alpha_mode_of(opts) == ALPHA_PREMULTIPLY, options,
 		        annotate);
@@ -2780,11 +2836,11 @@ do_decompress(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 			    heights, NULL, n, 1, oname, false);
 		} else if (wants_header(out)) {
 			file = write_header_generic(outs, sizes, widths,
-			    heights, NULL, n, 1, oname, false, false, out,
-			    opts);
+			    heights, NULL, n, 1, false, oname, false, false,
+			    out, opts);
 		} else if (wants_ktx2(out)) {
 			file = write_ktx2_generic(outs, sizes, widths,
-			    heights, NULL, n, 1, oname, false, false,
+			    heights, NULL, n, 1, false, oname, false, false,
 			    options, annotate);
 		} else {
 			uint32_t texel = hdr ? 16 : (uint32_t)(
@@ -2792,7 +2848,7 @@ do_decompress(NSString *path, NSDictionary<NSString *, NSString *> *opts)
 			    obase == 0x1907 ? 3 : 4);
 
 			file = write_ktx_generic(outs, sizes, widths, heights,
-			    NULL, n, 1, ogl, obase,
+			    NULL, n, 1, false, ogl, obase,
 			    hdr ? GL_FLOAT : GL_UNSIGNED_BYTE, hdr ? 4 : 1,
 			    obase, texel, 0, false, options, annotate);
 		}
