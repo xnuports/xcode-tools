@@ -995,9 +995,19 @@ levels down and looks like a mip chain problem.  The alpha stays gone all
 the way down: Apple write exactly one at every level, so it is thrown away
 again after the chain and not only on the way in.
 
-A container carries a chain and conversion carries it across.  Every level
+A container carries a chain and both modes carry it across.  Every level
 the file holds is kept, whatever the format and whatever `--alpha_mode`
-says, and the chain is only extended past them.
+says, and the chain is only extended past them; compressing one encodes
+each of those levels as it stands, so patching a level of an RGBA8
+container and asking for BC1 changes that level's blocks and no others.
+
+A flip, a gamma or a normal map does not change that -- each is applied
+to every level the file brought.  `--max_extent` is the one option that
+really does throw them away, because it resizes the base and the levels
+behind it no longer line up: a five level sixteen square container cut to
+eight comes out with four levels that owe nothing to the ones it had.
+And `--max_mipmaps` cuts a chain that came in too long as readily as it
+stops one being built.
 
 That last sentence replaced a wrong one, and the way it was wrong is worth
 keeping.  The experiment was to zero a level and ask whether the zeros
@@ -1035,15 +1045,26 @@ as its two bytes and then the two bytes of padding behind them.  Reading
 the file correctly would put a different image through the rest of the
 tool than their tool has.
 
-1521 of 1521 -- thirteen uncompressed formats each way, three images,
-three alpha modes -- against 106 of 1521 before this work, most of that
-being `--compression_format` reaching nothing.
+1521 of 1521 converting -- thirteen uncompressed formats each way, three
+images, three alpha modes -- against 106 of 1521 before this work, most
+of that being `--compression_format` reaching nothing.  891 of 891
+compressing a container to a block format, against 37 of 75.  2680 of
+2680 over the options above against four output kinds.
 
-Compressing a container is the gap that is left: `do_compress` reads one
-level and rebuilds the chain, where conversion now keeps it, and 37 of 75
-match across five input formats and six block formats.  Decompressing to
-DDS is a smaller one, 12 cases of 84, all of them formats with fewer than
-four channels.
+Two output side bugs fell out of that sweep, neither of them about
+containers.  A DDS with one level says dwCaps 0x00001000, plain texture,
+where a chain says 0x00401008 -- the same distinction dwFlags already
+makes a hundred bytes earlier, and the writer was making it in one place
+and not the other.  And a decompressed DDS is always the four channel
+spelling: BC4 comes out R8 in a KTX and DXGI 28 in a DDS, three times the
+bytes, with the EAC decoder's invented alpha of one showing through as
+the difference until it was made zero.
+
+What is left is the two formats nothing here can decode.  Apple's
+`decompress` reads BC7 and ETC2_RGB8A1; NVTT's decoder asserts on the
+first and is unimplemented for the second, so 40 of 220 decompression
+cases have no answer rather than a wrong one.  Both would need a decoder
+written.
 
 `--build_cubemap` takes six inputs into six faces, in both modes and all
 four output formats.  The faces are six independent chains -- a face is
