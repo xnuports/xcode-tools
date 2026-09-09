@@ -50,6 +50,9 @@ float	*decode_eac(const uint8_t *blocks, size_t len, int w, int h,
 /* Whether a BC7 level holds a mode 0 block, which NVTT cannot read. */
 bool	 bc7_has_mode0(const uint8_t *blocks, size_t len);
 
+/* An image file through NVTT's reader.  See decode.cpp. */
+uint8_t	*image_load_rgba8(const char *path, int *wp, int *hp);
+
 #ifdef __cplusplus
 }
 #endif

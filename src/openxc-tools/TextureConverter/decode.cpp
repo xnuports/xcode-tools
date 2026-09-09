@@ -17,6 +17,17 @@
 #include <astcenc.h>
 #include <nvtt/nvtt.h>
 #include <bc6h/zoh_utils.h>
+#include <nvimage/Image.h>
+#include <nvimage/ImageIO.h>
+/*
+ * Color32's four-argument constructor lists its members out of order, and
+ * this tree builds with -Werror.  The header is a submodule's and is left
+ * alone.
+ */
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wreorder-ctor"
+#include <nvmath/Color.h>
+#pragma clang diagnostic pop
 
 #include <stdlib.h>
 #include <string.h>
@@ -153,6 +164,52 @@ bc7_has_mode0(const uint8_t *blocks, size_t len)
 			return (true);
 	}
 	return (false);
+}
+
+/*
+ * An image file through NVTT's reader rather than ImageIO's.
+ *
+ * ImageIO throws the colour away when every pixel of a PNG is
+ * transparent: a one by one image of (244, 131, 157, 0) comes back
+ * (0, 0, 0, 0), where a two by two with one opaque pixel in it comes back
+ * whole.  Apple keep the colour, so they are not reading it this way, and
+ * every option CGImageSourceCreateImageAtIndex takes was tried.  NVTT is
+ * already linked here for its filters and its encoders, and the stb_image
+ * it bundles reads the file as it is written, so the caller falls back to
+ * this when it sees an image that is transparent all the way across.
+ *
+ * Eight bit RGBA, tightly packed, malloc'd for the caller.  NULL if the
+ * file could not be read at all.
+ */
+extern "C" uint8_t *
+image_load_rgba8(const char *path, int *wp, int *hp)
+{
+	nv::Image *im = nv::ImageIO::load(path);
+	uint8_t *out;
+	unsigned x, y;
+
+	if (im == NULL)
+		return (NULL);
+	out = (uint8_t *)malloc((size_t)im->width * im->height * 4);
+	if (out == NULL) {
+		delete im;
+		return (NULL);
+	}
+	for (y = 0; y < im->height; y++) {
+		for (x = 0; x < im->width; x++) {
+			nv::Color32 c = im->pixel(x, y);
+			uint8_t *o = out + ((size_t)y * im->width + x) * 4;
+
+			o[0] = c.r;
+			o[1] = c.g;
+			o[2] = c.b;
+			o[3] = c.a;
+		}
+	}
+	*wp = (int)im->width;
+	*hp = (int)im->height;
+	delete im;
+	return (out);
 }
 
 extern "C" float *

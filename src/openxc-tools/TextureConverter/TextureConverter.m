@@ -660,7 +660,7 @@ load_rgba(NSString *path, enum alpha_mode amode, int *wp, int *hp)
 	float *out;
 	size_t w, h, bpc, bpp, stride, x, y;
 	CGImageAlphaInfo alpha;
-	bool has_alpha, alpha_first, premultiplied;
+	bool has_alpha, alpha_first, premultiplied, any_alpha = false;
 
 	src = CGImageSourceCreateWithURL((__bridge CFURLRef)
 	    [NSURL fileURLWithPath:path], NULL);
@@ -761,6 +761,8 @@ load_rgba(NSString *path, enum alpha_mode amode, int *wp, int *hp)
 			}
 			if (!has_alpha)
 				a = 255;
+			if (a != 0)
+				any_alpha = true;
 			if (premultiplied && a != 0 && a != 255) {
 				r = r * 255u / a;
 				g = g * 255u / a;
@@ -782,6 +784,37 @@ load_rgba(NSString *path, enum alpha_mode amode, int *wp, int *hp)
 		}
 	}
 	CFRelease(pixels);
+
+	/*
+	 * ImageIO throws the colour away when every pixel is transparent,
+	 * and Apple keep it: a one by one PNG of (244, 131, 157, 0) is
+	 * (244, 131, 157, 255) in their output under the default alpha mode
+	 * and (0, 0, 0, 255) in this one.  An image with a single opaque
+	 * pixel in it comes back whole, so the test is the whole image, and
+	 * NVTT's reader -- already linked, and stb_image underneath -- is
+	 * asked again for those.  If the file really is black behind its
+	 * transparency the second read says so too.
+	 */
+	if (!any_alpha && w * h != 0) {
+		size_t n = w * h, i;
+		uint8_t *px;
+		int fw, fh;
+
+		if ((px = image_load_rgba8([path UTF8String], &fw, &fh)) !=
+		    NULL) {
+			if ((size_t)fw == w && (size_t)fh == h) {
+				for (i = 0; i < n; i++) {
+					out[i * 4 + 0] = px[i * 4 + 0] *
+					    inv255;
+					out[i * 4 + 1] = px[i * 4 + 1] *
+					    inv255;
+					out[i * 4 + 2] = px[i * 4 + 2] *
+					    inv255;
+				}
+			}
+			free(px);
+		}
+	}
 	*wp = (int)w;
 	*hp = (int)h;
 	return (out);

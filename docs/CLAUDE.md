@@ -1197,13 +1197,18 @@ Their message says `depth: 1` each time, being the depth of the image
 being resized rather than of the volume it goes into, which is the same
 thing said out loud.
 
-A PNG whose every pixel is transparent comes back
-from ImageIO with its colour zeroed, where Apple keep it: a one by one
-image of (244, 131, 157, 0) converts to (244, 131, 157, 255) there and to
-(0, 0, 0, 255) here under the default alpha mode.  Every option
-`CGImageSourceCreateImageAtIndex` takes was tried and none of them keeps
-the colour, so Apple are not reading PNGs this way.  An image with one
-opaque pixel in it is fine, which is why this hid for so long.
+A PNG whose every pixel is transparent came back from ImageIO with its
+colour zeroed, where Apple keep it: a one by one image of (244, 131, 157,
+0) converts to (244, 131, 157, 255) there and did to (0, 0, 0, 255) here
+under the default alpha mode.  An image with one opaque pixel in it comes
+back whole, which is why this hid for so long, and every option
+`CGImageSourceCreateImageAtIndex` takes was tried -- none of them keeps
+the colour, so Apple are not reading PNGs this way.  NVTT is linked here
+already, for its filters and its encoders, and the stb_image it bundles
+reads the file as it is written; so an image that is transparent all the
+way across is read a second time through `nv::ImageIO::load` and its
+colour taken from there.  If the file really is black behind its
+transparency the second read says so too.
 
 Error text and streams are a third: Apple put the specific complaint on
 stdout for some failures and stderr for others, and follow a failed
