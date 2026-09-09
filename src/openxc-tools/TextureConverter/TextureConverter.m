@@ -1066,6 +1066,7 @@ do_convert(NSArray<NSString *> *paths,
 	enum mip_filter which = MIP_FILTER_KAISER;
 	enum mip_wrap wrap = MIP_WRAP_MIRROR;
 	bool normal = opts[@"normal_map"] != nil;
+	bool srgb = opts[@"srgb_format"] != nil;
 	const char *oname = "RGBA32";
 	bool opaque = false;
 	NSData *data;
@@ -1301,6 +1302,24 @@ do_convert(NSArray<NSString *> *paths,
 		}
 		if (!format_lookup(oname, &gl, &base, &bx, &by, &metal))
 			return (255);
+		/*
+		 * --srgb_format asks for the sRGB spelling, which only the
+		 * eight bit formats have and only the two containers have
+		 * to name: the .h output writes atcFormatUnknown and DDS
+		 * refuses, which they do on their own.  Apple's tool
+		 * crashes on a format with no such spelling rather than
+		 * checking, so this is an error of our own.
+		 */
+		if (srgb && (wants_ktx2(output) ||
+		    (!wants_header(output) && !wants_dds(output)))) {
+			uint32_t vk;
+
+			if (!format_srgb_for(oname, &gl, &vk)) {
+				printf("Error: Compression format \"%s\" "
+				    "has no sRGB pixel format!\n", oname);
+				return (255);
+			}
+		}
 		bits = format_channel_bits(oname);
 		type = bits == 8 ? GL_UNSIGNED_BYTE :
 		    bits == 16 ? GL_HALF_FLOAT : GL_FLOAT;
@@ -1323,13 +1342,13 @@ do_convert(NSArray<NSString *> *paths,
 
 		data = wants_dds(output) ?
 		    write_dds_generic(ptrs, sizes, widths, heights, depths, n,
-		        faces, oname, false) :
+		        faces, oname, srgb) :
 		    wants_header(output) ?
 		    write_header_generic(ptrs, sizes, widths, heights, depths,
-		        n, faces, oname, false, normal, output, opts) :
+		        n, faces, oname, srgb, normal, output, opts) :
 		    wants_ktx2(output) ?
 		    write_ktx2_generic(ptrs, sizes, widths, heights, depths,
-		        n, faces, oname, prem, false, options, annotate) :
+		        n, faces, oname, prem, srgb, options, annotate) :
 		    write_ktx_generic(ptrs, sizes, widths, heights, depths, n,
 		        faces, gl, base, type, (uint32_t)(bits / 8), base,
 		        texel, 0, prem, options, annotate);
