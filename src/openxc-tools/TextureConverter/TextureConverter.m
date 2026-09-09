@@ -1252,6 +1252,21 @@ do_convert(NSArray<NSString *> *paths,
 		bool annotate = opts[@"disable_annotation"] == nil;
 		bool prem = alpha_mode_of(opts) == ALPHA_PREMULTIPLY;
 
+		/*
+		 * --compression_format names the format to write, and
+		 * conversion honours it: the input's own format is only
+		 * the default.  Channels the target does not have are
+		 * dropped and channels it gains are filled, level for
+		 * level, with the chain itself untouched.
+		 */
+		if (opts[@"compression_format"] != nil) {
+			const char *want = [opts[@"compression_format"]
+			    UTF8String];
+
+			if (format_lookup(want, &gl, &base, &bx, &by, &metal)
+			    && bx == 1)
+				oname = want;
+		}
 		if (!format_lookup(oname, &gl, &base, &bx, &by, &metal))
 			return (255);
 		bits = format_channel_bits(oname);
