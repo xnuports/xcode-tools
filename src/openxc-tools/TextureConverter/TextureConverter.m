@@ -1487,6 +1487,7 @@ tc_options_string(NSDictionary<NSString *, NSString *> *opts,
     NSString *compressor, NSString *fmt)
 {
 	static const char *order[] = {
+		"compressor", "compression_format",
 		"compression_quality", "gamma_in", "gamma_out", "srgb_format",
 		"max_mipmaps", "mipmap_filter", "alpha_mode",
 		"alpha_to_coverage", "alpha_weight", "flip_x", "flip_y",
@@ -1498,8 +1499,15 @@ tc_options_string(NSDictionary<NSString *, NSString *> *opts,
 	size_t i;
 
 	/*
-	 * The conversion path names no compressor and no compression format,
-	 * because it runs neither; it still records everything else.
+	 * The compression path runs a compressor and a format, and records
+	 * the two it settled on rather than the two it was asked for: the
+	 * format is required there, and the compressor is resolved, so
+	 * Auto is written out as the encoder Auto picked.
+	 *
+	 * The conversion path runs neither, so both fall back to the
+	 * ordinary rule below and are recorded only when given, spelled the
+	 * way the caller spelled them, and dropped when they name a
+	 * default -- --compressor=Auto writes nothing at all.
 	 */
 	if (compressor != nil)
 		[out appendFormat:@"compressor=%@ compression_format=%@",
@@ -1511,6 +1519,9 @@ tc_options_string(NSDictionary<NSString *, NSString *> *opts,
 		const struct option_def *def;
 
 		if (value == nil)
+			continue;
+		if (compressor != nil && ([name isEqualToString:@"compressor"]
+		    || [name isEqualToString:@"compression_format"]))
 			continue;
 		for (def = options; def->name != NULL; def++) {
 			if (strcmp(def->name, order[i]) == 0)
