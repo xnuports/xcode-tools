@@ -2119,12 +2119,22 @@ do_compress(NSArray<NSString *> *paths,
  *			was standardised with.  Handed a conforming
  *			block -- including one its own encoder just
  *			wrote -- it fails an assertion and calls exit.
- *	EAC_R11		nvtt/Surface.cpp has the call sites for these
- *	EAC_RG11	three commented out and marked "@@ Not
- *	ETC2_RGB8A1	implemented".
+ *	EAC_R11		nvtt/Surface.cpp has the call sites for these two
+ *	EAC_RG11	commented out and marked "@@ Not implemented",
+ *			so eac.c reads them instead.
  *
- * Leaving them out is what stops the assertion from taking the process
+ * Leaving BC7 out is what stops the assertion from taking the process
  * down with no message at all.
+ *
+ * ETC2_RGB8A1 is in the table and goes to the plain ETC2 decoder, which
+ * is wrong and is what Apple do.  NVTT has no punchthrough: it reads the
+ * bit that carries it as ETC1's "diff", so a block with the bit clear
+ * comes back decoded as an individual mode block -- colours that have
+ * nothing to do with the encoded ones, and no transparency anywhere.
+ * Their tool writes exactly that, alpha 255 across a texture encoded
+ * with holes in it, and a decoder that reads the format correctly writes
+ * a different file.  Measured on two images whose blocks are three
+ * quarters punchthrough, in all of T, H and the ETC1 shape.
  */
 static bool
 decode_format_of(const char *name, enum tc_decode *out)
@@ -2135,6 +2145,7 @@ decode_format_of(const char *name, enum tc_decode *out)
 		{ "BC5", TC_DEC_BC5 }, { "BC6U", TC_DEC_BC6 },
 		{ "BC6S", TC_DEC_BC6S },
 		{ "ETC2_RGB8", TC_DEC_ETC2_RGB },
+		{ "ETC2_RGB8A1", TC_DEC_ETC2_RGB },
 		{ "EAC_RGBA8", TC_DEC_ETC2_RGBA }
 	};
 	size_t i;
