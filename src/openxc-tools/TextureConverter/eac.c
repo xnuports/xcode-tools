@@ -140,7 +140,14 @@ decode_eac(const uint8_t *blocks, size_t len, int w, int h, bool two)
 					o[1] = two ?
 					    to_unorm8(g[y * 4 + x]) : 0.0f;
 					o[2] = 0.0f;
-					o[3] = 1.0f;
+					/*
+					 * Zero, not one: these formats carry
+					 * no alpha and Apple do not invent
+					 * one.  It shows in the four channel
+					 * DDS spelling of a decompressed
+					 * R11, where every alpha is zero.
+					 */
+					o[3] = 0.0f;
 				}
 			}
 		}
