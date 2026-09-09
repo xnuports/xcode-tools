@@ -1103,6 +1103,38 @@ the `.h` output names its arrays `Mip<n>Face<n>` and calls
 none, as Apple write none.  Six inputs exactly: one, two, five and seven
 are all refused.
 
+`--build_mips` takes its inputs as the levels of one chain rather than as
+one image: input zero is the base and each one after it is the level of
+that index, kept verbatim, with the chain extended past the last of them
+by filtering onward.  Only level zero of each input is taken, so a
+container that carries a chain of its own contributes one level and not
+its own.  Every option that touches a container's kept levels touches
+these the same way -- a flip, a gamma, the alpha mode, the premultiply --
+and `--max_mipmaps` truncates as it does anywhere.
+
+Each level has to be the level it claims to be.  The dimensions are
+checked against the base shifted right, with no clamp at one, so a sixteen
+by eight base takes four levels and not five: level four would have to be
+one by zero, and nothing is.  The format is checked too, and second: an
+image file reads as RGBA32 and a container as whatever it says, so a PNG
+handed in beside a KTX fails even when its size is right.  The check runs
+after `--max_extent` has resized the base, which is Apple's order and is
+visible in their message -- `--max_extent=8` with a sixteen and an eight
+is an error, and with a sixteen and a four is not.
+
+The combining modes are mutually exclusive, and the pair Apple name is the
+first two present in the order array, cubemap, volume, mips, whichever way
+round they were given.  Their arity and exclusivity complaints go to
+stderr with the usage on stdout, which is the opposite way round from most
+of this tool's messages, and `--build_cubemap` says "requires at size
+input textures" -- their typo, kept, because the text is what a caller
+matches on.
+
+Conversion announces the combining modes by name: `Building cubemap
+texture <output>`, `Building volume texture <output>`, `Building mip
+mapped texture <output>`, where an ordinary conversion says `Converting
+<input>`.  A chain says nothing at all until its levels have been checked.
+
 `--build_volume` stacks its inputs into one image with a depth, and the
 chain halves that too, dropping an odd slice at the end.  The filter
 across slices is not a three dimensional kernel -- which is what nvimage's
@@ -1117,11 +1149,10 @@ texture and not the level.  Two slices at least, and DDS gets none.
 
 Still to write, in the order they are worth doing:
 
-`--build_array` and `--build_mips`, the two remaining combining modes.
-Both take several inputs, as `--build_cubemap` and `--build_volume` do,
-and neither is implemented at all; the array one wants a KTX with
-`numberOfArrayElements` set, and the mip one takes each input as a level
-of the chain rather than filtering one.
+`--build_array`, the last of the four combining modes, which wants a KTX
+with `numberOfArrayElements` set.  Its exclusivity check is in place, so
+naming it beside another combining mode says the right thing; naming it
+alone does not yet build anything.
 
 `--rgbm_range`, which is the one recorded option that still changes
 Apple's pixels and does nothing here.  The default is 6.
@@ -1131,6 +1162,25 @@ inert rather than guessed at, as above.
 
 `--gamut_in`/`--gamut_out` beyond the `.h` output; the EXR and HDR inputs
 Apple's usage also lists; and BC7 mode 0.
+
+Two divergences found while measuring `--build_mips`, both older than it
+and both invisible to a sweep that compares only files.  `--max_extent`
+prints `Resized image to (width: %d, height: %d, depth: %d)` when it
+resizes -- once in the compression path and, oddly, twice in the
+conversion one, before the banner and again after it -- and this tool
+prints nothing.  And a PNG whose every pixel is transparent comes back
+from ImageIO with its colour zeroed, where Apple keep it: a one by one
+image of (244, 131, 157, 0) converts to (244, 131, 157, 255) there and to
+(0, 0, 0, 255) here under the default alpha mode.  Every option
+`CGImageSourceCreateImageAtIndex` takes was tried and none of them keeps
+the colour, so Apple are not reading PNGs this way.  An image with one
+opaque pixel in it is fine, which is why this hid for so long.
+
+Error text and streams are a third: Apple put the specific complaint on
+stdout for some failures and stderr for others, and follow a failed
+compression with `Error: Failed to compress texture` and a failed
+conversion with `Error: File Not Found!` whatever went wrong.  The
+combining modes match them exactly now; the rest of the messages do not.
 
 Accepted and inert in Apple's tool as well, so nothing is owed until a
 case is found where they bite: `--crop_uniform_content`, `--scale_range`,
